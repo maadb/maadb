@@ -28,7 +28,7 @@ export interface MaadBackend {
   putObjects(docId: DocId, objects: ExtractedObject[]): void;
   putRelationships(docId: DocId, relations: Relationship[]): void;
   putBlocks(docId: DocId, blocks: ParsedBlock[]): void;
-  putFieldIndex(docId: DocId, fields: Array<{ name: string; value: string; type: string }>): void;
+  putFieldIndex(docId: DocId, fields: Array<{ name: string; value: string; numericValue: number | null; type: string }>): void;
 
   // Read operations (called by MCP tools)
   getDocument(docId: DocId): DocumentRecord | null;
@@ -50,6 +50,6 @@ export interface MaadBackend {
     objects: ExtractedObject[],
     relationships: Relationship[],
     blocks: ParsedBlock[],
-    fieldIndex: Array<{ name: string; value: string; type: string }>,
+    fieldIndex: Array<{ name: string; value: string; numericValue: number | null; type: string }>,
   ): void;
 }

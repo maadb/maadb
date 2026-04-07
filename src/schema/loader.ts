@@ -190,12 +190,13 @@ function parseFieldDefinition(
   const role = typeof fd['role'] === 'string' ? fd['role'] : null;
   const format = typeof fd['format'] === 'string' ? fd['format'] : (fieldType === 'date' ? 'YYYY-MM-DD' : null);
 
-  // Ref target validation
+  // Ref target validation — applies to ref fields AND list fields with item_type: ref
   let target: DocType | null = null;
-  if (fieldType === 'ref') {
+  const needsTarget = fieldType === 'ref' || (fieldType === 'list' && fd['item_type'] === 'ref');
+  if (needsTarget) {
     const targetStr = fd['target'];
     if (typeof targetStr !== 'string') {
-      errors.push(maadError('SCHEMA_INVALID', `Schema "${schemaRef}" field "${name}" is a ref but has no "target"`));
+      errors.push(maadError('SCHEMA_INVALID', `Schema "${schemaRef}" field "${name}" has ref target but no "target" type specified`));
     } else {
       if (!registry.types.has(docType(targetStr))) {
         errors.push(maadError('SCHEMA_INVALID', `Schema "${schemaRef}" field "${name}" references unknown type "${targetStr}"`));

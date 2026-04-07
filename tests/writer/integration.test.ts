@@ -22,9 +22,14 @@ beforeAll(async () => {
   await engine.indexAll({ force: true });
 });
 
-afterAll(() => {
+afterAll(async () => {
   engine.close();
-  if (existsSync(TEMP_ROOT)) rmSync(TEMP_ROOT, { recursive: true });
+  await new Promise(r => setTimeout(r, 100));
+  try {
+    if (existsSync(TEMP_ROOT)) rmSync(TEMP_ROOT, { recursive: true, force: true });
+  } catch {
+    // Windows may hold handles briefly — non-fatal
+  }
 });
 
 describe('template body generation', () => {

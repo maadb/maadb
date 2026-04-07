@@ -1,6 +1,6 @@
 {
   "name": "maad",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Markdown Augmented Adaptive Database — treats markdown as the canonical database, builds a queryable index, and gives LLMs deterministic read/write access.",
   "type": "module",
   "main": "dist/engine.js",
@@ -15,7 +15,7 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "lint": "tsc --noEmit",
-    "serve": "node dist/server.js"
+    "serve": "node dist/cli.js serve"
   },
   "keywords": [
     "markdown",
@@ -31,7 +31,6 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0",
     "better-sqlite3": "^12.8.0",
     "gray-matter": "^4.0.3",
     "simple-git": "^3.35.2"

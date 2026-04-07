@@ -13,12 +13,14 @@ import { parseBlocks } from './blocks.js';
 import { findVerbatimZones } from './verbatim.js';
 import { extractValueCalls } from './tags.js';
 import { extractAnnotations } from './annotations.js';
+import { validateYamlProfile, checkMultiDocument } from './yaml-profile.js';
 
 export { parseFrontmatter } from './frontmatter.js';
 export { parseBlocks } from './blocks.js';
 export { findVerbatimZones, isInVerbatimZone } from './verbatim.js';
 export { extractValueCalls } from './tags.js';
 export { extractAnnotations } from './annotations.js';
+export { validateYamlProfile, checkMultiDocument } from './yaml-profile.js';
 
 export async function parseDocument(
   path: FilePath,
@@ -34,8 +36,16 @@ export async function parseDocument(
 
   const hash = createHash('sha256').update(raw).digest('hex');
 
+  // Check for multi-document YAML
+  const multiDocErr = checkMultiDocument(raw, path);
+  if (multiDocErr) return { ok: false, errors: [multiDocErr] };
+
   const fm = parseFrontmatter(raw, path);
   if (!fm.ok) return fm;
+
+  // Validate YAML profile (constrained subset)
+  const profileResult = validateYamlProfile(fm.value.frontmatter, path);
+  if (!profileResult.ok) return profileResult as Result<ParsedDocument>;
 
   const { frontmatter, body, bodyStartLine } = fm.value;
 

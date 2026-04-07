@@ -20,19 +20,36 @@ export function extractRelationships(
 ): Relationship[] {
   const relationships: Relationship[] = [];
 
-  // 1. Ref fields in frontmatter
+  // 1. Scalar ref fields in frontmatter
   for (const [fieldName, fieldDef] of schema.fields) {
-    if (fieldDef.type !== 'ref') continue;
+    if (fieldDef.type === 'ref') {
+      const value = bound.parsed.frontmatter[fieldName];
+      if (typeof value === 'string') {
+        relationships.push({
+          sourceDocId: bound.docId,
+          targetDocId: toDocId(value),
+          field: fieldName,
+          relationType: 'ref',
+        });
+      }
+    }
 
-    const value = bound.parsed.frontmatter[fieldName];
-    if (typeof value !== 'string') continue;
-
-    relationships.push({
-      sourceDocId: bound.docId,
-      targetDocId: toDocId(value),
-      field: fieldName,
-      relationType: 'ref',
-    });
+    // 1b. List-of-ref fields
+    if (fieldDef.type === 'list' && fieldDef.itemType === 'ref') {
+      const value = bound.parsed.frontmatter[fieldName];
+      if (Array.isArray(value)) {
+        for (const item of value) {
+          if (typeof item === 'string') {
+            relationships.push({
+              sourceDocId: bound.docId,
+              targetDocId: toDocId(item),
+              field: fieldName,
+              relationType: 'ref',
+            });
+          }
+        }
+      }
+    }
   }
 
   // 2. Inline mentions that look like doc_ids

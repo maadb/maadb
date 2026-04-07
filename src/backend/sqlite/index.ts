@@ -133,16 +133,16 @@ export class SqliteBackend implements MaadBackend {
     }
   }
 
-  putFieldIndex(docId: DocId, fields: Array<{ name: string; value: string; type: string }>): void {
+  putFieldIndex(docId: DocId, fields: Array<{ name: string; value: string; numericValue: number | null; type: string }>): void {
     this.db.prepare('DELETE FROM field_index WHERE doc_id = ?').run(docId as string);
 
     const insert = this.db.prepare(`
-      INSERT INTO field_index (doc_id, field_name, field_value, field_type)
-      VALUES (?, ?, ?, ?)
+      INSERT INTO field_index (doc_id, field_name, field_value, numeric_value, field_type)
+      VALUES (?, ?, ?, ?, ?)
     `);
 
     for (const f of fields) {
-      insert.run(docId as string, f.name, f.value, f.type);
+      insert.run(docId as string, f.name, f.value, f.numericValue, f.type);
     }
   }
 
@@ -151,7 +151,7 @@ export class SqliteBackend implements MaadBackend {
     objects: ExtractedObject[],
     relationships: Relationship[],
     blocks: ParsedBlock[],
-    fieldIndex: Array<{ name: string; value: string; type: string }>,
+    fieldIndex: Array<{ name: string; value: string; numericValue: number | null; type: string }>,
   ): void {
     const txn = this.db.transaction(() => {
       this.putDocument(doc);
@@ -387,18 +387,35 @@ export class SqliteBackend implements MaadBackend {
 // --- Helpers ---------------------------------------------------------------
 
 function buildFilterSQL(field: string, condition: FilterCondition): { sql: string; values: unknown[] } {
+  // For range operators, use numeric_value when the value is numeric (handles number fields correctly)
+  // For dates, field_value as ISO strings already sort correctly
+  const isNumericRange = (condition.op === 'gt' || condition.op === 'gte' || condition.op === 'lt' || condition.op === 'lte')
+    && typeof condition.value === 'number';
+
   switch (condition.op) {
     case 'eq':
       return { sql: 'field_name = ? AND field_value = ?', values: [field, String(condition.value)] };
     case 'neq':
       return { sql: 'field_name = ? AND field_value != ?', values: [field, String(condition.value)] };
     case 'gt':
+      if (isNumericRange) {
+        return { sql: 'field_name = ? AND numeric_value > ?', values: [field, condition.value] };
+      }
       return { sql: 'field_name = ? AND field_value > ?', values: [field, String(condition.value)] };
     case 'gte':
+      if (isNumericRange) {
+        return { sql: 'field_name = ? AND numeric_value >= ?', values: [field, condition.value] };
+      }
       return { sql: 'field_name = ? AND field_value >= ?', values: [field, String(condition.value)] };
     case 'lt':
+      if (isNumericRange) {
+        return { sql: 'field_name = ? AND numeric_value < ?', values: [field, condition.value] };
+      }
       return { sql: 'field_name = ? AND field_value < ?', values: [field, String(condition.value)] };
     case 'lte':
+      if (isNumericRange) {
+        return { sql: 'field_name = ? AND numeric_value <= ?', values: [field, condition.value] };
+      }
       return { sql: 'field_name = ? AND field_value <= ?', values: [field, String(condition.value)] };
     case 'in': {
       const placeholders = condition.value.map(() => '?').join(', ');

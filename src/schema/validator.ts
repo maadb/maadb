@@ -117,6 +117,19 @@ function validateField(
     case 'list':
       if (!Array.isArray(value)) {
         errors.push({ field: name, message: `Expected array, got ${typeof value}`, location: null });
+      } else if (def.itemType === 'ref' && def.target !== null) {
+        // Validate each item in a list-of-refs
+        const targetType = registry.types.get(def.target);
+        if (targetType) {
+          for (let i = 0; i < value.length; i++) {
+            const item = value[i];
+            if (typeof item !== 'string') {
+              errors.push({ field: `${name}[${i}]`, message: `Expected string ref, got ${typeof item}`, location: null });
+            } else if (!item.startsWith(targetType.idPrefix + '-')) {
+              errors.push({ field: `${name}[${i}]`, message: `Ref "${item}" does not start with expected prefix "${targetType.idPrefix}-"`, location: null });
+            }
+          }
+        }
       }
       break;
 

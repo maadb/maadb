@@ -27,9 +27,14 @@ beforeAll(async () => {
   await engine.indexAll({ force: true });
 });
 
-afterAll(() => {
+afterAll(async () => {
   engine.close();
-  if (existsSync(TEMP_ROOT)) rmSync(TEMP_ROOT, { recursive: true });
+  await new Promise(r => setTimeout(r, 100));
+  try {
+    if (existsSync(TEMP_ROOT)) rmSync(TEMP_ROOT, { recursive: true, force: true });
+  } catch {
+    // Windows may hold handles briefly — non-fatal
+  }
 });
 
 describe('createDocument', () => {
@@ -134,6 +139,43 @@ describe('updateDocument', () => {
       { status: 'nonexistent_status' },
     );
     expect(result.ok).toBe(false);
+  });
+});
+
+describe('reindex stale cleanup', () => {
+  it('removes stale backend records when files are deleted externally', async () => {
+    // Create a doc
+    const createResult = await engine.createDocument(
+      docType('client'),
+      { name: 'Stale Corp', status: 'active' },
+      'Will be deleted externally.',
+      'cli-stale',
+    );
+    expect(createResult.ok).toBe(true);
+
+    // Verify it's in the index
+    const getResult = engine.findDocuments({ docType: docType('client'), includeFrontmatter: true });
+    expect(getResult.ok).toBe(true);
+    if (!getResult.ok) return;
+    const staleBefore = getResult.value.results.find(r => (r.docId as string) === 'cli-stale');
+    expect(staleBefore).toBeDefined();
+
+    // Delete the file externally (outside MAAD)
+    const { unlinkSync } = await import('node:fs');
+    const fp = path.join(TEMP_ROOT, 'clients', 'cli-stale.md');
+    unlinkSync(fp);
+
+    // Reindex — should clean up the stale record
+    const reindexResult = await engine.reindex({ force: true });
+    expect(reindexResult.ok).toBe(true);
+
+    // Verify stale record is gone
+    const backend = engine.getBackend();
+    expect(backend.getDocument(docId('cli-stale'))).toBeNull();
+
+    // Objects and relationships should also be gone
+    const objects = backend.findObjects({ docId: docId('cli-stale') });
+    expect(objects).toHaveLength(0);
   });
 });
 

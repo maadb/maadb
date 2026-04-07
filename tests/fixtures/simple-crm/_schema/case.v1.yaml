@@ -30,6 +30,10 @@ fields:
     type: enum
     values: [low, medium, high]
     index: true
+  related_contacts:
+    type: list
+    item_type: ref
+    target: contact
 template:
   headings:
     - level: 1

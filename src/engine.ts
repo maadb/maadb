@@ -193,6 +193,9 @@ export class MaadEngine {
 
     const storedHashes = force ? new Map() : this.backend.getAllFileHashes();
 
+    // Track all files found on disk to detect stale backend records
+    const filesOnDisk = new Set<string>();
+
     for (const [, regType] of this.registry.types) {
       const dirPath = path.join(this.projectRoot, regType.path);
       if (!existsSync(dirPath)) continue;
@@ -203,6 +206,7 @@ export class MaadEngine {
         result.scanned++;
         const fp = toFilePath(path.relative(this.projectRoot, file));
         const absPath = toFilePath(file);
+        filesOnDisk.add(fp as string);
 
         // Change detection
         if (!force) {
@@ -220,6 +224,17 @@ export class MaadEngine {
           result.indexed++;
         } else {
           result.errors.push(...indexResult.errors);
+        }
+      }
+    }
+
+    // Remove stale backend records for files that no longer exist on disk
+    const allStoredPaths = this.backend.getAllFileHashes();
+    for (const [storedPath] of allStoredPaths) {
+      if (!filesOnDisk.has(storedPath as string)) {
+        const doc = this.backend.getDocumentByPath(storedPath);
+        if (doc) {
+          this.backend.removeDocument(doc.docId);
         }
       }
     }
@@ -303,12 +318,13 @@ export class MaadEngine {
       indexedAt: new Date().toISOString(),
     };
 
-    const fieldIndex: Array<{ name: string; value: string; type: string }> = [];
+    const fieldIndex: Array<{ name: string; value: string; numericValue: number | null; type: string }> = [];
     for (const [name, field] of Object.entries(validatedFields)) {
       if (field.indexed) {
         fieldIndex.push({
           name,
           value: String(field.value),
+          numericValue: computeNumericValue(field.value, field.fieldType),
           type: field.fieldType,
         });
       }
@@ -378,9 +394,15 @@ export class MaadEngine {
     const fp = path.join(dirPath, `${id}.md`);
     await writeFile(fp, markdown, 'utf-8');
 
-    // Index
+    // Index — file is already on disk; if indexing fails, next reindex recovers
     const indexResult = await this.indexFile(toFilePath(fp));
-    if (!indexResult.ok) return indexResult as Result<CreateResult>;
+    if (!indexResult.ok) {
+      console.warn(`MAAD: File written to ${fp} but indexing failed. Run 'maad reindex' to recover.`);
+      return err(indexResult.errors.map(e => ({
+        ...e,
+        details: { ...e.details, fileWritten: true, recoveryHint: 'Run maad reindex to recover' },
+      })));
+    }
 
     // Git auto-commit
     await this.gitCommit({
@@ -516,9 +538,15 @@ export class MaadEngine {
     const markdown = generateDocument(updatedFm, schema, currentBody.trim() || undefined);
     await writeFile(absPath, markdown, 'utf-8');
 
-    // Reindex
+    // Reindex — file is already on disk; if indexing fails, next reindex recovers
     const indexResult = await this.indexFile(toFilePath(absPath));
-    if (!indexResult.ok) return indexResult as Result<UpdateResult>;
+    if (!indexResult.ok) {
+      console.warn(`MAAD: File updated at ${absPath} but reindexing failed. Run 'maad reindex' to recover.`);
+      return err(indexResult.errors.map(e => ({
+        ...e,
+        details: { ...e.details, fileWritten: true, recoveryHint: 'Run maad reindex to recover' },
+      })));
+    }
 
     // Git auto-commit
     const detail = changedFields.length > 0
@@ -886,6 +914,29 @@ function generateDocId(prefix: string, fields: Record<string, unknown>): string 
   const stamp = now.toISOString().slice(0, 10);
   const rand = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
   return `${prefix}-${stamp}-${rand}`;
+}
+
+function computeNumericValue(value: unknown, fieldType: string): number | null {
+  if (value === null || value === undefined) return null;
+
+  if (fieldType === 'number') {
+    const num = typeof value === 'number' ? value : parseFloat(String(value));
+    return isFinite(num) ? num : null;
+  }
+
+  if (fieldType === 'amount') {
+    // "100.00 USD" -> 100.00
+    const match = /^([\d,.]+)/.exec(String(value));
+    if (match) {
+      const num = parseFloat(match[1]!.replace(/,/g, ''));
+      return isFinite(num) ? num : null;
+    }
+    return null;
+  }
+
+  // Dates stay as TEXT — ISO format sorts lexicographically correctly
+  // Enums and strings don't need numeric values
+  return null;
 }
 
 async function collectMarkdownFiles(dirPath: string): Promise<string[]> {

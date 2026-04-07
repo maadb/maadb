@@ -67,12 +67,14 @@ CREATE INDEX IF NOT EXISTS idx_blocks_block_id ON blocks(block_id);
 
 -- Field index: denormalized frontmatter fields for fast filtering
 CREATE TABLE IF NOT EXISTS field_index (
-  id           INTEGER PRIMARY KEY AUTOINCREMENT,
-  doc_id       TEXT NOT NULL REFERENCES documents(doc_id) ON DELETE CASCADE,
-  field_name   TEXT NOT NULL,
-  field_value  TEXT,
-  field_type   TEXT NOT NULL
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  doc_id        TEXT NOT NULL REFERENCES documents(doc_id) ON DELETE CASCADE,
+  field_name    TEXT NOT NULL,
+  field_value   TEXT,
+  numeric_value REAL,
+  field_type    TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_field_doc ON field_index(doc_id);
 CREATE INDEX IF NOT EXISTS idx_field_name_value ON field_index(field_name, field_value);
+CREATE INDEX IF NOT EXISTS idx_field_name_numeric ON field_index(field_name, numeric_value);
 `;

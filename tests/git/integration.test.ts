@@ -135,6 +135,11 @@ describe('no git graceful degradation', () => {
     }
 
     noGitEngine.close();
-    if (existsSync(noGitRoot)) rmSync(noGitRoot, { recursive: true });
+    await new Promise(r => setTimeout(r, 100));
+    try {
+      if (existsSync(noGitRoot)) rmSync(noGitRoot, { recursive: true, force: true });
+    } catch {
+      // non-fatal
+    }
   });
 });

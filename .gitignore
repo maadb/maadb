@@ -2,5 +2,8 @@ node_modules/
 dist/
 _backend/
 
+# Test temp directories
+tests/fixtures/_temp-*/
+
 # Internal dev log — local only, public release notes live in GitHub Releases
 CHANGELOG.md

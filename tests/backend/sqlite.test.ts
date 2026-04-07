@@ -97,15 +97,15 @@ describe('SqliteBackend', () => {
       backend.putDocument(makeDoc('cas-001', 'case', 'cases/cas-001.md'));
 
       backend.putFieldIndex(docId('cli-acme'), [
-        { name: 'status', value: 'active', type: 'enum' },
-        { name: 'name', value: 'Acme Corporation', type: 'string' },
+        { name: 'status', value: 'active', numericValue: null, type: 'enum' },
+        { name: 'name', value: 'Acme Corporation', numericValue: null, type: 'string' },
       ]);
       backend.putFieldIndex(docId('cli-beta'), [
-        { name: 'status', value: 'inactive', type: 'enum' },
-        { name: 'name', value: 'Beta Inc', type: 'string' },
+        { name: 'status', value: 'inactive', numericValue: null, type: 'enum' },
+        { name: 'name', value: 'Beta Inc', numericValue: null, type: 'string' },
       ]);
       backend.putFieldIndex(docId('cas-001'), [
-        { name: 'status', value: 'open', type: 'enum' },
+        { name: 'status', value: 'open', numericValue: null, type: 'enum' },
       ]);
     });
 
@@ -138,6 +138,60 @@ describe('SqliteBackend', () => {
       });
       expect(results[0]!.frontmatter).toBeDefined();
       expect(results[0]!.frontmatter!.name).toBe('Test');
+    });
+
+    it('handles numeric range queries correctly', () => {
+      // Add docs with numeric fields where lexicographic ordering would fail
+      backend.putDocument(makeDoc('item-2', 'item', 'items/item-2.md'));
+      backend.putDocument(makeDoc('item-10', 'item', 'items/item-10.md'));
+      backend.putDocument(makeDoc('item-100', 'item', 'items/item-100.md'));
+
+      backend.putFieldIndex(docId('item-2'), [
+        { name: 'count', value: '2', numericValue: 2, type: 'number' },
+      ]);
+      backend.putFieldIndex(docId('item-10'), [
+        { name: 'count', value: '10', numericValue: 10, type: 'number' },
+      ]);
+      backend.putFieldIndex(docId('item-100'), [
+        { name: 'count', value: '100', numericValue: 100, type: 'number' },
+      ]);
+
+      // Numeric gt: 2 > should return 10 and 100 (lexicographic would return 100 only since "2" > "10")
+      const results = backend.findDocuments({
+        filters: { count: { op: 'gt', value: 2 } },
+      });
+      expect(results).toHaveLength(2);
+      const ids = results.map(r => r.docId as string).sort();
+      expect(ids).toEqual(['item-10', 'item-100']);
+
+      // Numeric lte: <= 10 should return 2 and 10
+      const results2 = backend.findDocuments({
+        filters: { count: { op: 'lte', value: 10 } },
+      });
+      expect(results2).toHaveLength(2);
+      const ids2 = results2.map(r => r.docId as string).sort();
+      expect(ids2).toEqual(['item-10', 'item-2']);
+
+      // Clean up
+      backend.removeDocument(docId('item-2'));
+      backend.removeDocument(docId('item-10'));
+      backend.removeDocument(docId('item-100'));
+    });
+
+    it('handles date range queries lexicographically', () => {
+      backend.putFieldIndex(docId('cli-acme'), [
+        { name: 'opened_at', value: '2026-01-15', numericValue: null, type: 'date' },
+      ]);
+      backend.putFieldIndex(docId('cli-beta'), [
+        { name: 'opened_at', value: '2026-06-01', numericValue: null, type: 'date' },
+      ]);
+
+      // Date range: >= 2026-03-01 should return only cli-beta
+      const results = backend.findDocuments({
+        filters: { opened_at: { op: 'gte', value: '2026-03-01' } },
+      });
+      expect(results).toHaveLength(1);
+      expect(results[0]!.docId).toBe('cli-beta');
     });
 
     it('respects limit and offset', () => {
@@ -246,7 +300,7 @@ describe('SqliteBackend', () => {
       const blocks: ParsedBlock[] = [
         { id: blockId('main'), heading: 'Acme', level: 1, startLine: 5, endLine: 10, content: 'Main' },
       ];
-      const fields = [{ name: 'status', value: 'active', type: 'enum' }];
+      const fields = [{ name: 'status', value: 'active', numericValue: null, type: 'enum' }];
 
       backend.materializeDocument(doc, objects, rels, blocks, fields);
 

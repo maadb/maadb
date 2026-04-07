@@ -34,11 +34,9 @@ export class GitLayer {
   }
 
   async isRepo(): Promise<boolean> {
-    try {
-      return await this.git.checkIsRepo();
-    } catch {
-      return false;
-    }
+    // Check if .git exists at the project root specifically — not a parent repo
+    const gitDir = path.join(this.projectRoot, '.git');
+    return existsSync(gitDir);
   }
 
   async initRepo(): Promise<void> {
