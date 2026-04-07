@@ -12,6 +12,7 @@ import { MaadEngine } from './engine.js';
 import { GitLayer } from './git/index.js';
 import { docId, docType } from './types.js';
 import { generateMaadMd, generateStubMaadMd } from './maad-md.js';
+import { generateSchemaMd } from './schema-md.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -234,7 +235,7 @@ async function cmdReindex(): Promise<void> {
     for (const e of r.errors) console.log(`  ${e.code}: ${e.message}`);
   }
 
-  // Regenerate MAAD.md with current type information
+  // Regenerate MAAD.md (tool knowledge) and SCHEMA.md (data knowledge)
   try {
     const { loadSchemas } = await import('./schema/index.js');
     const registry = engine.getRegistry();
@@ -242,15 +243,29 @@ async function cmdReindex(): Promise<void> {
     if (schemaResult.ok) {
       const stats = engine.getBackend().getStats();
       const enginePath = path.resolve(__dirname, 'cli.js');
-      const maadMd = generateMaadMd({
-        projectRoot: engine.getProjectRoot(),
-        enginePath,
+
+      // MAAD.md — only write if it doesn't exist (tool knowledge is stable)
+      const maadMdPath = path.join(engine.getProjectRoot(), 'MAAD.md');
+      if (!existsSync(maadMdPath)) {
+        const maadMd = generateMaadMd({
+          projectRoot: engine.getProjectRoot(),
+          enginePath,
+          registry,
+          schemaStore: schemaResult.value,
+          stats,
+        });
+        writeFileSync(maadMdPath, maadMd, 'utf-8');
+        console.log('Created MAAD.md');
+      }
+
+      // SCHEMA.md — always regenerate (data knowledge changes with the index)
+      const schemaMd = generateSchemaMd({
         registry,
         schemaStore: schemaResult.value,
         stats,
       });
-      writeFileSync(path.join(engine.getProjectRoot(), 'MAAD.md'), maadMd, 'utf-8');
-      console.log('Updated MAAD.md');
+      writeFileSync(path.join(engine.getProjectRoot(), 'SCHEMA.md'), schemaMd, 'utf-8');
+      console.log('Updated SCHEMA.md');
     }
   } catch (e) {
     console.warn(`MAAD.md generation failed: ${e instanceof Error ? e.message : String(e)}`);

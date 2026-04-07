@@ -4,7 +4,7 @@
 // Updated on init and reindex to reflect current registry and schemas.
 // ============================================================================
 
-import type { Registry, SchemaStore, FieldDefinition, BackendStats } from './types.js';
+import type { Registry, SchemaStore, BackendStats } from './types.js';
 
 export interface MaadMdContext {
   projectRoot: string;
@@ -21,7 +21,6 @@ export function generateMaadMd(ctx: MaadMdContext): string {
   sections.push(generateHeader(cmd));
   sections.push(generateQuickStart(cmd, ctx));
   sections.push(generateFullCommandRef(cmd));
-  sections.push(generateTypes(ctx));
   sections.push(generatePrimitives());
   sections.push(generateRules());
   sections.push(generateFeedback());
@@ -46,6 +45,9 @@ function generateHeader(cmd: string): string {
 ## What is this?
 
 A **MAAD project** — a markdown-native database. Markdown files are the records. A queryable index gives you structured access without reading full files.
+
+**This file** = tool knowledge (commands, syntax, workflow). Read once per session.
+**SCHEMA.md** = data knowledge (types, fields, doc counts). Read to understand what's in this project.
 
 ## How to run commands
 
@@ -151,69 +153,6 @@ function generateFullCommandRef(cmd: string): string {
 - Ref: \`--field client=cli-acme\`
 - Array: \`--field tags=[enterprise,priority]\`
 - Date: \`--field opened_at=2026-04-07\``;
-}
-
-function generateTypes(ctx: MaadMdContext): string {
-  if (ctx.registry.types.size === 0) {
-    return `## Types\n\nNo types registered yet.`;
-  }
-
-  const lines: string[] = ['## Registered Types\n'];
-
-  for (const [, regType] of ctx.registry.types) {
-    const count = ctx.stats?.documentCountByType[regType.name as string] ?? 0;
-    const schema = ctx.schemaStore.getSchemaForType(regType.name);
-
-    lines.push(`### \`${regType.name as string}\` — ${count} docs | prefix: \`${regType.idPrefix}\` | schema: \`${regType.schemaRef as string}\``);
-
-    if (schema) {
-      const requiredStr = schema.required.filter(r => r !== 'doc_id').join(', ');
-      if (requiredStr) lines.push(`**Required:** ${requiredStr}`);
-
-      if (schema.fields.size > 0) {
-        lines.push('');
-        lines.push('| Field | Type | Details |');
-        lines.push('|-------|------|---------|');
-        for (const [name, field] of schema.fields) {
-          lines.push(`| \`${name}\` | ${formatFieldType(field)} | ${formatFieldDetails(field)} |`);
-        }
-      }
-    }
-
-    lines.push('');
-  }
-
-  if (Object.keys(ctx.registry.extraction.subtypes).length > 0) {
-    lines.push('### Custom Extraction Subtypes\n');
-    lines.push('| Subtype | Primitive |');
-    lines.push('|---------|-----------|');
-    for (const [subtype, primitive] of Object.entries(ctx.registry.extraction.subtypes)) {
-      lines.push(`| \`${subtype}\` | \`${primitive}\` |`);
-    }
-    lines.push('');
-  }
-
-  return lines.join('\n');
-}
-
-function formatFieldType(field: FieldDefinition): string {
-  let t = field.type as string;
-  if (field.type === 'ref' && field.target) t = `ref -> ${field.target as string}`;
-  if (field.type === 'list' && field.itemType) {
-    t = `list of ${field.itemType}`;
-    if (field.target) t += ` -> ${field.target as string}`;
-  }
-  if (field.type === 'enum' && field.values) t = `enum`;
-  return t;
-}
-
-function formatFieldDetails(field: FieldDefinition): string {
-  const parts: string[] = [];
-  if (field.index) parts.push('indexed');
-  if (field.role) parts.push(`role: ${field.role}`);
-  if (field.type === 'enum' && field.values) parts.push(field.values.join(', '));
-  if (field.format) parts.push(`format: ${field.format}`);
-  return parts.join(' | ') || '—';
 }
 
 function generatePrimitives(): string {
