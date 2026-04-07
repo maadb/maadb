@@ -1,9 +1,12 @@
 ---
 enabled: true
-current: 0.1.3
+current: 0.1.4
 ---
 
 # Version History
+
+## 0.1.4 — 2026-04-07
+summary is now sync read-only (no indexAll, no git audit). Rebuilt dist to match source. MAAD.md boot contract rewritten — stable instructions, summary for live snapshot, SCHEMA.md for deep reference only. Fixed project description to "Markdown As A Database". Added prepublishOnly build hook. 203 tests passing.
 
 ## 0.1.3 — 2026-04-07
 Pointer-only DB refactor (frontmatter/content stripped from SQLite, all reads from disk). Three new LLM UX commands: summary (one-call orientation), get full (resolved record with refs/objects/related), schema (field definitions for writes). Static MAAD.md (no volatile counts). 203 tests passing.

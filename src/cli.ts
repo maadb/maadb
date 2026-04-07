@@ -582,9 +582,8 @@ async function cmdInspect(): Promise<void> {
 
 async function cmdSummary(): Promise<void> {
   const engine = await initEngine();
-  await engine.indexAll();
 
-  const result = await engine.summary();
+  const result = engine.summary();
   console.log(JSON.stringify(result, null, 2));
   engine.close();
 }
@@ -631,7 +630,7 @@ Usage: maad <command> [options]
 
 Commands:
   init [dir]                        Initialize a new MAAD project
-  summary                           One-call project orientation (types, objects, activity)
+  summary                           Project snapshot (types, counts, sample IDs, object inventory)
   describe                          Show project overview
   get <doc_id> [depth] [block]      Read a document (hot/warm/cold/full)
   query <type> [--filter k=v]       Find documents by type and filters

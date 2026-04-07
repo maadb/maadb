@@ -1,7 +1,7 @@
 {
   "name": "maad",
-  "version": "0.1.3",
-  "description": "Markdown Augmented Adaptive Database — treats markdown as the canonical database, builds a queryable index, and gives LLMs deterministic read/write access.",
+  "version": "0.1.4",
+  "description": "Markdown As A Database — treats markdown as the canonical data store, builds a queryable index, and gives LLMs deterministic read/write access.",
   "type": "module",
   "main": "dist/engine.js",
   "types": "dist/engine.d.ts",
@@ -10,6 +10,7 @@
   },
   "scripts": {
     "build": "tsc",
+    "prepublishOnly": "npm run build",
     "dev": "tsc --watch",
     "test": "vitest run",
     "test:watch": "vitest",

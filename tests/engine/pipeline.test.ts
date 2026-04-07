@@ -197,8 +197,8 @@ describe('validate', () => {
 });
 
 describe('summary', () => {
-  it('returns one-call project orientation', async () => {
-    const result = await engine.summary();
+  it('returns one-call project orientation', () => {
+    const result = engine.summary();
     expect(result.totalDocuments).toBe(4);
     expect(result.types.length).toBe(4);
 

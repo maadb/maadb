@@ -147,12 +147,6 @@ export interface SummaryResult {
     count: number;
     topValues: string[];
   }>;
-  recentActivity: Array<{
-    action: string;
-    docId: string;
-    summary: string;
-    timestamp: string;
-  }>;
 }
 
 export interface GetFullResult {
@@ -853,7 +847,7 @@ export class MaadEngine {
     };
   }
 
-  async summary(): Promise<SummaryResult> {
+  summary(): SummaryResult {
     this.assertInit();
     const stats = this.backend.getStats();
 
@@ -865,22 +859,6 @@ export class MaadEngine {
 
     const subtypeInventory = this.backend.getSubtypeInventory(20);
 
-    // Recent activity from git (most recent per doc, top 10)
-    let recentActivity: SummaryResult['recentActivity'] = [];
-    if (this.gitLayer) {
-      try {
-        const entries = await this.gitLayer.audit();
-        recentActivity = entries.slice(0, 10).map(e => ({
-          action: e.lastAction,
-          docId: e.docId as string,
-          summary: e.lastSummary,
-          timestamp: e.lastTimestamp,
-        }));
-      } catch {
-        // Git audit failure is non-fatal
-      }
-    }
-
     return {
       types,
       totalDocuments: stats.totalDocuments,
@@ -888,7 +866,6 @@ export class MaadEngine {
       totalRelationships: stats.totalRelationships,
       lastIndexedAt: stats.lastIndexedAt,
       subtypeInventory,
-      recentActivity,
     };
   }
 
