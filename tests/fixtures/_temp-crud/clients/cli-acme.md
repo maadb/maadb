@@ -11,7 +11,3 @@ tags: [enterprise, priority]
 # Acme Corporation
 
 Primary client record. Strategic account with open litigation support work.
-
-## New Section
-
-Appended content.
