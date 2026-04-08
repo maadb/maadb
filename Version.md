@@ -43,10 +43,10 @@ Initial engine build. Parser, registry, schema, extractor (11 primitives), SQLit
 
 ## Planned
 
-- **0.3.0** — LLM evaluation + bulk ops: maadb-demo seed data, benchmark execution (MAAD vs Direct), bulk create/update
-- **0.4.0** — Provenance + admin tooling: `--prov off|on|detail` on serve, source metadata in tool responses
-- **0.5.0** — Query power: FTS5, cross-ref joins, fuzzy entity matching with confidence scores
-- **0.6.0** — Object attributes: user-defined tags on extracted objects, stored as YAML, indexed on reindex
-- **0.7.0** — Multi-project MCP: single server routing to multiple MAAD projects, cross-project queries
-- **0.8.0** — npm package prep: API surface decisions, exports, bin config, peer deps
+- **0.2.6** — Bug fixes: ref field query filtering, aggregate totalMetric, `maad connect` CLI command, Architect requires admin role warning
+- **0.3.0** — LLM evaluation: maadb-demo benchmark execution (MAAD vs Direct), evaluation framework
+- **0.4.0** — Query power: FTS5, fuzzy entity matching with confidence scores
+- **0.5.0** — Object attributes: user-defined tags on extracted objects, stored as YAML, indexed on reindex
+- **0.6.0** — Multi-project MCP: single server routing to multiple MAAD projects, cross-project queries
+- **0.7.0** — npm package prep: API surface decisions, exports, bin config, peer deps
 - **1.0.0** — Stable release: API locked, npm published, documentation complete
