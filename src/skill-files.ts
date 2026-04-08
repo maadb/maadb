@@ -58,9 +58,11 @@ Ask: **Will this type generate more than 1,000 records per year?**
 types:
   client:
     path: clients/          # directory for this type's records
-    id_prefix: cli           # prefix for auto-generated IDs
+    id_prefix: cli           # MUST be 2-5 lowercase alphanumeric (e.g. cli, usr, cas, note, te)
     schema: client.v1        # schema file reference
 \`\`\`
+
+**id_prefix rules:** 2-5 lowercase letters/numbers only. No uppercase, no single characters, no symbols. Examples: \`cli\`, \`usr\`, \`cas\`, \`note\`, \`te\`. The engine rejects anything else.
 
 ## Schema file
 
@@ -274,11 +276,23 @@ maad.update({
 
 Each headed block becomes an indexed block with a block_id. Retrieve individual notes with \`maad.get\` at warm depth.
 
+## ID mapping (critical)
+
+Source data will have its own IDs (C001, U005, INV-2024-001, etc.). These are NOT MAAD IDs.
+
+- MAAD generates IDs using the registry \`id_prefix\`: \`cli-001\`, \`usr-005\`, \`cas-012\`
+- \`id_prefix\` must be 2-5 lowercase alphanumeric characters
+- **Do not change the registry to match source IDs.** Map source IDs to MAAD format during import.
+- Establish the mapping before creating any records: \`C001 → cli-001\`, \`U005 → usr-005\`
+- Create parent types first (clients, users), then dependent types (cases, notes) so refs resolve
+- Store the original source ID in a \`source_id\` field if you need to cross-reference back
+- Ref fields must use MAAD IDs, not source IDs (e.g. \`client: cli-001\`, not \`client: C001\`)
+
 ## Handling tabular data
 
 If source data is in markdown tables (rows = records):
 - Classify: is each row a master record or a transaction entry?
-- Master rows: each row becomes one \`maad.create\` call
+- Master rows: each row becomes one \`maad.create\` call (or \`maad.bulk_create\` for 10+)
 - Transaction rows: group by parent, create one file per parent, append rows as headed blocks
 - Column headers map to frontmatter field names
 

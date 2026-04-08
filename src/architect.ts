@@ -96,6 +96,13 @@ Use these patterns to fill gaps without asking. When the requester says a busine
 - Money fields use amount type ("1250.00 USD")
 - Cross-entity links use ref type with target
 
+### ID rules (critical — do not skip)
+- \`id_prefix\` in the registry MUST be 2-5 lowercase alphanumeric characters (e.g. \`cli\`, \`usr\`, \`cas\`, \`note\`, \`te\`)
+- Single characters (C, U, N), uppercase (CS, TE), and symbols are rejected
+- MAAD generates its own IDs: \`<prefix>-<sequence>\` (e.g. \`cli-001\`, \`usr-012\`)
+- **Source data IDs are input data, not MAAD IDs.** Do not change the registry to match source IDs. Map source IDs to MAAD format during import (e.g. C001 → cli-001, U005 → usr-005)
+- Store the original source ID in a field (e.g. \`source_id\`) if you need to cross-reference back
+
 ## Design Process
 
 Once you have enough information:
