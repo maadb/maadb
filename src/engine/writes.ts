@@ -19,7 +19,7 @@ import { validateFrontmatter } from '../schema/index.js';
 import { generateDocument, extractBody } from '../writer/index.js';
 import type { EngineContext } from './context.js';
 import { gitCommit } from './context.js';
-import type { CreateResult, UpdateResult, DeleteResult } from './types.js';
+import type { CreateResult, UpdateResult, DeleteResult, BulkCreateInput, BulkUpdateInput, BulkResult } from './types.js';
 import { indexFile } from './indexing.js';
 import { generateDocId, readFrontmatter } from './helpers.js';
 import { atomicWrite } from './journal.js';
@@ -259,4 +259,145 @@ export async function deleteDocument(ctx: EngineContext, id: DocId, mode: 'soft'
     mode,
     filePath: doc.filePath,
   });
+}
+
+// ---- Bulk operations ------------------------------------------------------
+
+export async function bulkCreate(
+  ctx: EngineContext,
+  records: BulkCreateInput[],
+): Promise<Result<BulkResult>> {
+  const succeeded: BulkResult['succeeded'] = [];
+  const failed: BulkResult['failed'] = [];
+  const allFiles: string[] = [];
+
+  let i = -1;
+  for (const rec of records) {
+    i++;
+    const dt = rec.docType as DocType;
+    const regType = ctx.registry.types.get(dt);
+    if (!regType) {
+      failed.push({ index: i, docId: rec.docId ?? null, error: `Type "${rec.docType}" not in registry` });
+      continue;
+    }
+
+    const schema = ctx.schemaStore.getSchemaForType(dt);
+    if (!schema) {
+      failed.push({ index: i, docId: rec.docId ?? null, error: `No schema for type "${rec.docType}"` });
+      continue;
+    }
+
+    const existingIds = [
+      ...ctx.backend.getSampleDocIds(dt, 10000).map(id => id as string),
+      ...succeeded.map(s => s.docId),
+    ];
+    const id = rec.docId ?? generateDocId(regType.idPrefix, rec.fields, existingIds);
+
+    if (ctx.backend.getDocument(toDocId(id))) {
+      failed.push({ index: i, docId: id, error: `Document "${id}" already exists` });
+      continue;
+    }
+
+    const frontmatter: Record<string, unknown> = {
+      doc_id: id,
+      doc_type: rec.docType,
+      schema: regType.schemaRef as string,
+      ...rec.fields,
+    };
+
+    const validation = validateFrontmatter(frontmatter, schema, ctx.registry);
+    if (!validation.valid) {
+      const msg = validation.errors.map(e => `${e.field}: ${e.message}`).join('; ');
+      failed.push({ index: i, docId: id, error: msg });
+      continue;
+    }
+
+    const markdown = generateDocument(frontmatter, schema, rec.body);
+    const dirPath = path.join(ctx.projectRoot, regType.path);
+    if (!existsSync(dirPath)) mkdirSync(dirPath, { recursive: true });
+    const fp = path.join(dirPath, `${id}.md`);
+
+    try {
+      await atomicWrite(fp, markdown);
+    } catch (e) {
+      failed.push({ index: i, docId: id, error: `File write failed: ${e instanceof Error ? e.message : String(e)}` });
+      continue;
+    }
+
+    const indexResult = await indexFile(ctx, toFilePath(fp));
+    if (!indexResult.ok) {
+      failed.push({ index: i, docId: id, error: `Index failed: ${indexResult.errors.map(e => e.message).join('; ')}` });
+      continue;
+    }
+
+    allFiles.push(fp);
+    succeeded.push({
+      index: i,
+      docId: id,
+      filePath: path.relative(ctx.projectRoot, fp),
+      version: 1,
+    });
+  }
+
+  // Single git commit for all succeeded records
+  const first = succeeded[0];
+  if (first) {
+    const firstRec = records[first.index];
+    await gitCommit(ctx, {
+      action: 'create',
+      docId: toDocId(first.docId),
+      docType: (firstRec?.docType ?? 'unknown') as DocType,
+      detail: `bulk:${succeeded.length}`,
+      summary: `Bulk created ${succeeded.length} records`,
+      files: allFiles,
+    });
+  }
+
+  return ok({ succeeded, failed, totalRequested: records.length });
+}
+
+export async function bulkUpdate(
+  ctx: EngineContext,
+  updates: BulkUpdateInput[],
+): Promise<Result<BulkResult>> {
+  const succeeded: BulkResult['succeeded'] = [];
+  const failed: BulkResult['failed'] = [];
+  const allFiles: string[] = [];
+
+  let j = -1;
+  for (const upd of updates) {
+    j++;
+    const result = await updateDocument(
+      ctx,
+      upd.docId as DocId,
+      upd.fields,
+      upd.body,
+      upd.appendBody,
+      undefined, // no expectedVersion in bulk
+    );
+
+    if (result.ok) {
+      const doc = ctx.backend.getDocument(upd.docId as DocId);
+      const fp = doc ? path.join(ctx.projectRoot, doc.filePath as string) : '';
+      allFiles.push(fp);
+      succeeded.push({
+        index: j,
+        docId: upd.docId,
+        filePath: doc?.filePath as string ?? '',
+        version: result.value.version,
+      });
+    } else {
+      failed.push({
+        index: j,
+        docId: upd.docId,
+        error: result.errors.map(e => e.message).join('; '),
+      });
+    }
+  }
+
+  // Note: individual updates already git-commit. For bulk, this is a known limitation —
+  // each update goes through the full pipeline including git. A future optimization
+  // could batch git commits, but it requires refactoring updateDocument to accept a skipGit flag.
+
+  return ok({ succeeded, failed, totalRequested: updates.length });
 }

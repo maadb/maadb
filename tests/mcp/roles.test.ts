@@ -2,9 +2,9 @@ import { describe, it, expect } from 'vitest';
 import { getToolsForRole, parseRole } from '../../src/mcp/roles.js';
 
 describe('MCP roles', () => {
-  it('reader gets 11 tools', () => {
+  it('reader gets 12 tools', () => {
     const tools = getToolsForRole('reader');
-    expect(tools.size).toBe(11);
+    expect(tools.size).toBe(12);
     expect(tools.has('maad.summary')).toBe(true);
     expect(tools.has('maad.get')).toBe(true);
     expect(tools.has('maad.aggregate')).toBe(true);
@@ -12,9 +12,9 @@ describe('MCP roles', () => {
     expect(tools.has('maad.delete')).toBe(false);
   });
 
-  it('writer gets 14 tools (reader + create, update, validate)', () => {
+  it('writer gets 17 tools (reader + create, update, validate, bulk_create, bulk_update)', () => {
     const tools = getToolsForRole('writer');
-    expect(tools.size).toBe(14);
+    expect(tools.size).toBe(17);
     expect(tools.has('maad.create')).toBe(true);
     expect(tools.has('maad.update')).toBe(true);
     expect(tools.has('maad.validate')).toBe(true);
@@ -22,9 +22,9 @@ describe('MCP roles', () => {
     expect(tools.has('maad.reindex')).toBe(false);
   });
 
-  it('admin gets 18 tools (all)', () => {
+  it('admin gets 21 tools (all)', () => {
     const tools = getToolsForRole('admin');
-    expect(tools.size).toBe(18);
+    expect(tools.size).toBe(21);
     expect(tools.has('maad.delete')).toBe(true);
     expect(tools.has('maad.reindex')).toBe(true);
     expect(tools.has('maad.reload')).toBe(true);

@@ -76,6 +76,7 @@ async function main(): Promise<void> {
 async function cmdServe(): Promise<void> {
   let role: string | undefined;
   let dryRun = false;
+  let provenance: string | undefined;
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--role' && args[i + 1]) {
       role = args[i + 1];
@@ -83,12 +84,16 @@ async function cmdServe(): Promise<void> {
     if (args[i] === '--dry-run') {
       dryRun = true;
     }
+    if (args[i] === '--prov' && args[i + 1]) {
+      provenance = args[i + 1];
+    }
   }
 
   await startServer({
     projectRoot: path.resolve(projectRoot),
     role,
     dryRun,
+    provenance,
   });
 }
 
@@ -115,7 +120,7 @@ Commands:
   parse <file.md>                   Parse a file and print the result
   history <doc_id>                  Show git history for a document
   audit [--since date]              Show project-wide activity
-  serve [--role reader|writer|admin] Start MCP server (stdio transport)
+  serve [--role reader|writer|admin] [--prov off|on|detail] Start MCP server
 
 Options:
   --project <dir>                   Set project root (default: cwd)

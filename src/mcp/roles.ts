@@ -6,13 +6,13 @@ export type Role = 'reader' | 'writer' | 'admin';
 
 const READER_TOOLS = [
   'maad.scan', 'maad.summary', 'maad.describe',
-  'maad.get', 'maad.query', 'maad.search', 'maad.related', 'maad.schema', 'maad.aggregate',
+  'maad.get', 'maad.query', 'maad.search', 'maad.related', 'maad.schema', 'maad.aggregate', 'maad.join',
   'maad.history', 'maad.audit',
 ] as const;
 
 const WRITER_TOOLS = [
   ...READER_TOOLS,
-  'maad.create', 'maad.update', 'maad.validate',
+  'maad.create', 'maad.update', 'maad.validate', 'maad.bulk_create', 'maad.bulk_update',
 ] as const;
 
 const ADMIN_TOOLS = [

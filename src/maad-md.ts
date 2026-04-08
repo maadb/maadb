@@ -106,14 +106,17 @@ function generateFullCommandRef(cmd: string): string {
 | \`get <doc_id> cold\` | Full document (expensive — use sparingly) |
 | \`get <doc_id> full\` | Resolved record: refs resolved, objects, related, latest note |
 | \`query <type>\` | All documents of a type |
-| \`query <type> --filter field=value\` | Filtered by indexed field |
+| \`query <type> --filter field=value\` | Filtered (ops: eq, neq, gt, gte, lt, lte, in, contains) |
+| \`query <type> --fields name,status\` | Return frontmatter fields in results (projection) |
 | \`search <primitive>\` | Cross-document object search |
 | \`search <primitive> --subtype <s>\` | Filter by subtype (e.g. person, attorney) |
-| \`search <primitive> --contains <text>\` | Substring match on values |
+| \`search <primitive> --query <text>\` | Substring match on values (alias: --contains) |
 | \`related <doc_id> both\` | All connected documents (outgoing + incoming) |
 | \`related <doc_id> outgoing\` | Documents this one references |
 | \`related <doc_id> incoming\` | Documents that reference this one |
-| \`schema <type>\` | Field definitions for a type (what to pass to create/update) |
+| \`schema <type>\` | Field definitions, ID prefix, format hints (use before writes) |
+| \`aggregate\` | Group by a field with optional metric (count/sum/avg/min/max) |
+| \`join\` | Query + follow refs + project fields from both sides in one call |
 
 ### Write
 | Command | What it does |
@@ -122,6 +125,8 @@ function generateFullCommandRef(cmd: string): string {
 | \`update <doc_id> --field k=v [--field k=v ...]\` | Update frontmatter fields |
 | \`update <doc_id> --append "text"\` | Append to document body |
 | \`update <doc_id> --body "text"\` | Replace document body |
+| \`bulk_create\` | Create multiple records in one call (MCP only) |
+| \`bulk_update\` | Update multiple records in one call (MCP only) |
 
 ### Maintain
 | Command | What it does |

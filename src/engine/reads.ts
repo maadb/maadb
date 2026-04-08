@@ -29,6 +29,9 @@ import type {
   SchemaInfoResult,
   AggregateQuery,
   AggregateResult,
+  JoinQuery,
+  JoinResult,
+  JoinResultRow,
 } from './types.js';
 import { readFrontmatter, readBlockContent } from './helpers.js';
 
@@ -231,4 +234,81 @@ export function schemaInfo(ctx: EngineContext, dt: DocType): Result<SchemaInfoRe
 
 export function aggregate(ctx: EngineContext, query: AggregateQuery): Result<AggregateResult> {
   return ok(ctx.backend.aggregate(query));
+}
+
+export function join(ctx: EngineContext, query: JoinQuery): Result<JoinResult> {
+  // Step 1: Find source documents
+  const docQuery: DocumentQuery = { docType: query.docType };
+  if (query.filters) docQuery.filters = query.filters;
+  if (query.limit) docQuery.limit = query.limit;
+  if (query.offset) docQuery.offset = query.offset;
+
+  const docs = ctx.backend.findDocuments(docQuery);
+  const total = ctx.backend.countDocuments(docQuery);
+  if (docs.length === 0) return ok({ total, results: [] });
+
+  const docIds = docs.map(d => d.docId);
+
+  // Step 2: Get projected fields from source docs
+  const allSourceFields = [...(query.fields ?? []), ...query.refs];
+  const sourceFieldValues = ctx.backend.getFieldValues(docIds, allSourceFields);
+
+  // Step 3: Collect all ref target IDs and batch-fetch their fields
+  const refTargetIds = new Set<string>();
+  for (const [, fields] of sourceFieldValues) {
+    for (const refField of query.refs) {
+      const targetId = fields[refField];
+      if (targetId) refTargetIds.add(targetId);
+    }
+  }
+
+  // Get all requested ref fields across all targets
+  const allRefFieldNames = new Set<string>();
+  if (query.refFields) {
+    for (const fieldNames of Object.values(query.refFields)) {
+      for (const f of fieldNames) allRefFieldNames.add(f);
+    }
+  }
+
+  const refFieldValues = refTargetIds.size > 0 && allRefFieldNames.size > 0
+    ? ctx.backend.getFieldValues(
+        [...refTargetIds].map(id => id as DocId),
+        [...allRefFieldNames],
+      )
+    : new Map<string, Record<string, string>>();
+
+  // Step 4: Assemble results
+  const results: JoinResultRow[] = [];
+  for (const doc of docs) {
+    const srcFields = sourceFieldValues.get(doc.docId as string) ?? {};
+
+    // Build source fields (excluding ref field names)
+    const displayFields: Record<string, string> = {};
+    for (const f of (query.fields ?? [])) {
+      if (srcFields[f] !== undefined) displayFields[f] = srcFields[f];
+    }
+
+    // Build ref results
+    const refs: Record<string, { docId: string; fields: Record<string, string> } | null> = {};
+    for (const refField of query.refs) {
+      const targetId = srcFields[refField];
+      if (!targetId) {
+        refs[refField] = null;
+        continue;
+      }
+
+      const targetFields = refFieldValues.get(targetId) ?? {};
+      const requestedRefFields = query.refFields?.[refField] ?? [];
+      const filteredFields: Record<string, string> = {};
+      for (const f of requestedRefFields) {
+        if (targetFields[f] !== undefined) filteredFields[f] = targetFields[f];
+      }
+
+      refs[refField] = { docId: targetId, fields: filteredFields };
+    }
+
+    results.push({ docId: doc.docId as string, fields: displayFields, refs });
+  }
+
+  return ok({ total, results });
 }

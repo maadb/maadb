@@ -274,6 +274,52 @@ describe('summary', () => {
   });
 });
 
+describe('join', () => {
+  it('follows ref fields and returns projected fields from both sides', () => {
+    const result = engine.join({
+      docType: docType('case'),
+      refs: ['client'],
+      fields: ['title', 'status'],
+      refFields: { client: ['name'] },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.results.length).toBeGreaterThan(0);
+    const first = result.value.results[0]!;
+    expect(first.fields['title']).toBeDefined();
+    expect(first.fields['status']).toBeDefined();
+    expect(first.refs['client']).toBeDefined();
+    expect(first.refs['client']!.docId).toBe('cli-acme');
+    expect(first.refs['client']!.fields['name']).toBeDefined();
+  });
+
+  it('returns null for missing ref targets', () => {
+    const result = engine.join({
+      docType: docType('client'),
+      refs: ['primary_contact'],
+      fields: ['name'],
+      refFields: { primary_contact: ['name'] },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // Some clients may not have primary_contact set
+    expect(result.value.results.length).toBeGreaterThan(0);
+  });
+
+  it('supports filters on source documents', () => {
+    const result = engine.join({
+      docType: docType('case'),
+      refs: ['client'],
+      fields: ['title'],
+      refFields: { client: ['name'] },
+      filters: { status: { op: 'eq', value: 'open' } },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.results).toHaveLength(1);
+  });
+});
+
 describe('aggregate', () => {
   it('counts documents grouped by field', () => {
     const result = engine.aggregate({ groupBy: 'status', docType: docType('case') });

@@ -19,9 +19,9 @@ export function register(server: McpServer, engine: MaadEngine): void {
     }),
   }, async (args) => {
     if (args.depth === 'full') {
-      return resultToResponse(await engine.getDocumentFull(docId(args.docId)));
+      return resultToResponse(await engine.getDocumentFull(docId(args.docId)), 'maad.get');
     }
-    return resultToResponse(await engine.getDocument(docId(args.docId), args.depth, args.block ?? undefined));
+    return resultToResponse(await engine.getDocument(docId(args.docId), args.depth, args.block ?? undefined), 'maad.get');
   });
 
   server.registerTool('maad.query', {
@@ -39,7 +39,7 @@ export function register(server: McpServer, engine: MaadEngine): void {
     if (args.fields !== undefined) query.fields = args.fields;
     if (args.limit !== undefined) query.limit = args.limit;
     if (args.offset !== undefined) query.offset = args.offset;
-    return resultToResponse(engine.findDocuments(query));
+    return resultToResponse(engine.findDocuments(query), 'maad.query');
   });
 
   server.registerTool('maad.search', {
@@ -63,7 +63,7 @@ export function register(server: McpServer, engine: MaadEngine): void {
     if (args.docId !== undefined) query.docId = docId(args.docId);
     if (args.limit !== undefined) query.limit = args.limit;
     if (args.offset !== undefined) query.offset = args.offset;
-    return resultToResponse(engine.searchObjects(query));
+    return resultToResponse(engine.searchObjects(query), 'maad.search');
   });
 
   server.registerTool('maad.related', {
@@ -74,7 +74,7 @@ export function register(server: McpServer, engine: MaadEngine): void {
         .describe('outgoing=docs this references, incoming=docs that reference this, both=all'),
     }),
   }, (args) => {
-    return resultToResponse(engine.listRelated(docId(args.docId), args.direction));
+    return resultToResponse(engine.listRelated(docId(args.docId), args.direction), 'maad.related');
   });
 
   server.registerTool('maad.schema', {
@@ -83,7 +83,7 @@ export function register(server: McpServer, engine: MaadEngine): void {
       docType: z.string().describe('Document type'),
     }),
   }, (args) => {
-    return resultToResponse(engine.schemaInfo(docType(args.docType)));
+    return resultToResponse(engine.schemaInfo(docType(args.docType)), 'maad.schema');
   });
 
   server.registerTool('maad.aggregate', {
@@ -106,6 +106,30 @@ export function register(server: McpServer, engine: MaadEngine): void {
     if (args.metric !== undefined) query.metric = args.metric;
     if (args.filters !== undefined) query.filters = args.filters as any;
     if (args.limit !== undefined) query.limit = args.limit;
-    return resultToResponse(engine.aggregate(query));
+    return resultToResponse(engine.aggregate(query), 'maad.aggregate');
+  });
+
+  server.registerTool('maad.join', {
+    description: 'Queries documents and follows ref fields to return projected fields from both source and target records in one call. Eliminates N+1 round-trips. Example: all cases with their client name and attorney name.',
+    inputSchema: z.object({
+      docType: z.string().describe('Source document type to query'),
+      refs: z.array(z.string()).describe('Ref field names to follow (e.g. ["client", "assigned_attorney"])'),
+      fields: z.array(z.string()).optional().describe('Fields to return from source documents'),
+      refFields: z.record(z.string(), z.array(z.string())).optional().describe('Fields to return from each ref target: { "client": ["name", "industry"], "assigned_attorney": ["first_name"] }'),
+      filters: z.any().optional().describe('Field filters on source documents (same format as maad.query)'),
+      limit: z.number().optional().describe('Max results (default 50)'),
+      offset: z.number().optional().describe('Skip first N results'),
+    }),
+  }, (args) => {
+    const query: import('../../engine/types.js').JoinQuery = {
+      docType: docType(args.docType),
+      refs: args.refs,
+    };
+    if (args.fields !== undefined) query.fields = args.fields;
+    if (args.refFields !== undefined) query.refFields = args.refFields;
+    if (args.filters !== undefined) query.filters = args.filters as any;
+    if (args.limit !== undefined) query.limit = args.limit;
+    if (args.offset !== undefined) query.offset = args.offset;
+    return resultToResponse(engine.join(query), 'maad.join');
   });
 }

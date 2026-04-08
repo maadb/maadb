@@ -15,7 +15,7 @@ Markdown files (canonical records)
   -> YAML registry + schemas (structure definitions)
   -> 6-stage pipeline (parse, validate, extract, materialize)
   -> SQLite index (pointer-only — no data stored, just pointers)
-  -> CLI (17 commands) + MCP server (15 tools)
+  -> CLI + MCP server (12 reader / 17 writer / 21 admin tools)
 ```
 
 ### Record format
@@ -157,13 +157,13 @@ my-project/
 
 ## MCP Server
 
-Native LLM tool access via Model Context Protocol. 15 tools, role-based access, stdio transport.
+Native LLM tool access via Model Context Protocol. Role-based access, stdio transport. Provenance mode (`--prov on|detail`) for source attribution.
 
 | Role | Tools | Count |
 |------|-------|-------|
-| reader (default) | scan, summary, describe, get, query, search, related, schema, history, audit | 10 |
-| writer | reader + create, update, validate | 13 |
-| admin | writer + delete, reindex | 15 |
+| reader (default) | scan, summary, describe, get, query, search, related, schema, aggregate, join, history, audit | 12 |
+| writer | reader + create, update, validate, bulk_create, bulk_update | 17 |
+| admin | writer + delete, reindex, reload, health | 21 |
 
 All tools return `{ ok: true, data: {...} }` or `{ ok: false, errors: [...] }`.
 
@@ -182,18 +182,18 @@ All tools return `{ ok: true, data: {...} }` or `{ ok: false, errors: [...] }`.
 
 ## Current state
 
-**v0.2.3** — Production-hardened engine: durable writes, path security, structured logging, AI guardrails (dry-run, allowlists), batch queries, real pagination. MCP server with 15 tools, role-based access. 236 tests.
+**v0.2.5** — Read path improvements, query projection, aggregation, cross-ref joins, bulk ops, provenance flag. 21 admin / 17 writer / 12 reader tools. 260 tests.
 
 ## Roadmap
 
 | Version | What |
 |---------|------|
-| ~~0.2.x~~ | ~~MCP server + production hardening~~ — **shipped** |
-| 0.3.0 | Real LLM evaluation — MCP end-to-end, demo project, benchmark |
-| 0.4.0 | Object attributes — user-defined tags on objects, YAML-stored |
-| 0.5.0 | Reverse import — CSV/JSON/SQL into markdown |
-| 0.6.0 | Query enhancements — FTS5, compound filters |
-| 0.7.0 | Connector gates — OAuth, scopes, cursors (before any external API) |
+| ~~0.2.x~~ | ~~MCP server, production hardening, read path improvements~~ — **shipped** |
+| 0.3.0 | LLM evaluation + bulk ops — maadb-demo, benchmarks |
+| 0.4.0 | Provenance + admin tooling |
+| 0.5.0 | Query power — FTS5, fuzzy entity matching |
+| 0.6.0 | Object attributes — user-defined tags, YAML-stored |
+| 0.7.0 | Multi-project MCP |
 | 1.0.0 | Stable release — API locked, npm published |
 
 ## License

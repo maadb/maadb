@@ -7,6 +7,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { buildConfig, type McpConfig } from './config.js';
 import { setGuardrailConfig } from './guardrails.js';
+import { setProvenanceMode } from './response.js';
 import { startupEngine, registerShutdownHooks } from './lifecycle.js';
 import { logger } from '../engine/logger.js';
 import * as discoverTools from './tools/discover.js';
@@ -20,6 +21,7 @@ export interface ServeOptions {
   role?: string | undefined;
   dryRun?: boolean | undefined;
   toolAllowlist?: string[] | undefined;
+  provenance?: string | undefined;
 }
 
 export async function startServer(opts: ServeOptions): Promise<void> {
@@ -38,6 +40,7 @@ export async function startServer(opts: ServeOptions): Promise<void> {
 
   // Set guardrail config
   setGuardrailConfig({ dryRun: config.dryRun, toolAllowlist: config.toolAllowlist });
+  setProvenanceMode(config.provenance);
 
   // Create MCP server
   const server = new McpServer({
@@ -51,16 +54,16 @@ export async function startServer(opts: ServeOptions): Promise<void> {
   discoverTools.register(server, engine, config.projectRoot);
   readTools.register(server, engine);
   auditTools.register(server, engine);
-  toolCount = 10;
+  toolCount = 12;
 
   if (config.role === 'writer' || config.role === 'admin') {
     writeTools.register(server, engine);
-    toolCount = 13;
+    toolCount = 17;
   }
 
   if (config.role === 'admin') {
     maintainTools.register(server, engine);
-    toolCount = 17;
+    toolCount = 21;
   }
 
   logger.info('mcp', 'startup', `${toolCount} tools registered for role '${config.role}'${config.dryRun ? ' (dry-run)' : ''}`);

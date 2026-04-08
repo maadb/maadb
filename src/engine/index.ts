@@ -179,6 +179,7 @@ export class MaadEngine {
   getSchema(dt: DocType) { return reads.getSchema(this.ctx(), dt); }
   schemaInfo(dt: DocType) { return reads.schemaInfo(this.ctx(), dt); }
   aggregate(query: import('./types.js').AggregateQuery) { return reads.aggregate(this.ctx(), query); }
+  join(query: import('./types.js').JoinQuery) { return reads.join(this.ctx(), query); }
 
   // --- Composites (Tier 2, provisional) ---
   async getDocumentFull(id: DocId) { return composites.getDocumentFull(this.ctx(), id); }
@@ -195,6 +196,14 @@ export class MaadEngine {
   async deleteDocument(id: DocId, mode: 'soft' | 'hard') {
     if (this._readOnly) return singleErr('READ_ONLY', 'Engine is in read-only mode');
     return writes.deleteDocument(this.ctx(), id, mode);
+  }
+  async bulkCreate(records: import('./types.js').BulkCreateInput[]) {
+    if (this._readOnly) return singleErr('READ_ONLY', 'Engine is in read-only mode');
+    return writes.bulkCreate(this.ctx(), records);
+  }
+  async bulkUpdate(updates: import('./types.js').BulkUpdateInput[]) {
+    if (this._readOnly) return singleErr('READ_ONLY', 'Engine is in read-only mode');
+    return writes.bulkUpdate(this.ctx(), updates);
   }
 
   // --- Maintenance ---

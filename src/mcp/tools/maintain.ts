@@ -6,7 +6,7 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { MaadEngine } from '../../engine.js';
 import { docId } from '../../types.js';
-import { resultToResponse, successResponse } from '../response.js';
+import { resultToResponse, successResponse, getProvenanceMode } from '../response.js';
 import { isDryRun, dryRunResponse, auditToolCall } from '../guardrails.js';
 
 export function register(server: McpServer, engine: MaadEngine): void {
@@ -40,9 +40,11 @@ export function register(server: McpServer, engine: MaadEngine): void {
   });
 
   server.registerTool('maad.health', {
-    description: 'Returns engine health status: initialized, read-only mode, git availability, document count, last indexed timestamp, recovery actions.',
+    description: 'Returns engine health status: initialized, read-only mode, git availability, document count, last indexed timestamp, provenance mode, recovery actions.',
     inputSchema: z.object({}),
   }, () => {
-    return successResponse(engine.health());
+    const health = engine.health();
+    const provMode = getProvenanceMode();
+    return successResponse({ ...health, provenance: provMode }, 'maad.health');
   });
 }

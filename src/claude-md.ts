@@ -36,16 +36,20 @@ The Architect role handles: schema design, registry creation, data import, troub
 
 - \`maad.summary\` — project snapshot (start here)
 - \`maad.get\` — read a record (hot/warm/cold/full)
-- \`maad.query\` — find records by type and filters
+- \`maad.query\` — find records by type, filters, and field projection
 - \`maad.search\` — find extracted objects across all records
 - \`maad.related\` — traverse relationships between records
+- \`maad.aggregate\` — count/sum/avg/min/max grouped by a field
+- \`maad.join\` — query + follow refs + project fields from both sides in one call
 
 ### Writing data
 
 - **Always** call \`maad.schema <type>\` before creating or updating records
 - \`maad.create\` — new record (engine validates against schema)
 - \`maad.update\` — modify fields or body (use expectedVersion for safe writes)
-- **Execute writes sequentially** — do not parallelize write operations
+- \`maad.bulk_create\` — create multiple records in one call (much faster for imports)
+- \`maad.bulk_update\` — update multiple records in one call
+- **Execute individual writes sequentially** — do not parallelize single create/update calls
 
 ### Importing raw data
 

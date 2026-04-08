@@ -204,3 +204,79 @@ describe('deleteDocument', () => {
     expect(existsSync(deletedPath)).toBe(true);
   });
 });
+
+describe('bulkCreate', () => {
+  it('creates multiple records in one call', async () => {
+    const result = await engine.bulkCreate([
+      { docType: 'client', fields: { name: 'Bulk Client A', status: 'active' } },
+      { docType: 'client', fields: { name: 'Bulk Client B', status: 'prospect' } },
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.succeeded).toHaveLength(2);
+    expect(result.value.failed).toHaveLength(0);
+    expect(result.value.totalRequested).toBe(2);
+
+    // Verify records exist
+    const a = await engine.getDocument(docId(result.value.succeeded[0]!.docId), 'hot');
+    expect(a.ok).toBe(true);
+    const b = await engine.getDocument(docId(result.value.succeeded[1]!.docId), 'hot');
+    expect(b.ok).toBe(true);
+  });
+
+  it('reports per-record failures without blocking others', async () => {
+    const result = await engine.bulkCreate([
+      { docType: 'client', fields: { name: 'Good Record', status: 'active' } },
+      { docType: 'nonexistent', fields: { name: 'Bad Type' } },
+      { docType: 'client', fields: { name: 'Another Good', status: 'inactive' } },
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.succeeded).toHaveLength(2);
+    expect(result.value.failed).toHaveLength(1);
+    expect(result.value.failed[0]!.index).toBe(1);
+    expect(result.value.failed[0]!.error).toContain('not in registry');
+  });
+
+  it('rejects duplicate IDs within the same batch', async () => {
+    const result = await engine.bulkCreate([
+      { docType: 'client', fields: { name: 'Dup Test A', status: 'active' }, docId: 'cli-dup-test' },
+      { docType: 'client', fields: { name: 'Dup Test B', status: 'active' }, docId: 'cli-dup-test' },
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // First succeeds, second fails because ID already exists
+    expect(result.value.succeeded).toHaveLength(1);
+    expect(result.value.failed).toHaveLength(1);
+    expect(result.value.failed[0]!.error).toContain('already exists');
+  });
+});
+
+describe('bulkUpdate', () => {
+  it('updates multiple records in one call', async () => {
+    const result = await engine.bulkUpdate([
+      { docId: 'cli-acme', fields: { status: 'inactive' } },
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.succeeded).toHaveLength(1);
+    expect(result.value.failed).toHaveLength(0);
+
+    // Verify update
+    const doc = await engine.getDocument(docId('cli-acme'), 'hot');
+    expect(doc.ok).toBe(true);
+    if (doc.ok) expect(doc.value.frontmatter['status']).toBe('inactive');
+  });
+
+  it('reports failures for missing documents', async () => {
+    const result = await engine.bulkUpdate([
+      { docId: 'cli-acme', fields: { status: 'active' } },
+      { docId: 'nonexistent-doc', fields: { name: 'Nope' } },
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.succeeded).toHaveLength(1);
+    expect(result.value.failed).toHaveLength(1);
+    expect(result.value.failed[0]!.error).toContain('not found');
+  });
+});

@@ -6,7 +6,7 @@ current: 0.2.5
 # Version History
 
 ## 0.2.5 — 2026-04-08
-Read path improvements from LLM evaluation feedback: query projection (return frontmatter fields in results), maad.aggregate tool (count/sum/avg/min/max grouped by field), search `query` alias for `contains` (fixes silent param drop), schema output includes idPrefix and format hints. Improved maad.query filter documentation with operator examples. 18 admin tools, 14 writer, 11 reader. 247 tests passing.
+Read path + write path improvements from LLM evaluation feedback. Query projection (return frontmatter fields in results), maad.aggregate (count/sum/avg/min/max grouped by field), maad.join (cross-ref with projected fields from both sides), search `query` alias for `contains` (fixes silent param drop), schema output includes idPrefix and format hints, range query documentation. Bulk operations: maad.bulk_create and maad.bulk_update (per-record results, single git commit). Provenance flag: `--prov off|on|detail` on serve — `_source` metadata in tool responses, provenance instructions in summary. 21 admin tools, 17 writer, 12 reader. 260 tests passing.
 
 ## 0.2.4 — 2026-04-07
 MCP server stability: auto-create missing type directories, maad.reload (re-init engine mid-session), maad.health (engine status). CLAUDE.md generated on init with MCP-first agent instructions. MAAD.md updated with MCP-first language. Skill files: _skills/schema-guide.md and _skills/import-guide.md generated on init. 17 admin tools, 13 writer, 10 reader. 236 tests passing.

@@ -61,4 +61,38 @@ export function register(server: McpServer, engine: MaadEngine): void {
     const result = await engine.validate(args.docId ? docId(args.docId) : undefined);
     return resultToResponse(result);
   });
+
+  server.registerTool('maad.bulk_create', {
+    description: 'Creates multiple records in one call. Validates each record, writes files, single git commit. Returns per-record success/failure. Much faster than individual creates for imports.',
+    inputSchema: z.object({
+      records: z.array(z.object({
+        docType: z.string().describe('Document type'),
+        fields: z.any().describe('Frontmatter fields'),
+        body: z.string().optional().describe('Markdown body'),
+        docId: z.string().optional().describe('Custom ID (auto-generated if omitted)'),
+      })).describe('Array of records to create'),
+    }),
+  }, async (args) => {
+    auditToolCall('maad.bulk_create', { count: args.records.length });
+    if (isDryRun()) return dryRunResponse('maad.bulk_create', { count: args.records.length });
+    const result = await engine.bulkCreate(args.records as any);
+    return resultToResponse(result);
+  });
+
+  server.registerTool('maad.bulk_update', {
+    description: 'Updates multiple records in one call. Returns per-record success/failure.',
+    inputSchema: z.object({
+      updates: z.array(z.object({
+        docId: z.string().describe('Document ID to update'),
+        fields: z.any().optional().describe('Frontmatter fields to update'),
+        body: z.string().optional().describe('Replace entire body'),
+        appendBody: z.string().optional().describe('Append to body'),
+      })).describe('Array of updates'),
+    }),
+  }, async (args) => {
+    auditToolCall('maad.bulk_update', { count: args.updates.length });
+    if (isDryRun()) return dryRunResponse('maad.bulk_update', { count: args.updates.length });
+    const result = await engine.bulkUpdate(args.updates as any);
+    return resultToResponse(result);
+  });
 }

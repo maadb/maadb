@@ -236,7 +236,19 @@ maad.create({
 })
 \`\`\`
 
-**Important:** Execute creates sequentially, not in parallel. Parallel writes can cause SQLite lock errors.
+For bulk imports (10+ records), use \`maad.bulk_create\` instead — accepts an array, returns per-record results, single git commit:
+
+\`\`\`
+maad.bulk_create({
+  records: [
+    { docType: "client", fields: { name: "Acme Corp", status: "active" } },
+    { docType: "client", fields: { name: "Beta Inc", status: "prospect" } },
+    ...
+  ]
+})
+\`\`\`
+
+**Important:** Execute individual creates sequentially, not in parallel. Use bulk_create for batch operations.
 
 ### Transaction records (append to parent file)
 

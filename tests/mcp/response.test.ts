@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { successResponse, errorResponse, resultToResponse } from '../../src/mcp/response.js';
+import { describe, it, expect, afterEach } from 'vitest';
+import { successResponse, errorResponse, resultToResponse, setProvenanceMode } from '../../src/mcp/response.js';
 import type { Result } from '../../src/errors.js';
 
 describe('MCP response contract', () => {
@@ -46,5 +46,45 @@ describe('MCP response contract', () => {
 
     const error = JSON.parse(errorResponse([{ code: 'X', message: 'Y' }] as any).content[0]!.text);
     expect(Object.keys(error).sort()).toEqual(['errors', 'ok']);
+  });
+});
+
+describe('Provenance mode', () => {
+  afterEach(() => setProvenanceMode('off'));
+
+  it('does not include _source when provenance is off', () => {
+    setProvenanceMode('off');
+    const resp = successResponse({ foo: 'bar' }, 'maad.get');
+    const parsed = JSON.parse(resp.content[0]!.text);
+    expect(parsed._source).toBeUndefined();
+  });
+
+  it('includes _source when provenance is on', () => {
+    setProvenanceMode('on');
+    const resp = successResponse({ foo: 'bar' }, 'maad.get');
+    const parsed = JSON.parse(resp.content[0]!.text);
+    expect(parsed._source).toBe('maad.get');
+  });
+
+  it('includes _source when provenance is detail', () => {
+    setProvenanceMode('detail');
+    const resp = successResponse({ foo: 'bar' }, 'maad.query');
+    const parsed = JSON.parse(resp.content[0]!.text);
+    expect(parsed._source).toBe('maad.query');
+  });
+
+  it('does not include _source when no tool name provided', () => {
+    setProvenanceMode('on');
+    const resp = successResponse({ foo: 'bar' });
+    const parsed = JSON.parse(resp.content[0]!.text);
+    expect(parsed._source).toBeUndefined();
+  });
+
+  it('resultToResponse passes tool name through', () => {
+    setProvenanceMode('on');
+    const result: Result<string> = { ok: true, value: 'hello' };
+    const resp = resultToResponse(result, 'maad.search');
+    const parsed = JSON.parse(resp.content[0]!.text);
+    expect(parsed._source).toBe('maad.search');
   });
 });

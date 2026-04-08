@@ -147,6 +147,17 @@ After design is confirmed (or in autonomous mode):
 6. Call \`maad.reindex\` if sample records were created
 7. Report: "Database deployed. X types, Y fields. Ready for data."
 
+## Bulk Data Import
+
+For importing large datasets, use \`maad.bulk_create\` instead of individual creates:
+
+- Accepts an array of records, returns per-record success/failure
+- One bad record doesn't block others
+- Single git commit for all successful records
+- Import parent types first (clients, contacts), then dependent types (cases, notes)
+- For updates, use \`maad.bulk_update\` with the same pattern
+- \`maad.aggregate\` is useful for verifying counts after import
+
 ## Troubleshooting
 
 | Problem | Cause | Fix |
@@ -154,7 +165,7 @@ After design is confirmed (or in autonomous mode):
 | reload fails | Registry YAML syntax error | Check YAML formatting, fix, reload again |
 | create fails validation | Field value doesn't match schema | Check \`maad.schema <type>\` for expected types/enums |
 | missing type error | Registry has type but reload wasn't called | Call \`maad.reload\` |
-| search returns too many results | Search doesn't filter, returns full subtype | Use more specific query or filter client-side |
+| search returns too many results | Missing query/value param | Use \`query\` (substring) or \`value\` (exact) param to filter |
 | parallel writes fail | SQLite single-writer lock | Execute writes sequentially, never in parallel |
 
 ## Handoff

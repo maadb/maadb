@@ -26,6 +26,26 @@ export interface CreateResult {
   validation: ValidationResult;
 }
 
+export interface BulkCreateInput {
+  docType: string;
+  fields: Record<string, unknown>;
+  body?: string;
+  docId?: string;
+}
+
+export interface BulkUpdateInput {
+  docId: string;
+  fields?: Record<string, unknown>;
+  body?: string;
+  appendBody?: string;
+}
+
+export interface BulkResult {
+  succeeded: Array<{ index: number; docId: string; filePath: string; version: number }>;
+  failed: Array<{ index: number; docId: string | null; error: string }>;
+  totalRequested: number;
+}
+
 export interface GetResult {
   docId: DocId;
   docType: DocType;
@@ -76,6 +96,27 @@ export interface AggregateResult {
     metric?: number | null;
   }>;
   total: number;
+}
+
+export interface JoinQuery {
+  docType: DocType;
+  refs: string[];
+  fields?: string[];
+  refFields?: Record<string, string[]>;
+  filters?: Record<string, import('../types.js').FilterCondition>;
+  limit?: number;
+  offset?: number;
+}
+
+export interface JoinResultRow {
+  docId: string;
+  fields: Record<string, string>;
+  refs: Record<string, { docId: string; fields: Record<string, string> } | null>;
+}
+
+export interface JoinResult {
+  total: number;
+  results: JoinResultRow[];
 }
 
 export interface RelatedResult {
