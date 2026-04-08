@@ -172,6 +172,22 @@ export class SqliteBackend implements MaadBackend {
     return row ? rowToDocument(row) : null;
   }
 
+  getDocumentsByIds(docIds: DocId[]): Map<DocId, DocumentRecord> {
+    const map = new Map<DocId, DocumentRecord>();
+    if (docIds.length === 0) return map;
+
+    const placeholders = docIds.map(() => '?').join(', ');
+    const rows = this.db.prepare(
+      `SELECT * FROM documents WHERE doc_id IN (${placeholders}) AND deleted = 0`,
+    ).all(...docIds.map(id => id as string)) as RawDocRow[];
+
+    for (const row of rows) {
+      const doc = rowToDocument(row);
+      map.set(doc.docId, doc);
+    }
+    return map;
+  }
+
   getDocumentByPath(path: FilePath): DocumentRecord | null {
     const row = this.db.prepare(
       'SELECT * FROM documents WHERE file_path = ? AND deleted = 0',
@@ -180,7 +196,7 @@ export class SqliteBackend implements MaadBackend {
     return row ? rowToDocument(row) : null;
   }
 
-  findDocuments(query: DocumentQuery): DocumentMatch[] {
+  private buildDocQuery(query: DocumentQuery): { where: string; params: unknown[] } {
     const conditions: string[] = ['d.deleted = 0'];
     const params: unknown[] = [];
 
@@ -189,30 +205,20 @@ export class SqliteBackend implements MaadBackend {
       params.push(query.docType as string);
     }
 
-    let needsFieldJoin = false;
-    const fieldConditions: string[] = [];
-
     if (query.filters) {
       for (const [field, condition] of Object.entries(query.filters)) {
-        needsFieldJoin = true;
         const { sql, values } = buildFilterSQL(field, condition);
-        fieldConditions.push(sql);
+        conditions.push(`d.doc_id IN (SELECT doc_id FROM field_index WHERE ${sql})`);
         params.push(...values);
       }
     }
 
-    let sql: string;
-    if (needsFieldJoin && fieldConditions.length > 0) {
-      // For each filter, the doc must have a matching row in field_index
-      const subqueries = fieldConditions.map(fc =>
-        `d.doc_id IN (SELECT doc_id FROM field_index WHERE ${fc})`
-      );
-      conditions.push(...subqueries);
-      sql = `SELECT d.* FROM documents d WHERE ${conditions.join(' AND ')} ORDER BY d.indexed_at DESC LIMIT ? OFFSET ?`;
-    } else {
-      sql = `SELECT d.* FROM documents d WHERE ${conditions.join(' AND ')} ORDER BY d.indexed_at DESC LIMIT ? OFFSET ?`;
-    }
+    return { where: conditions.join(' AND '), params };
+  }
 
+  findDocuments(query: DocumentQuery): DocumentMatch[] {
+    const { where, params } = this.buildDocQuery(query);
+    const sql = `SELECT d.* FROM documents d WHERE ${where} ORDER BY d.indexed_at DESC LIMIT ? OFFSET ?`;
     params.push(query.limit ?? 50, query.offset ?? 0);
 
     const rows = this.db.prepare(sql).all(...params) as RawDocRow[];
@@ -224,35 +230,21 @@ export class SqliteBackend implements MaadBackend {
     }));
   }
 
-  findObjects(query: ObjectQuery): ObjectMatch[] {
+  countDocuments(query: DocumentQuery): number {
+    const { where, params } = this.buildDocQuery(query);
+    const row = this.db.prepare(`SELECT COUNT(*) as cnt FROM documents d WHERE ${where}`).get(...params) as { cnt: number };
+    return row.cnt;
+  }
+
+  private buildObjQuery(query: ObjectQuery): { where: string; params: unknown[] } {
     const conditions: string[] = [];
     const params: unknown[] = [];
 
-    if (query.primitive) {
-      conditions.push('primitive = ?');
-      params.push(query.primitive);
-    }
-
-    if (query.subtype) {
-      conditions.push('subtype = ?');
-      params.push(query.subtype);
-    }
-
-    if (query.value) {
-      conditions.push('value = ?');
-      params.push(query.value);
-    }
-
-    if (query.contains) {
-      conditions.push('value LIKE ?');
-      params.push(`%${query.contains}%`);
-    }
-
-    if (query.docId) {
-      conditions.push('doc_id = ?');
-      params.push(query.docId as string);
-    }
-
+    if (query.primitive) { conditions.push('primitive = ?'); params.push(query.primitive); }
+    if (query.subtype) { conditions.push('subtype = ?'); params.push(query.subtype); }
+    if (query.value) { conditions.push('value = ?'); params.push(query.value); }
+    if (query.contains) { conditions.push('value LIKE ?'); params.push(`%${query.contains}%`); }
+    if (query.docId) { conditions.push('doc_id = ?'); params.push(query.docId as string); }
     if (query.range) {
       if (query.range.gte) { conditions.push('normalized_value >= ?'); params.push(query.range.gte); }
       if (query.range.gt) { conditions.push('normalized_value > ?'); params.push(query.range.gt); }
@@ -260,8 +252,13 @@ export class SqliteBackend implements MaadBackend {
       if (query.range.lt) { conditions.push('normalized_value < ?'); params.push(query.range.lt); }
     }
 
-    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-    const sql = `SELECT * FROM objects ${where} ORDER BY doc_id, source_line LIMIT ? OFFSET ?`;
+    const w = conditions.length > 0 ? conditions.join(' AND ') : '1=1';
+    return { where: w, params };
+  }
+
+  findObjects(query: ObjectQuery): ObjectMatch[] {
+    const { where, params } = this.buildObjQuery(query);
+    const sql = `SELECT * FROM objects WHERE ${where} ORDER BY doc_id, source_line LIMIT ? OFFSET ?`;
     params.push(query.limit ?? 50, query.offset ?? 0);
 
     const rows = this.db.prepare(sql).all(...params) as RawObjectRow[];
@@ -276,6 +273,12 @@ export class SqliteBackend implements MaadBackend {
       sourceLine: row.source_line,
       blockId: row.block_id ? toBlockId(row.block_id) : null,
     }));
+  }
+
+  countObjects(query: ObjectQuery): number {
+    const { where, params } = this.buildObjQuery(query);
+    const row = this.db.prepare(`SELECT COUNT(*) as cnt FROM objects WHERE ${where}`).get(...params) as { cnt: number };
+    return row.cnt;
   }
 
   getRelationships(docId: DocId, direction: 'outgoing' | 'incoming' | 'both'): Relationship[] {

@@ -1,9 +1,12 @@
 ---
 enabled: true
-current: 0.2.2
+current: 0.2.3
 ---
 
 # Version History
+
+## 0.2.3 — 2026-04-07
+Production hardening Phase C: batch doc lookups (getDocumentsByIds eliminates N+1 in listRelated and getDocumentFull), real pagination (countDocuments/countObjects — total means total matches not page size), DRY query builders in SQLite backend. 236 tests passing.
 
 ## 0.2.2 — 2026-04-07
 Production hardening Phase B: 25 MCP boundary tests (role gating, response contracts, path containment, guardrails, health/read-only). Service separation — extracted config.ts, lifecycle.ts from server.ts. 236 tests passing.

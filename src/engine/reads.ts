@@ -80,12 +80,14 @@ export async function getDocument(
 
 export function findDocuments(ctx: EngineContext, query: DocumentQuery): Result<FindResult> {
   const results = ctx.backend.findDocuments(query);
-  return ok({ total: results.length, results });
+  const total = ctx.backend.countDocuments(query);
+  return ok({ total, results });
 }
 
 export function searchObjects(ctx: EngineContext, query: ObjectQuery): Result<SearchResult> {
   const results = ctx.backend.findObjects(query);
-  return ok({ total: results.length, results });
+  const total = ctx.backend.countObjects(query);
+  return ok({ total, results });
 }
 
 export function listRelated(
@@ -96,18 +98,26 @@ export function listRelated(
 ): Result<RelatedResult> {
   const rels = ctx.backend.getRelationships(id, direction);
 
+  // Batch lookup all related doc IDs in one query
+  const relatedIds = new Set<DocId>();
+  for (const rel of rels) {
+    if (rel.sourceDocId === id) relatedIds.add(rel.targetDocId);
+    else relatedIds.add(rel.sourceDocId);
+  }
+  const docsMap = ctx.backend.getDocumentsByIds([...relatedIds]);
+
   const outgoing: RelatedResult['outgoing'] = [];
   const incoming: RelatedResult['incoming'] = [];
 
   for (const rel of rels) {
     if (rel.sourceDocId === id) {
-      const targetDoc = ctx.backend.getDocument(rel.targetDocId);
+      const targetDoc = docsMap.get(rel.targetDocId);
       const targetType = targetDoc?.docType ?? toDocType('unknown');
       if (!types || types.includes(targetType)) {
         outgoing.push({ docId: rel.targetDocId, docType: targetType, field: rel.field });
       }
     } else {
-      const sourceDoc = ctx.backend.getDocument(rel.sourceDocId);
+      const sourceDoc = docsMap.get(rel.sourceDocId);
       const sourceType = sourceDoc?.docType ?? toDocType('unknown');
       if (!types || types.includes(sourceType)) {
         incoming.push({ docId: rel.sourceDocId, docType: sourceType, field: rel.field });

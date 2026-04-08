@@ -41,19 +41,28 @@ export async function getDocumentFull(ctx: EngineContext, id: DocId): Promise<Re
   const objects = ctx.backend.findObjects({ docId: id, limit: 50 });
 
   const rels = ctx.backend.getRelationships(id, 'both');
+
+  // Batch lookup all related doc IDs
+  const relatedIds = new Set<import('../types.js').DocId>();
+  for (const rel of rels) {
+    if (rel.sourceDocId === id) relatedIds.add(rel.targetDocId);
+    else relatedIds.add(rel.sourceDocId);
+  }
+  const docsMap = ctx.backend.getDocumentsByIds([...relatedIds]);
+
   const outgoing: GetFullResult['related']['outgoing'] = [];
   const incoming: GetFullResult['related']['incoming'] = [];
 
   for (const rel of rels) {
     if (rel.sourceDocId === id) {
-      const target = ctx.backend.getDocument(rel.targetDocId);
+      const target = docsMap.get(rel.targetDocId);
       outgoing.push({
         docId: rel.targetDocId as string,
         docType: (target?.docType ?? 'unknown') as string,
         field: rel.field,
       });
     } else {
-      const source = ctx.backend.getDocument(rel.sourceDocId);
+      const source = docsMap.get(rel.sourceDocId);
       incoming.push({
         docId: rel.sourceDocId as string,
         docType: (source?.docType ?? 'unknown') as string,
@@ -66,7 +75,7 @@ export async function getDocumentFull(ctx: EngineContext, id: DocId): Promise<Re
   let latestNote: GetFullResult['latestNote'] = null;
   if (ctx.gitLayer) {
     for (const inc of incoming) {
-      const incDoc = ctx.backend.getDocument(toDocId(inc.docId));
+      const incDoc = docsMap.get(toDocId(inc.docId));
       if (!incDoc) continue;
       if (!(inc.docType.includes('note'))) continue;
 

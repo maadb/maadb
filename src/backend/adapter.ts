@@ -32,9 +32,12 @@ export interface MaadBackend {
 
   // Read operations (called by MCP tools)
   getDocument(docId: DocId): DocumentRecord | null;
+  getDocumentsByIds(docIds: DocId[]): Map<DocId, DocumentRecord>;
   getDocumentByPath(path: FilePath): DocumentRecord | null;
   findDocuments(query: DocumentQuery): DocumentMatch[];
+  countDocuments(query: DocumentQuery): number;
   findObjects(query: ObjectQuery): ObjectMatch[];
+  countObjects(query: ObjectQuery): number;
   getRelationships(docId: DocId, direction: 'outgoing' | 'incoming' | 'both'): Relationship[];
   getBlocks(docId: DocId): ParsedBlock[];
 
