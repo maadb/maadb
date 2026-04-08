@@ -8,6 +8,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { MaadEngine } from '../engine.js';
 import { parseRole } from './roles.js';
+import { setGuardrailConfig } from './guardrails.js';
 import * as discoverTools from './tools/discover.js';
 import * as readTools from './tools/read.js';
 import * as writeTools from './tools/write.js';
@@ -17,6 +18,8 @@ import * as maintainTools from './tools/maintain.js';
 export interface ServeOptions {
   projectRoot: string;
   role?: string | undefined;
+  dryRun?: boolean | undefined;
+  toolAllowlist?: string[] | undefined;
 }
 
 export async function startServer(opts: ServeOptions): Promise<void> {
@@ -44,7 +47,10 @@ export async function startServer(opts: ServeOptions): Promise<void> {
     process.exit(1);
   }
 
-  console.error(`MAAD MCP: Engine initialized for ${projectRoot} (role: ${role})`);
+  // Set guardrail config
+  setGuardrailConfig({ dryRun: opts.dryRun, toolAllowlist: opts.toolAllowlist });
+
+  console.error(`MAAD MCP: Engine initialized for ${projectRoot} (role: ${role}${opts.dryRun ? ', dry-run' : ''})`);
 
   // Create MCP server
   const server = new McpServer({

@@ -7,6 +7,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { ok, singleErr, type Result } from '../errors.js';
+import { logger } from './logger.js';
 import {
   docId as toDocId,
   docType as toDocType,
@@ -68,7 +69,8 @@ export async function getDocument(
     try {
       const raw = await readFile(absPath, 'utf-8');
       result.body = extractBody(raw);
-    } catch {
+    } catch (e) {
+      logger.degraded('reads', 'getDocument.cold', `Failed to read file for cold read: ${absPath}`, { error: e instanceof Error ? e.message : String(e) });
       result.body = '';
     }
   }

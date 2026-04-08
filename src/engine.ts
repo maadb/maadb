@@ -3,7 +3,7 @@
 // All code lives in src/engine/*.ts — this file is a passthrough.
 // ============================================================================
 
-export { MaadEngine } from './engine/index.js';
+export { MaadEngine, type HealthReport } from './engine/index.js';
 
 export type {
   IndexResult,

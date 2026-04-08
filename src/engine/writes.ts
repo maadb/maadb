@@ -3,7 +3,7 @@
 // ============================================================================
 
 import { existsSync, mkdirSync } from 'node:fs';
-import { readFile, writeFile, rename, unlink } from 'node:fs/promises';
+import { readFile, rename, unlink } from 'node:fs/promises';
 import path from 'node:path';
 
 import { ok, err, singleErr, maadError, type Result } from '../errors.js';
@@ -22,6 +22,7 @@ import { gitCommit } from './context.js';
 import type { CreateResult, UpdateResult, DeleteResult } from './types.js';
 import { indexFile } from './indexing.js';
 import { generateDocId, readFrontmatter } from './helpers.js';
+import { atomicWrite } from './journal.js';
 
 export async function createDocument(
   ctx: EngineContext,
@@ -61,16 +62,22 @@ export async function createDocument(
   if (!existsSync(dirPath)) mkdirSync(dirPath, { recursive: true });
 
   const fp = path.join(dirPath, `${id}.md`);
-  await writeFile(fp, markdown, 'utf-8');
+
+  // Durable write: journal → atomic write → index → git → complete
+  const journalId = ctx.journal.begin('create', id, fp);
+
+  await atomicWrite(fp, markdown);
+  ctx.journal.advance(journalId, 'file_written');
 
   const indexResult = await indexFile(ctx, toFilePath(fp));
   if (!indexResult.ok) {
-    console.warn(`MAAD: File written to ${fp} but indexing failed. Run 'maad reindex' to recover.`);
+    ctx.journal.advance(journalId, 'file_written'); // stays at file_written
     return err(indexResult.errors.map(e => ({
       ...e,
-      details: { ...e.details, fileWritten: true, recoveryHint: 'Run maad reindex to recover' },
+      details: { ...e.details, fileWritten: true, indexed: false, recoveryHint: 'Run maad reindex to recover' },
     })));
   }
+  ctx.journal.advance(journalId, 'indexed');
 
   await gitCommit(ctx, {
     action: 'create',
@@ -80,6 +87,8 @@ export async function createDocument(
     summary: String(fields['name'] ?? fields['title'] ?? id),
     files: [fp],
   });
+  ctx.journal.advance(journalId, 'committed');
+  ctx.journal.complete(journalId);
 
   return ok({
     docId: toDocId(id),
@@ -145,16 +154,21 @@ export async function updateDocument(
   }
 
   const markdown = generateDocument(updatedFm, schema, currentBody.trim() || undefined);
-  await writeFile(absPath, markdown, 'utf-8');
+
+  // Durable write: journal → atomic write → index → git → complete
+  const journalId = ctx.journal.begin('update', id as string, absPath);
+
+  await atomicWrite(absPath, markdown);
+  ctx.journal.advance(journalId, 'file_written');
 
   const indexResult = await indexFile(ctx, toFilePath(absPath));
   if (!indexResult.ok) {
-    console.warn(`MAAD: File updated at ${absPath} but reindexing failed. Run 'maad reindex' to recover.`);
     return err(indexResult.errors.map(e => ({
       ...e,
-      details: { ...e.details, fileWritten: true, recoveryHint: 'Run maad reindex to recover' },
+      details: { ...e.details, fileWritten: true, indexed: false, recoveryHint: 'Run maad reindex to recover' },
     })));
   }
+  ctx.journal.advance(journalId, 'indexed');
 
   const detail = changedFields.length > 0
     ? `fields:${changedFields.join(',')}`
@@ -170,6 +184,8 @@ export async function updateDocument(
     summary: summaryStr,
     files: [absPath],
   });
+  ctx.journal.advance(journalId, 'committed');
+  ctx.journal.complete(journalId);
 
   const newDoc = ctx.backend.getDocument(id);
 
@@ -186,6 +202,7 @@ export async function deleteDocument(ctx: EngineContext, id: DocId, mode: 'soft'
   if (!doc) return singleErr('FILE_NOT_FOUND', `Document "${id as string}" not found`);
 
   const absPath = path.join(ctx.projectRoot, doc.filePath as string);
+  const journalId = ctx.journal.begin('delete', id as string, absPath);
 
   if (mode === 'hard') {
     try {
@@ -233,6 +250,9 @@ export async function deleteDocument(ctx: EngineContext, id: DocId, mode: 'soft'
       files: [absPath, deletedPath],
     });
   }
+
+  ctx.journal.advance(journalId, 'committed');
+  ctx.journal.complete(journalId);
 
   return ok({
     docId: id,

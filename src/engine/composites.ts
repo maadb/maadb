@@ -8,6 +8,7 @@ import {
   docId as toDocId,
   type DocId,
 } from '../types.js';
+import { logger } from './logger.js';
 import type { EngineContext } from './context.js';
 import type { GetFullResult } from './types.js';
 import { readFrontmatter } from './helpers.js';
@@ -81,8 +82,8 @@ export async function getDocumentFull(ctx: EngineContext, id: DocId): Promise<Re
             };
           }
         }
-      } catch {
-        // Git failure is non-fatal
+      } catch (e) {
+        logger.bestEffort('composites', 'getDocumentFull.latestNote', `Git history lookup failed for ${inc.docId}`, { error: e instanceof Error ? e.message : String(e) });
       }
     }
   }

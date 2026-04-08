@@ -74,17 +74,21 @@ async function main(): Promise<void> {
 }
 
 async function cmdServe(): Promise<void> {
-  // Parse --role from args
   let role: string | undefined;
+  let dryRun = false;
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--role' && args[i + 1]) {
       role = args[i + 1];
+    }
+    if (args[i] === '--dry-run') {
+      dryRun = true;
     }
   }
 
   await startServer({
     projectRoot: path.resolve(projectRoot),
     role,
+    dryRun,
   });
 }
 

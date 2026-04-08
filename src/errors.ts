@@ -25,7 +25,9 @@ export type ErrorCode =
   | 'UNKNOWN_TYPE'
   | 'INVALID_DOC_ID'
   | 'WRITE_ERROR'
-  | 'DELETE_ERROR';
+  | 'DELETE_ERROR'
+  | 'READ_ONLY'
+  | 'PATH_OUTSIDE_PROJECT';
 
 export interface MaadError {
   code: ErrorCode;

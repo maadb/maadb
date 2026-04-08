@@ -7,7 +7,8 @@ import path from 'node:path';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { MaadEngine } from '../../engine.js';
 import { scanFile, scanDirectory } from '../../scanner.js';
-import { successResponse } from '../response.js';
+import { successResponse, errorResponse } from '../response.js';
+import { isContainedIn } from '../../engine/pathguard.js';
 
 export function register(server: McpServer, engine: MaadEngine, projectRoot: string): void {
   server.registerTool('maad.scan', {
@@ -17,8 +18,8 @@ export function register(server: McpServer, engine: MaadEngine, projectRoot: str
     }),
   }, async (args) => {
     const absTarget = path.resolve(projectRoot, args.path);
-    if (!absTarget.startsWith(path.resolve(projectRoot))) {
-      return successResponse({ ok: false, errors: [{ code: 'PATH_OUTSIDE_PROJECT', message: 'Scan path must be within the project root' }] });
+    if (!isContainedIn(absTarget, projectRoot)) {
+      return errorResponse([{ code: 'PATH_OUTSIDE_PROJECT', message: `Scan path must be within the project root: ${args.path}` } as any]);
     }
 
     const { statSync } = await import('node:fs');
@@ -26,7 +27,7 @@ export function register(server: McpServer, engine: MaadEngine, projectRoot: str
     try {
       stat = statSync(absTarget);
     } catch {
-      return successResponse({ ok: false, errors: [{ code: 'PATH_NOT_FOUND', message: `Not found: ${args.path}` }] });
+      return errorResponse([{ code: 'PATH_NOT_FOUND', message: `Not found: ${args.path}` } as any]);
     }
 
     if (stat.isFile()) {

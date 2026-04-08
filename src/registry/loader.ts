@@ -8,6 +8,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import matter from 'gray-matter';
 import { ok, err, singleErr, maadError, type Result } from '../errors.js';
+import { isContainedIn } from '../engine/pathguard.js';
 import {
   docType,
   schemaRef,
@@ -86,6 +87,10 @@ export async function loadRegistry(projectRoot: string): Promise<Result<Registry
     }
 
     const resolvedPath = path.join(projectRoot, typePath);
+    if (!isContainedIn(resolvedPath, projectRoot)) {
+      errors.push(maadError('REGISTRY_INVALID', `Type "${name}" path escapes project root: ${typePath}`));
+      continue;
+    }
     if (!existsSync(resolvedPath)) {
       errors.push(maadError('REGISTRY_INVALID', `Type "${name}" path does not exist: ${typePath}`));
     }
@@ -120,7 +125,9 @@ export async function loadRegistry(projectRoot: string): Promise<Result<Registry
     const template = typeof typeDef['template'] === 'string' ? typeDef['template'] : null;
     if (template !== null) {
       const templatePath = path.join(projectRoot, template);
-      if (!existsSync(templatePath)) {
+      if (!isContainedIn(templatePath, projectRoot)) {
+        errors.push(maadError('REGISTRY_INVALID', `Type "${name}" template escapes project root: ${template}`));
+      } else if (!existsSync(templatePath)) {
         errors.push(maadError('FILE_NOT_FOUND', `Type "${name}" references template "${template}" but file not found`));
       }
     }

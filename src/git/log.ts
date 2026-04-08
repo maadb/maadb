@@ -5,6 +5,7 @@
 
 import type { SimpleGit } from 'simple-git';
 import { parseCommitMessage } from './commit.js';
+import { logger } from '../engine/logger.js';
 import {
   docId as toDocId,
   docType as toDocType,
@@ -30,7 +31,8 @@ export async function getHistory(
   let logOutput: string;
   try {
     logOutput = await git.raw(['log', ...args]);
-  } catch {
+  } catch (e) {
+    logger.bestEffort('git', 'history', `Git log failed for ${filePath}: ${e instanceof Error ? e.message : String(e)}`);
     return [];
   }
 
@@ -76,7 +78,8 @@ export async function getAudit(
   let logOutput: string;
   try {
     logOutput = await git.raw(['log', ...args]);
-  } catch {
+  } catch (e) {
+    logger.bestEffort('git', 'audit', `Git log failed: ${e instanceof Error ? e.message : String(e)}`);
     return [];
   }
 

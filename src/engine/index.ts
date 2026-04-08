@@ -6,7 +6,7 @@
 import { existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 
-import { ok, type Result } from '../errors.js';
+import { ok, singleErr, type Result } from '../errors.js';
 import type {
   DocId,
   DocType,
@@ -22,6 +22,7 @@ import { SqliteBackend } from '../backend/index.js';
 import type { MaadBackend } from '../backend/index.js';
 import { GitLayer } from '../git/index.js';
 import type { EngineContext } from './context.js';
+import { OperationJournal } from './journal.js';
 
 // Domain modules
 import * as indexing from './indexing.js';
@@ -48,16 +49,32 @@ export type {
   ValidationReport,
 } from './types.js';
 
+export interface HealthReport {
+  projectRoot: string;
+  initialized: boolean;
+  readOnly: boolean;
+  gitAvailable: boolean;
+  indexExists: boolean;
+  lastIndexedAt: string | null;
+  totalDocuments: number;
+  registeredTypes: number;
+  recoveryActions: string[];
+}
+
 export class MaadEngine {
   private projectRoot: string = '';
   private registry!: Registry;
   private schemaStore!: SchemaStore;
   private backend!: MaadBackend;
   private gitLayer: GitLayer | null = null;
+  private journal!: OperationJournal;
   private initialized = false;
+  private _readOnly = false;
+  private startupRecovery: string[] = [];
 
-  async init(projectRoot: string): Promise<Result<void>> {
+  async init(projectRoot: string, opts?: { readOnly?: boolean }): Promise<Result<void>> {
     this.projectRoot = path.resolve(projectRoot);
+    this._readOnly = opts?.readOnly ?? false;
 
     const regResult = await loadRegistry(this.projectRoot);
     if (!regResult.ok) return regResult;
@@ -68,11 +85,21 @@ export class MaadEngine {
     this.schemaStore = schemaResult.value;
 
     const backendDir = path.join(this.projectRoot, '_backend');
-    if (!existsSync(backendDir)) mkdirSync(backendDir, { recursive: true });
+    if (!existsSync(backendDir)) {
+      if (this._readOnly) {
+        // In read-only mode, don't create _backend — just fail gracefully
+        return singleErr('READ_ONLY', 'Backend directory does not exist and engine is in read-only mode');
+      }
+      mkdirSync(backendDir, { recursive: true });
+    }
 
     const dbPath = path.join(backendDir, 'maad.db');
     this.backend = new SqliteBackend(dbPath);
     this.backend.init();
+
+    // Operation journal — tracks pending writes for crash recovery
+    this.journal = new OperationJournal(backendDir);
+    this.startupRecovery = this.journal.reconcile();
 
     this.gitLayer = new GitLayer(this.projectRoot);
     if (await this.gitLayer.isRepo()) {
@@ -83,6 +110,30 @@ export class MaadEngine {
 
     this.initialized = true;
     return ok(undefined);
+  }
+
+  isReadOnly(): boolean {
+    return this._readOnly;
+  }
+
+  health(): HealthReport {
+    this.assertInit();
+    const stats = this.backend.getStats();
+    return {
+      projectRoot: this.projectRoot,
+      initialized: this.initialized,
+      readOnly: this._readOnly,
+      gitAvailable: this.gitLayer !== null,
+      indexExists: stats.totalDocuments > 0,
+      lastIndexedAt: stats.lastIndexedAt,
+      totalDocuments: stats.totalDocuments,
+      registeredTypes: this.registry.types.size,
+      recoveryActions: this.startupRecovery,
+    };
+  }
+
+  getStartupRecovery(): string[] {
+    return this.startupRecovery;
   }
 
   close(): void {
@@ -97,6 +148,7 @@ export class MaadEngine {
       schemaStore: this.schemaStore,
       backend: this.backend,
       gitLayer: this.gitLayer,
+      journal: this.journal,
     };
   }
 
@@ -124,10 +176,19 @@ export class MaadEngine {
   // --- Composites (Tier 2, provisional) ---
   async getDocumentFull(id: DocId) { return composites.getDocumentFull(this.ctx(), id); }
 
-  // --- Writes ---
-  async createDocument(dt: DocType, fields: Record<string, unknown>, body?: string, customDocId?: string) { return writes.createDocument(this.ctx(), dt, fields, body, customDocId); }
-  async updateDocument(id: DocId, fields?: Record<string, unknown>, body?: string, appendBody?: string, expectedVersion?: number) { return writes.updateDocument(this.ctx(), id, fields, body, appendBody, expectedVersion); }
-  async deleteDocument(id: DocId, mode: 'soft' | 'hard') { return writes.deleteDocument(this.ctx(), id, mode); }
+  // --- Writes (read-only guarded) ---
+  async createDocument(dt: DocType, fields: Record<string, unknown>, body?: string, customDocId?: string) {
+    if (this._readOnly) return singleErr('READ_ONLY', 'Engine is in read-only mode');
+    return writes.createDocument(this.ctx(), dt, fields, body, customDocId);
+  }
+  async updateDocument(id: DocId, fields?: Record<string, unknown>, body?: string, appendBody?: string, expectedVersion?: number) {
+    if (this._readOnly) return singleErr('READ_ONLY', 'Engine is in read-only mode');
+    return writes.updateDocument(this.ctx(), id, fields, body, appendBody, expectedVersion);
+  }
+  async deleteDocument(id: DocId, mode: 'soft' | 'hard') {
+    if (this._readOnly) return singleErr('READ_ONLY', 'Engine is in read-only mode');
+    return writes.deleteDocument(this.ctx(), id, mode);
+  }
 
   // --- Maintenance ---
   async validate(docId?: DocId) { return maintenance.validate(this.ctx(), docId); }

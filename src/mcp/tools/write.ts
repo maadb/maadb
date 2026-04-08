@@ -7,6 +7,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { MaadEngine } from '../../engine.js';
 import { docId, docType } from '../../types.js';
 import { resultToResponse } from '../response.js';
+import { isDryRun, dryRunResponse, auditToolCall } from '../guardrails.js';
 
 export function register(server: McpServer, engine: MaadEngine): void {
   server.registerTool('maad.create', {
@@ -18,6 +19,8 @@ export function register(server: McpServer, engine: MaadEngine): void {
       docId: z.string().optional().describe('Custom doc_id (auto-generated if omitted)'),
     }),
   }, async (args) => {
+    auditToolCall('maad.create', args);
+    if (isDryRun()) return dryRunResponse('maad.create', args);
     const result = await engine.createDocument(
       docType(args.docType),
       args.fields as Record<string, unknown>,
@@ -37,6 +40,8 @@ export function register(server: McpServer, engine: MaadEngine): void {
       expectedVersion: z.number().optional().describe('Version from prior get — rejects if document has changed'),
     }),
   }, async (args) => {
+    auditToolCall('maad.update', args);
+    if (isDryRun()) return dryRunResponse('maad.update', args);
     const result = await engine.updateDocument(
       docId(args.docId),
       args.fields as Record<string, unknown> | undefined ?? undefined,

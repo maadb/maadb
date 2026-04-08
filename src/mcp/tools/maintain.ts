@@ -7,6 +7,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { MaadEngine } from '../../engine.js';
 import { docId } from '../../types.js';
 import { resultToResponse } from '../response.js';
+import { isDryRun, dryRunResponse, auditToolCall } from '../guardrails.js';
 
 export function register(server: McpServer, engine: MaadEngine): void {
   server.registerTool('maad.delete', {
@@ -16,6 +17,8 @@ export function register(server: McpServer, engine: MaadEngine): void {
       mode: z.enum(['soft', 'hard']).default('soft').describe('soft=rename, hard=remove file'),
     }),
   }, async (args) => {
+    auditToolCall('maad.delete', args);
+    if (isDryRun()) return dryRunResponse('maad.delete', args);
     return resultToResponse(await engine.deleteDocument(docId(args.docId), args.mode));
   });
 
