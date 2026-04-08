@@ -58,6 +58,26 @@ export interface SearchResult {
   results: ObjectMatch[];
 }
 
+export interface AggregateQuery {
+  docType?: DocType;
+  groupBy: string;
+  metric?: {
+    field: string;
+    op: 'count' | 'sum' | 'avg' | 'min' | 'max';
+  };
+  filters?: Record<string, import('../types.js').FilterCondition>;
+  limit?: number;
+}
+
+export interface AggregateResult {
+  groups: Array<{
+    value: string;
+    count: number;
+    metric?: number | null;
+  }>;
+  total: number;
+}
+
 export interface RelatedResult {
   docId: DocId;
   outgoing: Array<{ docId: DocId; docType: DocType; field: string }>;
@@ -110,6 +130,7 @@ export interface GetFullResult {
 
 export interface SchemaInfoResult {
   type: string;
+  idPrefix: string;
   schemaRef: string;
   fields: Array<{
     name: string;
@@ -118,6 +139,7 @@ export interface SchemaInfoResult {
     indexed: boolean;
     values: string[] | null;
     target: string | null;
+    format: string | null;
     default: unknown;
   }>;
   templateHeadings: Array<{ level: number; text: string }> | null;

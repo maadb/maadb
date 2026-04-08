@@ -1,9 +1,12 @@
 ---
 enabled: true
-current: 0.2.4
+current: 0.2.5
 ---
 
 # Version History
+
+## 0.2.5 — 2026-04-08
+Read path improvements from LLM evaluation feedback: query projection (return frontmatter fields in results), maad.aggregate tool (count/sum/avg/min/max grouped by field), search `query` alias for `contains` (fixes silent param drop), schema output includes idPrefix and format hints. Improved maad.query filter documentation with operator examples. 18 admin tools, 14 writer, 11 reader. 247 tests passing.
 
 ## 0.2.4 — 2026-04-07
 MCP server stability: auto-create missing type directories, maad.reload (re-init engine mid-session), maad.health (engine status). CLAUDE.md generated on init with MCP-first agent instructions. MAAD.md updated with MCP-first language. Skill files: _skills/schema-guide.md and _skills/import-guide.md generated on init. 17 admin tools, 13 writer, 10 reader. 236 tests passing.
@@ -40,9 +43,10 @@ Initial engine build. Parser, registry, schema, extractor (11 primitives), SQLit
 
 ## Planned
 
-- **0.3.0** — Real LLM evaluation: MCP end-to-end testing, maadb-demo seed data, benchmark execution (MAAD vs Direct)
-- **0.4.0** — Object attributes: user-defined tags on extracted objects, stored as YAML, indexed on reindex
-- **0.5.0** — Reverse import tooling: CSV/JSON/SQL converters into markdown records
-- **0.6.0** — Query enhancements: FTS5, compound filters, aggregations
-- **0.7.0** — Connector gates: OAuth refresh, scope minimization, cursor persistence (required before any external API)
+- **0.3.0** — LLM evaluation + bulk ops: maadb-demo seed data, benchmark execution (MAAD vs Direct), bulk create/update
+- **0.4.0** — Provenance + admin tooling: `--prov off|on|detail` on serve, source metadata in tool responses
+- **0.5.0** — Query power: FTS5, cross-ref joins, fuzzy entity matching with confidence scores
+- **0.6.0** — Object attributes: user-defined tags on extracted objects, stored as YAML, indexed on reindex
+- **0.7.0** — Multi-project MCP: single server routing to multiple MAAD projects, cross-project queries
+- **0.8.0** — npm package prep: API surface decisions, exports, bin config, peer deps
 - **1.0.0** — Stable release: API locked, npm published, documentation complete

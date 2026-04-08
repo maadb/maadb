@@ -27,6 +27,7 @@ import {
   type BackendStats,
   type FilterCondition,
 } from '../../types.js';
+import type { AggregateQuery, AggregateResult } from '../../engine/types.js';
 
 export class SqliteBackend implements MaadBackend {
   private db: DatabaseType;
@@ -236,6 +237,28 @@ export class SqliteBackend implements MaadBackend {
     return row.cnt;
   }
 
+  getFieldValues(docIds: DocId[], fieldNames: string[]): Map<string, Record<string, string>> {
+    if (docIds.length === 0 || fieldNames.length === 0) return new Map();
+
+    const idPlaceholders = docIds.map(() => '?').join(', ');
+    const namePlaceholders = fieldNames.map(() => '?').join(', ');
+    const sql = `SELECT doc_id, field_name, field_value FROM field_index
+      WHERE doc_id IN (${idPlaceholders}) AND field_name IN (${namePlaceholders})`;
+
+    const rows = this.db.prepare(sql).all(
+      ...docIds.map(id => id as string),
+      ...fieldNames,
+    ) as Array<{ doc_id: string; field_name: string; field_value: string }>;
+
+    const result = new Map<string, Record<string, string>>();
+    for (const row of rows) {
+      let fields = result.get(row.doc_id);
+      if (!fields) { fields = {}; result.set(row.doc_id, fields); }
+      fields[row.field_name] = row.field_value;
+    }
+    return result;
+  }
+
   private buildObjQuery(query: ObjectQuery): { where: string; params: unknown[] } {
     const conditions: string[] = [];
     const params: unknown[] = [];
@@ -368,6 +391,77 @@ export class SqliteBackend implements MaadBackend {
     ).all(dt as string, limit) as Array<{ doc_id: string }>;
 
     return rows.map(r => toDocId(r.doc_id));
+  }
+
+  aggregate(query: AggregateQuery): AggregateResult {
+    // Build a set of doc_ids scoped by docType + filters
+    const scopeConditions: string[] = ['d.deleted = 0'];
+    const scopeParams: unknown[] = [];
+
+    if (query.docType) {
+      scopeConditions.push('d.doc_type = ?');
+      scopeParams.push(query.docType as string);
+    }
+
+    if (query.filters) {
+      for (const [field, condition] of Object.entries(query.filters)) {
+        const { sql, values } = buildFilterSQL(field, condition);
+        scopeConditions.push(`d.doc_id IN (SELECT doc_id FROM field_index WHERE ${sql})`);
+        scopeParams.push(...values);
+      }
+    }
+
+    const scopeWhere = scopeConditions.join(' AND ');
+    const limit = query.limit ?? 50;
+
+    if (!query.metric) {
+      // Count documents per group value
+      const sql = `
+        SELECT fi.field_value as grp, COUNT(DISTINCT fi.doc_id) as cnt
+        FROM field_index fi
+        JOIN documents d ON d.doc_id = fi.doc_id
+        WHERE fi.field_name = ? AND ${scopeWhere}
+        GROUP BY fi.field_value
+        ORDER BY cnt DESC
+        LIMIT ?`;
+
+      const rows = this.db.prepare(sql).all(query.groupBy, ...scopeParams, limit) as Array<{ grp: string; cnt: number }>;
+
+      return {
+        groups: rows.map(r => ({ value: r.grp ?? '(null)', count: r.cnt })),
+        total: rows.reduce((sum, r) => sum + r.cnt, 0),
+      };
+    }
+
+    // Metric aggregation: group by one field, aggregate another
+    const metricOp = query.metric.op;
+    const metricCol = metricOp === 'count' ? '1' : 'mfi.numeric_value';
+    const aggFn = metricOp === 'count' ? 'COUNT(*)' :
+      metricOp === 'sum' ? `SUM(${metricCol})` :
+      metricOp === 'avg' ? `AVG(${metricCol})` :
+      metricOp === 'min' ? `MIN(${metricCol})` :
+      `MAX(${metricCol})`;
+
+    const sql = `
+      SELECT gfi.field_value as grp, COUNT(DISTINCT gfi.doc_id) as cnt, ${aggFn} as metric
+      FROM field_index gfi
+      JOIN documents d ON d.doc_id = gfi.doc_id
+      ${metricOp !== 'count' ? 'JOIN field_index mfi ON mfi.doc_id = gfi.doc_id AND mfi.field_name = ?' : ''}
+      WHERE gfi.field_name = ? AND ${scopeWhere}
+      GROUP BY gfi.field_value
+      ORDER BY metric DESC
+      LIMIT ?`;
+
+    const params = metricOp !== 'count'
+      ? [query.metric.field, query.groupBy, ...scopeParams, limit]
+      : [query.groupBy, ...scopeParams, limit];
+
+    const rows = this.db.prepare(sql).all(...params) as Array<{ grp: string; cnt: number; metric: number | null }>;
+
+    return {
+      groups: rows.map(r => ({ value: r.grp ?? '(null)', count: r.cnt, metric: r.metric })),
+      total: rows.reduce((sum, r) => sum + r.cnt, 0),
+    };
   }
 
   // --- Maintenance ---------------------------------------------------------

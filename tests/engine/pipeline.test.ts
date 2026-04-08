@@ -108,6 +108,72 @@ describe('findDocuments', () => {
     if (!result.ok) return;
     expect(result.value.results).toHaveLength(0);
   });
+
+  it('projects requested fields into results', () => {
+    const result = engine.findDocuments({
+      docType: docType('client'),
+      fields: ['name', 'status'],
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.results.length).toBeGreaterThan(0);
+    const first = result.value.results[0];
+    expect(first.fields).toBeDefined();
+    expect(first.fields!['name']).toBeDefined();
+    expect(first.fields!['status']).toBeDefined();
+  });
+
+  it('returns empty fields object when no matching field data', () => {
+    const result = engine.findDocuments({
+      docType: docType('client'),
+      fields: ['nonexistent_field'],
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.results.length).toBeGreaterThan(0);
+    expect(result.value.results[0].fields).toEqual({});
+  });
+
+  it('supports date range queries', () => {
+    const result = engine.findDocuments({
+      docType: docType('case'),
+      filters: { opened_at: { op: 'gte', value: '2026-01-01' } },
+      fields: ['title', 'opened_at'],
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.results.length).toBeGreaterThan(0);
+    expect(result.value.results[0].fields!['opened_at']).toBe('2026-04-01');
+  });
+
+  it('excludes records outside date range', () => {
+    const result = engine.findDocuments({
+      docType: docType('case'),
+      filters: { opened_at: { op: 'lt', value: '2020-01-01' } },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.results).toHaveLength(0);
+  });
+
+  it('omits fields property when no projection requested', () => {
+    const result = engine.findDocuments({ docType: docType('client') });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.results[0].fields).toBeUndefined();
+  });
+
+  it('combines filters with projection', () => {
+    const result = engine.findDocuments({
+      docType: docType('case'),
+      filters: { status: { op: 'eq', value: 'open' } },
+      fields: ['title', 'status', 'client'],
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.results).toHaveLength(1);
+    expect(result.value.results[0].fields!['status']).toBe('open');
+  });
 });
 
 describe('searchObjects', () => {
@@ -208,6 +274,44 @@ describe('summary', () => {
   });
 });
 
+describe('aggregate', () => {
+  it('counts documents grouped by field', () => {
+    const result = engine.aggregate({ groupBy: 'status', docType: docType('case') });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.groups.length).toBeGreaterThan(0);
+    const openGroup = result.value.groups.find(g => g.value === 'open');
+    expect(openGroup).toBeDefined();
+    expect(openGroup!.count).toBeGreaterThanOrEqual(1);
+  });
+
+  it('counts clients grouped by status', () => {
+    const result = engine.aggregate({ groupBy: 'status', docType: docType('client') });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.groups.length).toBeGreaterThan(0);
+  });
+
+  it('returns empty groups for no matches', () => {
+    const result = engine.aggregate({
+      groupBy: 'status',
+      docType: docType('case'),
+      filters: { status: { op: 'eq', value: 'nonexistent' } },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.groups).toHaveLength(0);
+  });
+
+  it('aggregates without docType scope', () => {
+    const result = engine.aggregate({ groupBy: 'status' });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // Should include statuses from both cases and clients
+    expect(result.value.groups.length).toBeGreaterThan(0);
+  });
+});
+
 describe('getDocumentFull', () => {
   it('returns resolved record with refs, objects, and related', async () => {
     const result = await engine.getDocumentFull(docId('cas-2026-001'));
@@ -266,6 +370,19 @@ describe('schemaInfo', () => {
     expect(contactField).toBeDefined();
     expect(contactField!.type).toContain('ref');
     expect(contactField!.target).toBe('contact');
+
+    // idPrefix from registry
+    expect(info.idPrefix).toBe('cli');
+  });
+
+  it('includes format hints for date fields', () => {
+    const result = engine.schemaInfo(docType('case'));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const dateField = result.value.fields.find(f => f.name === 'opened_at');
+    expect(dateField).toBeDefined();
+    expect(dateField!.format).toBe('YYYY-MM-DD');
   });
 
   it('returns error for unknown type', () => {

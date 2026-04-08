@@ -82,7 +82,7 @@ export async function cmdQuery(ctx: CliContext): Promise<void> {
 export async function cmdSearch(ctx: CliContext): Promise<void> {
   const primitive = ctx.args[1];
   if (!primitive) {
-    console.error('Usage: maad search <primitive> [--subtype type] [--value val] [--contains text] [--doc doc_id]');
+    console.error('Usage: maad search <primitive> [--subtype type] [--query text] [--value val] [--contains text] [--doc doc_id]');
     process.exit(1);
   }
 
@@ -92,7 +92,7 @@ export async function cmdSearch(ctx: CliContext): Promise<void> {
   for (let i = 2; i < ctx.args.length; i++) {
     if (ctx.args[i] === '--subtype' && ctx.args[i + 1]) { query['subtype'] = ctx.args[++i]; }
     if (ctx.args[i] === '--value' && ctx.args[i + 1]) { query['value'] = ctx.args[++i]; }
-    if (ctx.args[i] === '--contains' && ctx.args[i + 1]) { query['contains'] = ctx.args[++i]; }
+    if ((ctx.args[i] === '--contains' || ctx.args[i] === '--query') && ctx.args[i + 1]) { query['contains'] = ctx.args[++i]; }
     if (ctx.args[i] === '--doc' && ctx.args[i + 1]) { query['docId'] = ctx.args[++i]; }
   }
 

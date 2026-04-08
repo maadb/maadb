@@ -178,6 +178,7 @@ export class MaadEngine {
   summary() { return reads.summary(this.ctx()); }
   getSchema(dt: DocType) { return reads.getSchema(this.ctx(), dt); }
   schemaInfo(dt: DocType) { return reads.schemaInfo(this.ctx(), dt); }
+  aggregate(query: import('./types.js').AggregateQuery) { return reads.aggregate(this.ctx(), query); }
 
   // --- Composites (Tier 2, provisional) ---
   async getDocumentFull(id: DocId) { return composites.getDocumentFull(this.ctx(), id); }

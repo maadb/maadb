@@ -41,6 +41,12 @@ export interface MaadBackend {
   getRelationships(docId: DocId, direction: 'outgoing' | 'incoming' | 'both'): Relationship[];
   getBlocks(docId: DocId): ParsedBlock[];
 
+  // Projection
+  getFieldValues(docIds: DocId[], fieldNames: string[]): Map<string, Record<string, string>>;
+
+  // Aggregation queries
+  aggregate(query: import('../engine/types.js').AggregateQuery): import('../engine/types.js').AggregateResult;
+
   // Aggregation
   getSubtypeInventory(limit: number): Array<{ primitive: string; subtype: string; count: number; topValues: string[] }>;
   getSampleDocIds(docType: DocType, limit: number): DocId[];

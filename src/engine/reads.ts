@@ -27,6 +27,8 @@ import type {
   DescribeResult,
   SummaryResult,
   SchemaInfoResult,
+  AggregateQuery,
+  AggregateResult,
 } from './types.js';
 import { readFrontmatter, readBlockContent } from './helpers.js';
 
@@ -81,6 +83,15 @@ export async function getDocument(
 export function findDocuments(ctx: EngineContext, query: DocumentQuery): Result<FindResult> {
   const results = ctx.backend.findDocuments(query);
   const total = ctx.backend.countDocuments(query);
+
+  if (query.fields && query.fields.length > 0 && results.length > 0) {
+    const docIds = results.map(r => r.docId);
+    const fieldValues = ctx.backend.getFieldValues(docIds, query.fields);
+    for (const match of results) {
+      match.fields = fieldValues.get(match.docId as string) ?? {};
+    }
+  }
+
   return ok({ total, results });
 }
 
@@ -191,6 +202,8 @@ export function schemaInfo(ctx: EngineContext, dt: DocType): Result<SchemaInfoRe
       if (field.target) typeStr += ` -> ${field.target as string}`;
     }
 
+    const format = field.format ?? (field.type === 'amount' ? '<number> <currency> (e.g. 1250.00 USD)' : null);
+
     fields.push({
       name,
       type: typeStr,
@@ -198,6 +211,7 @@ export function schemaInfo(ctx: EngineContext, dt: DocType): Result<SchemaInfoRe
       indexed: field.index,
       values: field.values,
       target: field.target as string | null,
+      format,
       default: field.defaultValue,
     });
   }
@@ -208,8 +222,13 @@ export function schemaInfo(ctx: EngineContext, dt: DocType): Result<SchemaInfoRe
 
   return ok({
     type: dt as string,
+    idPrefix: regType.idPrefix as string,
     schemaRef: regType.schemaRef as string,
     fields,
     templateHeadings,
   });
+}
+
+export function aggregate(ctx: EngineContext, query: AggregateQuery): Result<AggregateResult> {
+  return ok(ctx.backend.aggregate(query));
 }

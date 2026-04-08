@@ -336,6 +336,7 @@ export type FilterCondition =
 export interface DocumentQuery {
   docType?: DocType;
   filters?: Record<string, FilterCondition>;
+  fields?: string[];
   limit?: number;
   offset?: number;
 }
@@ -355,6 +356,7 @@ export interface DocumentMatch {
   docId: DocId;
   docType: DocType;
   filePath: FilePath;
+  fields?: Record<string, string>;
 }
 
 export interface ObjectMatch {
