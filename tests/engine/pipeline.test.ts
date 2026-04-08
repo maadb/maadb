@@ -134,6 +134,30 @@ describe('findDocuments', () => {
     expect(result.value.results[0].fields).toEqual({});
   });
 
+  it('filters by ref field with full syntax', () => {
+    const result = engine.findDocuments({
+      docType: docType('case'),
+      filters: { client: { op: 'eq', value: 'cli-acme' } },
+      fields: ['title'],
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.results.length).toBeGreaterThan(0);
+    expect(result.value.results[0].fields!['title']).toBe('Contract Review Dispute');
+  });
+
+  it('filters by ref field with shorthand string', () => {
+    const result = engine.findDocuments({
+      docType: docType('case'),
+      filters: { client: 'cli-acme' as any },
+      fields: ['title'],
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.results.length).toBeGreaterThan(0);
+    expect(result.value.results[0].fields!['title']).toBe('Contract Review Dispute');
+  });
+
   it('supports date range queries', () => {
     const result = engine.findDocuments({
       docType: docType('case'),
@@ -355,6 +379,31 @@ describe('aggregate', () => {
     if (!result.ok) return;
     // Should include statuses from both cases and clients
     expect(result.value.groups.length).toBeGreaterThan(0);
+  });
+
+  it('returns totalMetric when metric is specified', () => {
+    // Use a field that has numeric values — opened_at stored as date string won't have numeric_value
+    // but count metric works on any field
+    const result = engine.aggregate({
+      docType: docType('case'),
+      groupBy: 'status',
+      metric: { field: 'status', op: 'count' },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.totalMetric).toBeDefined();
+    expect(typeof result.value.totalMetric).toBe('number');
+    expect(result.value.totalMetric).toBeGreaterThan(0);
+  });
+
+  it('does not return totalMetric without metric', () => {
+    const result = engine.aggregate({
+      docType: docType('case'),
+      groupBy: 'status',
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.totalMetric).toBeUndefined();
   });
 });
 

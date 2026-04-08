@@ -458,9 +458,12 @@ export class SqliteBackend implements MaadBackend {
 
     const rows = this.db.prepare(sql).all(...params) as Array<{ grp: string; cnt: number; metric: number | null }>;
 
+    const totalMetric = rows.reduce((sum, r) => sum + (r.metric ?? 0), 0);
+
     return {
       groups: rows.map(r => ({ value: r.grp ?? '(null)', count: r.cnt, metric: r.metric })),
       total: rows.reduce((sum, r) => sum + r.cnt, 0),
+      totalMetric,
     };
   }
 
@@ -518,7 +521,17 @@ export class SqliteBackend implements MaadBackend {
 
 // --- Helpers ---------------------------------------------------------------
 
-function buildFilterSQL(field: string, condition: FilterCondition): { sql: string; values: unknown[] } {
+function normalizeFilter(condition: FilterCondition | string | unknown): FilterCondition {
+  // Shorthand: "value" → { op: 'eq', value: "value" }
+  if (typeof condition === 'string') return { op: 'eq', value: condition };
+  if (typeof condition === 'number') return { op: 'eq', value: condition };
+  if (typeof condition === 'object' && condition !== null && 'op' in condition) return condition as FilterCondition;
+  // Fallback: treat as eq with string coercion
+  return { op: 'eq', value: String(condition) };
+}
+
+function buildFilterSQL(field: string, rawCondition: FilterCondition | string | unknown): { sql: string; values: unknown[] } {
+  const condition = normalizeFilter(rawCondition);
   // For range operators, use numeric_value when the value is numeric (handles number fields correctly)
   // For dates, field_value as ISO strings already sort correctly
   const isNumericRange = (condition.op === 'gt' || condition.op === 'gte' || condition.op === 'lt' || condition.op === 'lte')

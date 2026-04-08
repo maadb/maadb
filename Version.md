@@ -1,9 +1,12 @@
 ---
 enabled: true
-current: 0.2.5
+current: 0.2.6
 ---
 
 # Version History
+
+## 0.2.6 — 2026-04-08
+Filter shorthand: ref fields (and any field) can be filtered with plain string values instead of requiring `{ op: 'eq', value: '...' }`. Aggregate totalMetric: grand total of the metric across all groups returned automatically. 264 tests passing.
 
 ## 0.2.5 — 2026-04-08
 Read path + write path improvements from LLM evaluation feedback. Query projection (return frontmatter fields in results), maad.aggregate (count/sum/avg/min/max grouped by field), maad.join (cross-ref with projected fields from both sides), search `query` alias for `contains` (fixes silent param drop), schema output includes idPrefix and format hints, range query documentation. Bulk operations: maad.bulk_create and maad.bulk_update (per-record results, single git commit). Provenance flag: `--prov off|on|detail` on serve — `_source` metadata in tool responses, provenance instructions in summary. 21 admin tools, 17 writer, 12 reader. 260 tests passing.

@@ -96,6 +96,7 @@ export interface AggregateResult {
     metric?: number | null;
   }>;
   total: number;
+  totalMetric?: number | null;
 }
 
 export interface JoinQuery {
