@@ -1,9 +1,12 @@
 ---
 enabled: true
-current: 0.2.8
+current: 0.2.9
 ---
 
 # Version History
+
+## 0.2.9 — 2026-04-09
+Summary warnings (brokenRefs, validationErrors), business-friendly validation messages with field expectations, bulk_update batched into single git commit. 266 tests passing.
 
 ## 0.2.8 — 2026-04-09
 Version tracking on reads, query sort, updated_at, list field index fix. Reads now return version and updatedAt for optimistic locking. Reindex no longer bumps version when content unchanged. List fields denormalized to one row per item in field_index (fixes broken filters). maad.query supports sortBy/sortOrder. Engine-managed updated_at timestamp on documents table with auto-migration. 266 tests passing.
