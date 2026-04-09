@@ -3,9 +3,13 @@
 // Lifecycle, config, and guardrails are extracted into separate modules.
 // ============================================================================
 
+import { createRequire } from 'node:module';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { buildConfig, type McpConfig } from './config.js';
+
+const require = createRequire(import.meta.url);
+const pkg = require('../../package.json') as { version: string };
 import { setGuardrailConfig } from './guardrails.js';
 import { setProvenanceMode } from './response.js';
 import { startupEngine, registerShutdownHooks } from './lifecycle.js';
@@ -45,7 +49,7 @@ export async function startServer(opts: ServeOptions): Promise<void> {
   // Create MCP server
   const server = new McpServer({
     name: 'maad',
-    version: '0.2.7',
+    version: pkg.version,
   });
 
   // Register tools by role tier

@@ -110,11 +110,27 @@ The MCP server connects an LLM agent to your project. Configuration depends on y
 }
 ```
 
+**OpenClaw** — register as an MCP server:
+
+```bash
+openclaw mcp set maad '{"command":"node","args":["/path/to/maad/dist/cli.js","--project","/path/to/my-project","serve","--role","admin"]}'
+```
+
 **Any MCP-compatible agent** — MAAD uses stdio transport. The command is:
 
 ```bash
 node /path/to/maad/dist/cli.js --project /path/to/project serve --role <reader|writer|admin>
 ```
+
+**Environment variables** — useful for container deployments and OpenClaw SecretRefs:
+
+| Variable | Equivalent flag | Example |
+|----------|----------------|---------|
+| `MAAD_PROJECT` | `--project` | `/data/my-project` |
+| `MAAD_ROLE` | `--role` | `admin` |
+| `MAAD_PROV` | `--prov` | `on` |
+
+Flags take precedence over env vars. Env vars take precedence over defaults.
 
 ### Step 4 — Connect and build
 
@@ -272,7 +288,7 @@ All tools return `{ ok: true, data: {...} }` or `{ ok: false, errors: [...] }`.
 
 ## Current State
 
-**v0.2.7** — MCP server live, query projection, aggregation, cross-ref joins, bulk ops, provenance flag. 266 tests passing.
+**v0.2.10** — MCP server live, query projection, aggregation, cross-ref joins, bulk ops, provenance flag, read-back verification, summary warnings, env var config. 266 tests passing.
 
 ## Roadmap
 

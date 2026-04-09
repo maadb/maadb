@@ -16,9 +16,9 @@ import { startServer } from '../mcp/server.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Parse --project flag
+// Parse --project flag (env var MAAD_PROJECT as fallback)
 const rawArgs = process.argv.slice(2);
-let projectRoot = '.';
+let projectRoot = process.env['MAAD_PROJECT'] ?? '.';
 const args: string[] = [];
 
 for (let i = 0; i < rawArgs.length; i++) {
@@ -74,9 +74,9 @@ async function main(): Promise<void> {
 }
 
 async function cmdServe(): Promise<void> {
-  let role: string | undefined;
+  let role: string | undefined = process.env['MAAD_ROLE'];
   let dryRun = false;
-  let provenance: string | undefined;
+  let provenance: string | undefined = process.env['MAAD_PROV'];
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--role' && args[i + 1]) {
       role = args[i + 1];
@@ -127,6 +127,11 @@ Options:
   --role <role>                     MCP server role (default: reader)
   --force                           Force full reindex (skip hash check)
   --help                            Show this help
+
+Environment Variables:
+  MAAD_PROJECT                      Project root (fallback for --project)
+  MAAD_ROLE                         Server role (fallback for --role)
+  MAAD_PROV                         Provenance mode (fallback for --prov)
 `);
 }
 
