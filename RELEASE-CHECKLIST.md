@@ -32,10 +32,18 @@ Run through this before every version release.
 - [ ] MAAD.md generator includes all current commands
 - [ ] No stale spec files in project root (check for MAAD-TOOLS.md etc.)
 
+## Bulk operations
+
+- [ ] `bulk_create` returns verification block with sampled IDs
+- [ ] `bulk_update` returns verification block with sampled IDs
+- [ ] Verification catches a deliberate field mismatch in test
+
 ## Deployment
 
-- [ ] `node dist/cli.js --help` shows all commands
+- [ ] `node dist/cli.js --help` shows all commands and env vars
 - [ ] MCP server starts: `maad serve --project <dir> --role reader`
+- [ ] MCP server starts with env vars: `MAAD_PROJECT=<dir> MAAD_ROLE=reader maad serve`
+- [ ] MCP server reports correct version from package.json
 - [ ] MCP tools/list returns correct count for each role
 - [ ] At least one tool call succeeds via MCP protocol
 - [ ] Git tag created: `git tag v<version>`
