@@ -57,8 +57,8 @@ MAAD is designed for LLM agents. The typical deployment is: clone the engine, cr
 ### Step 1 — Install the engine
 
 ```bash
-git clone https://github.com/patchnetluis/maad.git
-cd maad
+git clone https://github.com/Patchnet/maadb.git
+cd maadb
 npm install && npm run build
 ```
 
