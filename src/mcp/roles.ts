@@ -5,19 +5,19 @@
 export type Role = 'reader' | 'writer' | 'admin';
 
 const READER_TOOLS = [
-  'maad.scan', 'maad.summary', 'maad.describe',
-  'maad.get', 'maad.query', 'maad.search', 'maad.related', 'maad.schema', 'maad.aggregate', 'maad.join',
-  'maad.history', 'maad.audit',
+  'maad_scan', 'maad_summary', 'maad_describe',
+  'maad_get', 'maad_query', 'maad_search', 'maad_related', 'maad_schema', 'maad_aggregate', 'maad_join',
+  'maad_history', 'maad_audit',
 ] as const;
 
 const WRITER_TOOLS = [
   ...READER_TOOLS,
-  'maad.create', 'maad.update', 'maad.validate', 'maad.bulk_create', 'maad.bulk_update',
+  'maad_create', 'maad_update', 'maad_validate', 'maad_bulk_create', 'maad_bulk_update',
 ] as const;
 
 const ADMIN_TOOLS = [
   ...WRITER_TOOLS,
-  'maad.delete', 'maad.reindex', 'maad.reload', 'maad.health',
+  'maad_delete', 'maad_reindex', 'maad_reload', 'maad_health',
 ] as const;
 
 const ROLE_TOOLS: Record<Role, readonly string[]> = {

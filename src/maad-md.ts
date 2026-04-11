@@ -49,8 +49,8 @@ function generateHeader(cmd: string): string {
 A **MAAD project** — a markdown-native database. Markdown files are the records. A queryable index gives you structured access without reading full files.
 
 **This file** = stable operating instructions. Read once per session.
-**\`maad.summary\` tool** = live project snapshot. Run once per session to see what's here.
-**SCHEMA.md** = deep structural reference. Read only when \`maad.schema\` isn't enough.
+**\`maad_summary\` tool** = live project snapshot. Run once per session to see what's here.
+**SCHEMA.md** = deep structural reference. Read only when \`maad_schema\` isn't enough.
 
 ## How to access data
 
@@ -194,7 +194,7 @@ function generateRules(): string {
 - Before reporting a relationship → call \`related\` or \`join\`
 - If you cannot ground a claim from the database → say "unable to verify from records"
 
-Use \`maad.verify\` to fact-check before answering:
+Use \`maad_verify\` to fact-check before answering:
 - \`verify mode=field docId=cas-001 field=claim_amount expected="1500000.00 USD"\`
 - \`verify mode=count docType=case expectedCount=12 filters={status: "open"}\`
 

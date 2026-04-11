@@ -195,6 +195,8 @@ export function summary(ctx: EngineContext): SummaryResult {
     }
   }
 
+  const emptyProject = ctx.registry.types.size === 0 && stats.totalDocuments === 0;
+
   return {
     types,
     totalDocuments: stats.totalDocuments,
@@ -203,6 +205,9 @@ export function summary(ctx: EngineContext): SummaryResult {
     lastIndexedAt: stats.lastIndexedAt,
     subtypeInventory,
     warnings: { brokenRefs, validationErrors },
+    emptyProject,
+    bootstrapHint: emptyProject ? '_skills/architect-core.md' : null,
+    readOnly: ctx.readOnly,
   };
 }
 

@@ -1,5 +1,5 @@
 // ============================================================================
-// Discover tools — maad.scan, maad.summary, maad.describe
+// Discover tools — maad_scan, maad_summary, maad_describe
 // ============================================================================
 
 import { z } from 'zod';
@@ -11,7 +11,7 @@ import { successResponse, errorResponse, getProvenanceMode } from '../response.j
 import { isContainedIn } from '../../engine/pathguard.js';
 
 export function register(server: McpServer, engine: MaadEngine, projectRoot: string): void {
-  server.registerTool('maad.scan', {
+  server.registerTool('maad_scan', {
     description: 'Analyze raw markdown structure. Works without registry. Use for onboarding new files. Pass a file path for detailed analysis or a directory for corpus-level patterns.',
     inputSchema: z.object({
       path: z.string().describe('File or directory path to scan (relative to project root)'),
@@ -37,7 +37,7 @@ export function register(server: McpServer, engine: MaadEngine, projectRoot: str
     }
   });
 
-  server.registerTool('maad.summary', {
+  server.registerTool('maad_summary', {
     description: 'Returns the live indexed project snapshot for session bootstrapping. Use this first every session. Returns types, counts, sample IDs, and object inventory.',
     inputSchema: z.object({}),
   }, () => {
@@ -45,7 +45,7 @@ export function register(server: McpServer, engine: MaadEngine, projectRoot: str
     const provMode = getProvenanceMode();
 
     if (provMode === 'off') {
-      return successResponse(summary, 'maad.summary');
+      return successResponse(summary, 'maad_summary');
     }
 
     const provenanceInstructions = provMode === 'detail'
@@ -53,7 +53,7 @@ export function register(server: McpServer, engine: MaadEngine, projectRoot: str
           mode: 'detail',
           instructions: [
             'Tag every data value in your responses with its source:',
-            '[T:<tool_name>] = from a specific MAAD tool (e.g. [T:maad.get])',
+            '[T:<tool_name>] = from a specific MAAD tool (e.g. [T:maad_get])',
             '[R] = from memory/recall (unverified)',
             '[R*] = inferred/derived — not directly stated in any source',
             'When mixing sources in a table, add a source column.',
@@ -72,10 +72,10 @@ export function register(server: McpServer, engine: MaadEngine, projectRoot: str
           ],
         };
 
-    return successResponse({ ...summary, provenance: provenanceInstructions }, 'maad.summary');
+    return successResponse({ ...summary, provenance: provenanceInstructions }, 'maad_summary');
   });
 
-  server.registerTool('maad.describe', {
+  server.registerTool('maad_describe', {
     description: 'Returns registry types, extraction primitives, and document counts.',
     inputSchema: z.object({}),
   }, () => {

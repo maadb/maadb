@@ -169,6 +169,9 @@ export interface SummaryResult {
     brokenRefs: number;
     validationErrors: number;
   };
+  emptyProject: boolean;
+  bootstrapHint: string | null;
+  readOnly: boolean;
 }
 
 export interface GetFullResult {

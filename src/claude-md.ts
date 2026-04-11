@@ -14,11 +14,11 @@ This is a MAAD project. You have MCP tools for all data operations.
 
 ## Boot sequence
 
-1. Run \`maad.summary\` to see what's in this project
+1. Run \`maad_summary\` to see what's in this project
 2. If summary shows **zero types and zero documents** → this is an empty project. Read \`_skills/architect-core.md\` and enter Architect mode to design and deploy the database.
 3. If summary shows existing types and documents → this is a live project. Proceed with normal operations below.
-4. Use \`maad.schema <type>\` to understand record structure before writing
-5. Use \`maad.health\` if something seems wrong
+4. Use \`maad_schema <type>\` to understand record structure before writing
+5. Use \`maad_health\` if something seems wrong
 
 ## Empty project → Architect mode
 
@@ -34,21 +34,21 @@ The Architect role handles: schema design, registry creation, data import, troub
 
 ### Reading data
 
-- \`maad.summary\` — project snapshot (start here)
-- \`maad.get\` — read a record (hot/warm/cold/full)
-- \`maad.query\` — find records by type, filters, and field projection
-- \`maad.search\` — find extracted objects across all records
-- \`maad.related\` — traverse relationships between records
-- \`maad.aggregate\` — count/sum/avg/min/max grouped by a field
-- \`maad.join\` — query + follow refs + project fields from both sides in one call
+- \`maad_summary\` — project snapshot (start here)
+- \`maad_get\` — read a record (hot/warm/cold/full)
+- \`maad_query\` — find records by type, filters, and field projection
+- \`maad_search\` — find extracted objects across all records
+- \`maad_related\` — traverse relationships between records
+- \`maad_aggregate\` — count/sum/avg/min/max grouped by a field
+- \`maad_join\` — query + follow refs + project fields from both sides in one call
 
 ### Writing data
 
-- **Always** call \`maad.schema <type>\` before creating or updating records
-- \`maad.create\` — new record (engine validates against schema)
-- \`maad.update\` — modify fields or body (use expectedVersion for safe writes)
-- \`maad.bulk_create\` — create multiple records in one call (much faster for imports)
-- \`maad.bulk_update\` — update multiple records in one call
+- **Always** call \`maad_schema <type>\` before creating or updating records
+- \`maad_create\` — new record (engine validates against schema)
+- \`maad_update\` — modify fields or body (use expectedVersion for safe writes)
+- \`maad_bulk_create\` — create multiple records in one call (much faster for imports)
+- \`maad_bulk_update\` — update multiple records in one call
 - **Execute individual writes sequentially** — do not parallelize single create/update calls
 
 ### Importing raw data
@@ -58,10 +58,10 @@ When onboarding new data into this project:
 1. Read the raw files to understand the data
 2. Read \`_skills/architect-core.md\` for schema design guidance
 3. Design the registry and schemas
-4. Call \`maad.reload\` to pick up the new registry and schemas
-5. Create records using \`maad.create\` (master) or \`maad.update --append\` (transaction)
-6. Call \`maad.reindex\` after bulk creation
-7. Call \`maad.summary\` to confirm
+4. Call \`maad_reload\` to pick up the new registry and schemas
+5. Create records using \`maad_create\` (master) or \`maad_update --append\` (transaction)
+6. Call \`maad_reindex\` after bulk creation
+7. Call \`maad_summary\` to confirm
 
 ### Frontmatter format
 
@@ -79,15 +79,15 @@ field2: value2
 
 ### Server management
 
-- \`maad.reload\` — reload registry and schemas after config changes (no restart needed)
-- \`maad.health\` — check engine status
-- \`maad.reindex\` — rebuild index after bulk file changes
+- \`maad_reload\` — reload registry and schemas after config changes (no restart needed)
+- \`maad_health\` — check engine status
+- \`maad_reindex\` — rebuild index after bulk file changes
 
 ## Rules
 
 1. MCP tools only — no bash for data operations
-2. Schema first — call \`maad.schema\` before writes
-3. Reload after config changes — call \`maad.reload\` after editing registry or schemas
+2. Schema first — call \`maad_schema\` before writes
+3. Reload after config changes — call \`maad_reload\` after editing registry or schemas
 4. Sequential writes — never parallelize create/update/delete operations
 5. Report errors — if a tool returns \`ok: false\`, report what happened
 6. Empty project = Architect mode — read the skill files and design the database

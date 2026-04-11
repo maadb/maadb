@@ -137,7 +137,7 @@ Flags take precedence over env vars. Env vars take precedence over defaults.
 After wiring MCP, restart your agent session. The agent will see `maad.*` tools. From there:
 
 1. Agent reads `MAAD.md` → sees this is a MAAD project
-2. Agent runs `maad.summary` → detects empty project
+2. Agent runs `maad_summary` → detects empty project
 3. Agent reads `_skills/architect-core.md` → enters Architect mode
 4. Agent designs schema based on your goal, deploys the database
 
@@ -238,45 +238,45 @@ All tools return `{ ok: true, data: {...} }` or `{ ok: false, errors: [...] }`.
 ### Discover
 | Tool | What it does |
 |------|-------------|
-| `maad.scan` | Analyze raw markdown — no registry needed |
-| `maad.summary` | **Start here.** Types, counts, sample IDs, object inventory |
-| `maad.describe` | Project overview: types, doc counts, primitives |
-| `maad.schema` | Field definitions for a type |
+| `maad_scan` | Analyze raw markdown — no registry needed |
+| `maad_summary` | **Start here.** Types, counts, sample IDs, object inventory |
+| `maad_describe` | Project overview: types, doc counts, primitives |
+| `maad_schema` | Field definitions for a type |
 
 ### Read
 | Tool | What it does |
 |------|-------------|
-| `maad.get` | Read a record (hot/warm/cold/full tiers) |
-| `maad.query` | Find documents by type, filters, and field projection |
-| `maad.search` | Cross-document object search |
-| `maad.related` | Connected documents via ref traversal |
-| `maad.aggregate` | Count/sum/avg/min/max grouped by field |
-| `maad.join` | Query + follow refs + project fields from both sides |
-| `maad.verify` | Fact-check a field value or document count against the database |
+| `maad_get` | Read a record (hot/warm/cold/full tiers) |
+| `maad_query` | Find documents by type, filters, and field projection |
+| `maad_search` | Cross-document object search |
+| `maad_related` | Connected documents via ref traversal |
+| `maad_aggregate` | Count/sum/avg/min/max grouped by field |
+| `maad_join` | Query + follow refs + project fields from both sides |
+| `maad_verify` | Fact-check a field value or document count against the database |
 
 ### Write
 | Tool | What it does |
 |------|-------------|
-| `maad.create` | Create a new record |
-| `maad.update` | Modify fields or append to body |
-| `maad.bulk_create` | Create multiple records in one call |
-| `maad.bulk_update` | Update multiple records in one call |
-| `maad.validate` | Check record(s) against schema |
+| `maad_create` | Create a new record |
+| `maad_update` | Modify fields or append to body |
+| `maad_bulk_create` | Create multiple records in one call |
+| `maad_bulk_update` | Update multiple records in one call |
+| `maad_validate` | Check record(s) against schema |
 
 ### Maintain
 | Tool | What it does |
 |------|-------------|
-| `maad.delete` | Remove a record |
-| `maad.reindex` | Rebuild index from markdown |
-| `maad.reload` | Reload registry + schemas without restart |
-| `maad.health` | Engine status and diagnostics |
-| `maad.history` | Git history for a document |
-| `maad.audit` | Project-wide activity log |
+| `maad_delete` | Remove a record |
+| `maad_reindex` | Rebuild index from markdown |
+| `maad_reload` | Reload registry + schemas without restart |
+| `maad_health` | Engine status and diagnostics |
+| `maad_history` | Git history for a document |
+| `maad_audit` | Project-wide activity log |
 
 ## Agent Boot Flow
 
 1. Agent reads `MAAD.md` → stable operating instructions
-2. Agent runs `maad.summary` → live project snapshot
+2. Agent runs `maad_summary` → live project snapshot
 3. If empty project → reads `_skills/architect-core.md`, enters Architect mode
 4. If live project → uses MCP tools for normal operations
 

@@ -148,30 +148,30 @@ After design is confirmed (or in autonomous mode):
 
 1. Write \`_registry/object_types.yaml\` with all types
 2. Write \`_schema/<type>.v1.yaml\` for each type
-3. Call \`maad.reload\` to pick up new config
-4. Call \`maad.summary\` to verify engine loaded the types
+3. Call \`maad_reload\` to pick up new config
+4. Call \`maad_summary\` to verify engine loaded the types
 5. Optionally create 1-2 sample records per type to validate the schema
-6. Call \`maad.reindex\` if sample records were created
+6. Call \`maad_reindex\` if sample records were created
 7. Report: "Database deployed. X types, Y fields. Ready for data."
 
 ## Bulk Data Import
 
-For importing large datasets, use \`maad.bulk_create\` instead of individual creates:
+For importing large datasets, use \`maad_bulk_create\` instead of individual creates:
 
 - Accepts an array of records, returns per-record success/failure
 - One bad record doesn't block others
 - Single git commit for all successful records
 - Import parent types first (clients, contacts), then dependent types (cases, notes)
-- For updates, use \`maad.bulk_update\` with the same pattern
-- \`maad.aggregate\` is useful for verifying counts after import
+- For updates, use \`maad_bulk_update\` with the same pattern
+- \`maad_aggregate\` is useful for verifying counts after import
 
 ## Troubleshooting
 
 | Problem | Cause | Fix |
 |---------|-------|-----|
 | reload fails | Registry YAML syntax error | Check YAML formatting, fix, reload again |
-| create fails validation | Field value doesn't match schema | Check \`maad.schema <type>\` for expected types/enums |
-| missing type error | Registry has type but reload wasn't called | Call \`maad.reload\` |
+| create fails validation | Field value doesn't match schema | Check \`maad_schema <type>\` for expected types/enums |
+| missing type error | Registry has type but reload wasn't called | Call \`maad_reload\` |
 | search returns too many results | Missing query/value param | Use \`query\` (substring) or \`value\` (exact) param to filter |
 | parallel writes fail | SQLite single-writer lock | Execute writes sequentially, never in parallel |
 

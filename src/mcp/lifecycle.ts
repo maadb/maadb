@@ -7,6 +7,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { MaadEngine } from '../engine.js';
 import { logger } from '../engine/logger.js';
+import { ensureProjectSkills } from '../skills-scaffold.js';
 
 export interface StartupResult {
   engine: MaadEngine;
@@ -22,17 +23,26 @@ export async function startupEngine(projectRoot: string): Promise<StartupResult>
     throw new Error(`Project directory not found: ${resolved}`);
   }
 
-  const registryPath = path.join(resolved, '_registry', 'object_types.yaml');
-  if (!existsSync(registryPath)) {
-    throw new Error(`No _registry/object_types.yaml found in ${resolved}`);
-  }
-
-  // Init engine
+  // Init engine — self-heals _registry, _schema, _backend on empty projects
   const engine = new MaadEngine();
   const initResult = await engine.init(resolved);
   if (!initResult.ok) {
     const messages = initResult.errors.map(e => `${e.code}: ${e.message}`).join('; ');
     throw new Error(`Engine initialization failed: ${messages}`);
+  }
+
+  // Ensure _skills/ guide files exist for the agent. Non-blocking: a failed
+  // write (permissions, read-only FS) logs a warning but does not crash the
+  // server — engine is already up and usable without the skills.
+  if (!engine.isReadOnly()) {
+    const skillsResult = ensureProjectSkills(resolved);
+    if (skillsResult.created.length > 0) {
+      logger.info('lifecycle', 'startup', `Scaffolded skills: ${skillsResult.created.join(', ')}`);
+    }
+    for (const e of skillsResult.errors) {
+      logger.bestEffort('lifecycle', 'startup', `Failed to write ${e.file}: ${e.message}`);
+      warnings.push(`skills scaffold: ${e.file} — ${e.message}`);
+    }
   }
 
   // Check for recovery actions

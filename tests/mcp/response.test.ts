@@ -54,23 +54,23 @@ describe('Provenance mode', () => {
 
   it('does not include _source when provenance is off', () => {
     setProvenanceMode('off');
-    const resp = successResponse({ foo: 'bar' }, 'maad.get');
+    const resp = successResponse({ foo: 'bar' }, 'maad_get');
     const parsed = JSON.parse(resp.content[0]!.text);
     expect(parsed._source).toBeUndefined();
   });
 
   it('includes _source when provenance is on', () => {
     setProvenanceMode('on');
-    const resp = successResponse({ foo: 'bar' }, 'maad.get');
+    const resp = successResponse({ foo: 'bar' }, 'maad_get');
     const parsed = JSON.parse(resp.content[0]!.text);
-    expect(parsed._source).toBe('maad.get');
+    expect(parsed._source).toBe('maad_get');
   });
 
   it('includes _source when provenance is detail', () => {
     setProvenanceMode('detail');
-    const resp = successResponse({ foo: 'bar' }, 'maad.query');
+    const resp = successResponse({ foo: 'bar' }, 'maad_query');
     const parsed = JSON.parse(resp.content[0]!.text);
-    expect(parsed._source).toBe('maad.query');
+    expect(parsed._source).toBe('maad_query');
   });
 
   it('does not include _source when no tool name provided', () => {
@@ -83,8 +83,8 @@ describe('Provenance mode', () => {
   it('resultToResponse passes tool name through', () => {
     setProvenanceMode('on');
     const result: Result<string> = { ok: true, value: 'hello' };
-    const resp = resultToResponse(result, 'maad.search');
+    const resp = resultToResponse(result, 'maad_search');
     const parsed = JSON.parse(resp.content[0]!.text);
-    expect(parsed._source).toBe('maad.search');
+    expect(parsed._source).toBe('maad_search');
   });
 });

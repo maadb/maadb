@@ -1,5 +1,5 @@
 // ============================================================================
-// Audit tools — maad.history, maad.audit
+// Audit tools — maad_history, maad_audit
 // ============================================================================
 
 import { z } from 'zod';
@@ -9,7 +9,7 @@ import { docId, docType } from '../../types.js';
 import { resultToResponse } from '../response.js';
 
 export function register(server: McpServer, engine: MaadEngine): void {
-  server.registerTool('maad.history', {
+  server.registerTool('maad_history', {
     description: 'Returns git commit history for a specific document.',
     inputSchema: z.object({
       docId: z.string().describe('Document ID'),
@@ -23,7 +23,7 @@ export function register(server: McpServer, engine: MaadEngine): void {
     return resultToResponse(await engine.history(docId(args.docId), opts));
   });
 
-  server.registerTool('maad.audit', {
+  server.registerTool('maad_audit', {
     description: 'Returns project-wide activity log from git. Shows most recent action per document.',
     inputSchema: z.object({
       since: z.string().optional().describe('Activity since date'),

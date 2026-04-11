@@ -3,7 +3,7 @@
 // Holds state, delegates to domain functions via EngineContext.
 // ============================================================================
 
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { ok, singleErr, type Result } from '../errors.js';
@@ -60,6 +60,8 @@ export interface HealthReport {
   totalDocuments: number;
   registeredTypes: number;
   recoveryActions: string[];
+  emptyProject: boolean;
+  bootstrapHint: string | null;
 }
 
 export class MaadEngine {
@@ -76,6 +78,28 @@ export class MaadEngine {
   async init(projectRoot: string, opts?: { readOnly?: boolean }): Promise<Result<void>> {
     this.projectRoot = path.resolve(projectRoot);
     this._readOnly = opts?.readOnly ?? false;
+
+    // Self-heal engine-owned state on empty projects. In read-only mode we
+    // refuse to write anything: a missing registry/schema/backend is a hard
+    // error. In read-write mode we create the minimum structure so pointing
+    // the engine at a fresh empty directory is a valid "architect mode" entry
+    // point (empty registry, no schemas, empty index).
+    const registryPath = path.join(this.projectRoot, '_registry', 'object_types.yaml');
+    if (!existsSync(registryPath)) {
+      if (this._readOnly) {
+        return singleErr('READ_ONLY', `Registry file does not exist and engine is in read-only mode: ${registryPath}`);
+      }
+      mkdirSync(path.dirname(registryPath), { recursive: true });
+      writeFileSync(registryPath, 'types: {}\n', 'utf-8');
+    }
+
+    const schemaDir = path.join(this.projectRoot, '_schema');
+    if (!existsSync(schemaDir)) {
+      if (this._readOnly) {
+        return singleErr('READ_ONLY', `Schema directory does not exist and engine is in read-only mode: ${schemaDir}`);
+      }
+      mkdirSync(schemaDir, { recursive: true });
+    }
 
     const regResult = await loadRegistry(this.projectRoot);
     if (!regResult.ok) return regResult;
@@ -126,6 +150,7 @@ export class MaadEngine {
   health(): HealthReport {
     this.assertInit();
     const stats = this.backend.getStats();
+    const emptyProject = this.registry.types.size === 0 && stats.totalDocuments === 0;
     return {
       projectRoot: this.projectRoot,
       initialized: this.initialized,
@@ -136,6 +161,8 @@ export class MaadEngine {
       totalDocuments: stats.totalDocuments,
       registeredTypes: this.registry.types.size,
       recoveryActions: this.startupRecovery,
+      emptyProject,
+      bootstrapHint: emptyProject ? '_skills/architect-core.md' : null,
     };
   }
 
@@ -156,6 +183,7 @@ export class MaadEngine {
       backend: this.backend,
       gitLayer: this.gitLayer,
       journal: this.journal,
+      readOnly: this._readOnly,
     };
   }
 

@@ -49,8 +49,8 @@ The engine indexes each block with line pointers. Individual notes are addressab
 ### Decision rule
 
 Ask: **Will this type generate more than 1,000 records per year?**
-- No → Master pattern (one file per record, use \`maad.create\`)
-- Yes → Transaction pattern (append to parent file, use \`maad.update --append\`)
+- No → Master pattern (one file per record, use \`maad_create\`)
+- Yes → Transaction pattern (append to parent file, use \`maad_update --append\`)
 
 ## Registry entry
 
@@ -137,7 +137,7 @@ client:
 
 ## Template headings (optional)
 
-Add heading structure that \`maad.create\` will generate for new records:
+Add heading structure that \`maad_create\` will generate for new records:
 
 \`\`\`yaml
 template:
@@ -155,8 +155,8 @@ Schema refs use \`<type>.v<number>\` format. When changing a schema, create a ne
 
 ## After creating schemas
 
-1. Call \`maad.reload\` to pick up new registry and schemas
-2. Call \`maad.summary\` or \`maad.schema <type>\` to verify
+1. Call \`maad_reload\` to pick up new registry and schemas
+2. Call \`maad_summary\` or \`maad_schema <type>\` to verify
 `;
 }
 
@@ -180,7 +180,7 @@ Read the raw files. Identify:
 - What relationships exist between types (client → contact, case → client)
 - What field types to use (string, date, enum, ref, amount)
 
-Use \`maad.scan\` on the source directory for structural patterns if helpful.
+Use \`maad_scan\` on the source directory for structural patterns if helpful.
 
 ## Step 2 — Classify master vs transaction
 
@@ -217,16 +217,16 @@ types:
 
 Create schema files in \`_schema/\` for each type. See schema-guide.md for field type reference.
 
-After writing registry and schemas, call \`maad.reload\` to pick them up.
+After writing registry and schemas, call \`maad_reload\` to pick them up.
 
 ## Step 4 — Create records
 
 ### Master records (one file per record)
 
-For each record, use \`maad.create\`:
+For each record, use \`maad_create\`:
 
 \`\`\`
-maad.create({
+maad_create({
   docType: "client",
   fields: {
     name: "Apex Industrial Supply Co.",
@@ -238,10 +238,10 @@ maad.create({
 })
 \`\`\`
 
-For bulk imports (10+ records), use \`maad.bulk_create\` instead — accepts an array, returns per-record results, single git commit:
+For bulk imports (10+ records), use \`maad_bulk_create\` instead — accepts an array, returns per-record results, single git commit:
 
 \`\`\`
-maad.bulk_create({
+maad_bulk_create({
   records: [
     { docType: "client", fields: { name: "Acme Corp", status: "active" } },
     { docType: "client", fields: { name: "Beta Inc", status: "prospect" } },
@@ -257,7 +257,7 @@ maad.bulk_create({
 First create the parent file, then append entries:
 
 \`\`\`
-maad.create({
+maad_create({
   docType: "case_note",
   docId: "notes-cas-001",
   fields: { case: "cas-001", doc_type: "case_note" },
@@ -268,13 +268,13 @@ maad.create({
 For subsequent notes, append to the same file:
 
 \`\`\`
-maad.update({
+maad_update({
   docId: "notes-cas-001",
   appendBody: "## 2024-04-15 — Settlement Call {#note-011}\\n\\nClient agreed to $1.8M floor."
 })
 \`\`\`
 
-Each headed block becomes an indexed block with a block_id. Retrieve individual notes with \`maad.get\` at warm depth.
+Each headed block becomes an indexed block with a block_id. Retrieve individual notes with \`maad_get\` at warm depth.
 
 ## ID mapping (critical)
 
@@ -292,7 +292,7 @@ Source data will have its own IDs (C001, U005, INV-2024-001, etc.). These are NO
 
 If source data is in markdown tables (rows = records):
 - Classify: is each row a master record or a transaction entry?
-- Master rows: each row becomes one \`maad.create\` call (or \`maad.bulk_create\` for 10+)
+- Master rows: each row becomes one \`maad_create\` call (or \`maad_bulk_create\` for 10+)
 - Transaction rows: group by parent, create one file per parent, append rows as headed blocks
 - Column headers map to frontmatter field names
 
@@ -308,15 +308,15 @@ If source data is unstructured text (articles, reports, filings):
 
 After creating all records:
 
-1. \`maad.reindex({ force: true })\` — rebuild the full index
-2. \`maad.summary\` — verify counts and types
-3. \`maad.query\` — spot-check a few records
-4. \`maad.search\` — verify extracted objects
+1. \`maad_reindex({ force: true })\` — rebuild the full index
+2. \`maad_summary\` — verify counts and types
+3. \`maad_query\` — spot-check a few records
+4. \`maad_search\` — verify extracted objects
 
 ## Tips
 
-- Call \`maad.schema <type>\` before creating records to verify field names
-- Use \`maad.reload\` after any registry or schema changes
+- Call \`maad_schema <type>\` before creating records to verify field names
+- Use \`maad_reload\` after any registry or schema changes
 - Execute write operations sequentially — do not parallelize
 - If a create fails validation, check the error message — it tells you which field is wrong
 - For bulk imports, work through one type at a time: all clients, then all cases, then notes

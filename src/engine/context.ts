@@ -15,6 +15,7 @@ export interface EngineContext {
   backend: MaadBackend;
   gitLayer: GitLayer | null;
   journal: OperationJournal;
+  readOnly: boolean;
 }
 
 export async function gitCommit(ctx: EngineContext, opts: CommitOptions): Promise<void> {

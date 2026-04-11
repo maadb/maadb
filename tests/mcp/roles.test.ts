@@ -5,30 +5,30 @@ describe('MCP roles', () => {
   it('reader gets 12 tools', () => {
     const tools = getToolsForRole('reader');
     expect(tools.size).toBe(12);
-    expect(tools.has('maad.summary')).toBe(true);
-    expect(tools.has('maad.get')).toBe(true);
-    expect(tools.has('maad.aggregate')).toBe(true);
-    expect(tools.has('maad.create')).toBe(false);
-    expect(tools.has('maad.delete')).toBe(false);
+    expect(tools.has('maad_summary')).toBe(true);
+    expect(tools.has('maad_get')).toBe(true);
+    expect(tools.has('maad_aggregate')).toBe(true);
+    expect(tools.has('maad_create')).toBe(false);
+    expect(tools.has('maad_delete')).toBe(false);
   });
 
   it('writer gets 17 tools (reader + create, update, validate, bulk_create, bulk_update)', () => {
     const tools = getToolsForRole('writer');
     expect(tools.size).toBe(17);
-    expect(tools.has('maad.create')).toBe(true);
-    expect(tools.has('maad.update')).toBe(true);
-    expect(tools.has('maad.validate')).toBe(true);
-    expect(tools.has('maad.delete')).toBe(false);
-    expect(tools.has('maad.reindex')).toBe(false);
+    expect(tools.has('maad_create')).toBe(true);
+    expect(tools.has('maad_update')).toBe(true);
+    expect(tools.has('maad_validate')).toBe(true);
+    expect(tools.has('maad_delete')).toBe(false);
+    expect(tools.has('maad_reindex')).toBe(false);
   });
 
   it('admin gets 21 tools (all)', () => {
     const tools = getToolsForRole('admin');
     expect(tools.size).toBe(21);
-    expect(tools.has('maad.delete')).toBe(true);
-    expect(tools.has('maad.reindex')).toBe(true);
-    expect(tools.has('maad.reload')).toBe(true);
-    expect(tools.has('maad.health')).toBe(true);
+    expect(tools.has('maad_delete')).toBe(true);
+    expect(tools.has('maad_reindex')).toBe(true);
+    expect(tools.has('maad_reload')).toBe(true);
+    expect(tools.has('maad_health')).toBe(true);
   });
 
   it('parseRole defaults to reader for invalid input', () => {

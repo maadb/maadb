@@ -9,8 +9,7 @@ import { GitLayer } from '../../git/index.js';
 import { generateMaadMd, generateStubMaadMd } from '../../maad-md.js';
 import { generateSchemaMd } from '../../schema-md.js';
 import { generateClaudeMd } from '../../claude-md.js';
-import { generateSchemaGuide, generateImportGuide } from '../../skill-files.js';
-import { generateArchitectSkill } from '../../architect.js';
+import { ensureProjectSkills } from '../../skills-scaffold.js';
 import type { CliContext } from '../helpers.js';
 import { initEngine } from '../helpers.js';
 
@@ -55,27 +54,11 @@ export async function cmdInit(ctx: CliContext): Promise<void> {
     console.log('  Created CLAUDE.md');
   }
 
-  // Skill files — detailed workflow guides
-  const skillDir = path.join(root, '_skills');
-  if (!existsSync(skillDir)) mkdirSync(skillDir, { recursive: true });
-
-  const schemaGuidePath = path.join(skillDir, 'schema-guide.md');
-  if (!existsSync(schemaGuidePath)) {
-    writeFileSync(schemaGuidePath, generateSchemaGuide(), 'utf-8');
-    console.log('  Created _skills/schema-guide.md');
-  }
-
-  const importGuidePath = path.join(skillDir, 'import-guide.md');
-  if (!existsSync(importGuidePath)) {
-    writeFileSync(importGuidePath, generateImportGuide(), 'utf-8');
-    console.log('  Created _skills/import-guide.md');
-  }
-
-  const architectPath = path.join(skillDir, 'architect-core.md');
-  if (!existsSync(architectPath)) {
-    writeFileSync(architectPath, generateArchitectSkill(), 'utf-8');
-    console.log('  Created _skills/architect-core.md');
-  }
+  // Skill files — detailed workflow guides (delegated to shared scaffold
+  // helper so lifecycle, CLI init, and future EnginePool share one code path)
+  const skillsResult = ensureProjectSkills(root);
+  for (const f of skillsResult.created) console.log(`  Created ${f}`);
+  for (const e of skillsResult.errors) console.warn(`  Failed ${e.file}: ${e.message}`);
 
   const git = new GitLayer(root);
   if (!(await git.isRepo())) {

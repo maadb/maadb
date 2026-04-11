@@ -22,7 +22,7 @@
 - LLM UX layer: `summary`, `get full`, `schema` commands
 - Query projection (return only requested fields)
 - Aggregation tool (`count`, `sum`, `avg`, `min`, `max` grouped by field)
-- Cross-ref joins (`maad.join` — query + follow refs + project both sides)
+- Cross-ref joins (`maad_join` — query + follow refs + project both sides)
 - Bulk operations (`bulk_create`, `bulk_update` — single git commit)
 - Provenance mode (`--prov off|on|detail`)
 - Architect skill — autonomous database design and deployment
@@ -33,7 +33,7 @@
 
 ## Current: v0.2.12
 
-Engine is stable, public, and feature-complete for single-project MCP use. Recent additions: version tracking on reads, query sort, list field index fix, summary warnings, validation messages, bulk_update batching, read-back verification, `maad.verify` fact-checking tool, grounding rules, env var config, dynamic server version. 13 reader / 18 writer / 22 admin tools.
+Engine is stable, public, and feature-complete for single-project MCP use. Recent additions: version tracking on reads, query sort, list field index fix, summary warnings, validation messages, bulk_update batching, read-back verification, `maad_verify` fact-checking tool, grounding rules, env var config, dynamic server version. 13 reader / 18 writer / 22 admin tools.
 
 ---
 
@@ -61,15 +61,15 @@ Zero-to-operational in one agent session.
 
 ### 0.4.0 — Multi-Project Routing
 
-One MCP server, multiple projects, session-bound mode. Foundation for everything multi-project.
+One MCP server, multiple projects, session-bound mode. Foundation for everything multi-project. Inherits the 0.2.13 empty-project bootstrap: each pooled engine self-heals via `engine.init()` and `ensureProjectSkills()` runs per project on first bind, so `maad_use_project` works against empty directories without any manual init step.
 
 - [ ] `instance.yaml` — declares projects with name, path, role, description
 - [ ] `EnginePool` — lazy-loads engines per session, no eviction in v1
 - [ ] `SessionState` — per-connection mode + active project + whitelist
-- [ ] `maad.use_project <name>` — bind session to single mode (locked to one project)
-- [ ] `maad.use_projects [names]` — bind session to multi mode (whitelist + explicit `project=` required on every call)
-- [ ] `maad.projects` — list available projects (works pre-session)
-- [ ] `maad.current_session` — debug session state
+- [ ] `maad_use_project <name>` — bind session to single mode (locked to one project)
+- [ ] `maad_use_projects [names]` — bind session to multi mode (whitelist + explicit `project=` required on every call)
+- [ ] `maad_projects` — list available projects (works pre-session)
+- [ ] `maad_current_session` — debug session state
 - [ ] `withSession()` wrapper on every project-level tool — routes to correct engine, enforces mode
 - [ ] No mid-session mode switching (end and reconnect)
 - [ ] Backward compat: `--project <path>` still works, auto-binds session to single mode
@@ -94,7 +94,7 @@ Better visibility into what happened and why.
 
 - [ ] Provenance refinement — cleaner source attribution in responses
 - [ ] Admin dashboard tool — project health, index stats, schema drift detection
-- [ ] `maad.export` — dump project data in portable format
+- [ ] `maad_export` — dump project data in portable format
 - [ ] Improved error messages with actionable guidance
 
 ### 0.6.0 — Query Power
@@ -103,7 +103,7 @@ Make the index smarter.
 
 - [ ] Full-text search via SQLite FTS5
 - [ ] Fuzzy entity matching (typo-tolerant search)
-- [ ] Compound filters (AND/OR in `maad.query`)
+- [ ] Compound filters (AND/OR in `maad_query`)
 - [ ] Sort by any indexed field
 - [ ] Cursor-based pagination tokens
 
