@@ -40,7 +40,8 @@ export type ErrorCode =
   | 'INSUFFICIENT_ROLE'
   | 'ROLE_UPGRADE_DENIED'
   | 'WRITE_TIMEOUT'
-  | 'SHUTTING_DOWN';
+  | 'SHUTTING_DOWN'
+  | 'RATE_LIMITED';
 
 export interface MaadError {
   code: ErrorCode;

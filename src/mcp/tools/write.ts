@@ -11,6 +11,22 @@ import { isDryRun, dryRunResponse, auditToolCall } from '../guardrails.js';
 import type { InstanceCtx } from '../ctx.js';
 import { withEngine } from '../with-session.js';
 import { withIdempotency } from '../idempotency.js';
+import { getRateLimiter } from '../rate-limit.js';
+
+function checkWriteRate(sessionId: string, toolName: string): ReturnType<typeof errorResponse> | null {
+  const rejection = getRateLimiter().tryAcquireWrite(sessionId);
+  if (!rejection) return null;
+  return errorResponse([{
+    code: 'RATE_LIMITED',
+    message: `Write rate limit exceeded (${rejection.reason})`,
+    details: {
+      reason: rejection.reason,
+      limit: rejection.limit,
+      retryAfterMs: rejection.retryAfterMs,
+      tool: toolName,
+    },
+  } as any]);
+}
 
 function parseFields(raw: unknown): Record<string, unknown> | null {
   if (raw === null || raw === undefined) return null;
@@ -38,8 +54,10 @@ export function register(server: McpServer, ctx: InstanceCtx): void {
       project: z.string().optional().describe('Project name (multi-project mode only)'),
       idempotencyKey: z.string().max(128).optional().describe('Opaque client-supplied key; scopes (project, tool, key) and dedupes retries within TTL'),
     }),
-  }, async (args, extra) => withEngine(ctx, extra, 'maad_create', args, async ({ engine, projectName }) =>
+  }, async (args, extra) => withEngine(ctx, extra, 'maad_create', args, async ({ engine, projectName, sessionId }) =>
     withIdempotency(projectName, 'maad_create', args.idempotencyKey, reqId(), async () => {
+      const rateRejection = checkWriteRate(sessionId, 'maad_create');
+      if (rateRejection) return rateRejection;
       auditToolCall('maad_create', args);
       if (isDryRun()) return dryRunResponse('maad_create', args);
       const fields = parseFields(args.fields);
@@ -65,8 +83,10 @@ export function register(server: McpServer, ctx: InstanceCtx): void {
       project: z.string().optional().describe('Project name (multi-project mode only)'),
       idempotencyKey: z.string().max(128).optional().describe('Opaque client-supplied key; scopes (project, tool, key) and dedupes retries within TTL'),
     }),
-  }, async (args, extra) => withEngine(ctx, extra, 'maad_update', args, async ({ engine, projectName }) =>
+  }, async (args, extra) => withEngine(ctx, extra, 'maad_update', args, async ({ engine, projectName, sessionId }) =>
     withIdempotency(projectName, 'maad_update', args.idempotencyKey, reqId(), async () => {
+      const rateRejection = checkWriteRate(sessionId, 'maad_update');
+      if (rateRejection) return rateRejection;
       auditToolCall('maad_update', args);
       if (isDryRun()) return dryRunResponse('maad_update', args);
       const fields = args.fields !== undefined ? parseFields(args.fields) : undefined;
@@ -105,8 +125,10 @@ export function register(server: McpServer, ctx: InstanceCtx): void {
       project: z.string().optional().describe('Project name (multi-project mode only)'),
       idempotencyKey: z.string().max(128).optional().describe('Opaque client-supplied key; scopes (project, tool, key) and dedupes retries within TTL'),
     }),
-  }, async (args, extra) => withEngine(ctx, extra, 'maad_bulk_create', args, async ({ engine, projectName }) =>
+  }, async (args, extra) => withEngine(ctx, extra, 'maad_bulk_create', args, async ({ engine, projectName, sessionId }) =>
     withIdempotency(projectName, 'maad_bulk_create', args.idempotencyKey, reqId(), async () => {
+      const rateRejection = checkWriteRate(sessionId, 'maad_bulk_create');
+      if (rateRejection) return rateRejection;
       auditToolCall('maad_bulk_create', { count: args.records.length });
       if (isDryRun()) return dryRunResponse('maad_bulk_create', { count: args.records.length });
       const result = await engine.bulkCreate(args.records as any);
@@ -126,8 +148,10 @@ export function register(server: McpServer, ctx: InstanceCtx): void {
       project: z.string().optional().describe('Project name (multi-project mode only)'),
       idempotencyKey: z.string().max(128).optional().describe('Opaque client-supplied key; scopes (project, tool, key) and dedupes retries within TTL'),
     }),
-  }, async (args, extra) => withEngine(ctx, extra, 'maad_bulk_update', args, async ({ engine, projectName }) =>
+  }, async (args, extra) => withEngine(ctx, extra, 'maad_bulk_update', args, async ({ engine, projectName, sessionId }) =>
     withIdempotency(projectName, 'maad_bulk_update', args.idempotencyKey, reqId(), async () => {
+      const rateRejection = checkWriteRate(sessionId, 'maad_bulk_update');
+      if (rateRejection) return rateRejection;
       auditToolCall('maad_bulk_update', { count: args.updates.length });
       if (isDryRun()) return dryRunResponse('maad_bulk_update', { count: args.updates.length });
       const result = await engine.bulkUpdate(args.updates as any);

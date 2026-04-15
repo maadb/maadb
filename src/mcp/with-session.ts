@@ -20,11 +20,13 @@ import type { SessionState } from '../instance/session.js';
 import { resolveSessionId } from '../instance/session.js';
 import { getMinRoleForTool, roleSatisfies } from './roles.js';
 import { errorResponse } from './response.js';
+import { getRateLimiter } from './rate-limit.js';
 
 interface CallContext {
   engine: MaadEngine;
   projectName: string;
   projectRoot: string;
+  sessionId: string;
 }
 
 type McpToolResponse = { content: Array<{ type: 'text'; text: string }> };
@@ -70,16 +72,45 @@ export async function withEngine(
       `Tool ${toolName} requires role "${minRole}" but session has "${effectiveRole}" for project "${projectName}".`);
   }
 
-  // Resolve engine
-  const poolResult = await ctx.pool.get(projectName);
-  if (!poolResult.ok) return errorResponse(poolResult.errors);
+  // Payload size cap. Oversize args are rejected without touching the engine.
+  const rl = getRateLimiter();
+  const payloadBytes = args ? Buffer.byteLength(JSON.stringify(args), 'utf8') : 0;
+  const payloadRejection = rl.checkPayloadSize(payloadBytes);
+  if (payloadRejection) {
+    return mcpErrorWithDetails('RATE_LIMITED', 'Payload exceeds limit', {
+      reason: payloadRejection.reason,
+      limit: payloadRejection.limit,
+      retryAfterMs: payloadRejection.retryAfterMs,
+      size: payloadBytes,
+    });
+  }
 
-  const project = ctx.instance.projects.find((p) => p.name === projectName)!;
-  return handler({
-    engine: poolResult.value,
-    projectName,
-    projectRoot: project.path,
-  });
+  // Concurrent-in-flight cap. Released in the `finally` below so an engine
+  // error never leaks a slot.
+  const slot = rl.tryAcquireConcurrent(sessionId);
+  if (!slot.ok) {
+    return mcpErrorWithDetails('RATE_LIMITED', 'Concurrent in-flight limit reached', {
+      reason: slot.rejection.reason,
+      limit: slot.rejection.limit,
+      retryAfterMs: slot.rejection.retryAfterMs,
+    });
+  }
+
+  try {
+    // Resolve engine
+    const poolResult = await ctx.pool.get(projectName);
+    if (!poolResult.ok) return errorResponse(poolResult.errors);
+
+    const project = ctx.instance.projects.find((p) => p.name === projectName)!;
+    return await handler({
+      engine: poolResult.value,
+      projectName,
+      projectRoot: project.path,
+      sessionId,
+    });
+  } finally {
+    slot.release();
+  }
 }
 
 function resolveProjectName(state: SessionState, args: Record<string, unknown> | undefined): string | McpToolResponse {
@@ -101,5 +132,10 @@ function resolveProjectName(state: SessionState, args: Record<string, unknown> |
 
 function mcpError(code: string, message: string): McpToolResponse {
   const err: MaadError = { code: code as MaadError['code'], message };
+  return errorResponse([err]);
+}
+
+function mcpErrorWithDetails(code: string, message: string, details: Record<string, unknown>): McpToolResponse {
+  const err: MaadError = { code: code as MaadError['code'], message, details };
   return errorResponse([err]);
 }

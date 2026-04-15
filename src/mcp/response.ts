@@ -24,7 +24,7 @@ interface SuccessResponse {
 
 interface ErrorResponse {
   ok: false;
-  errors: Array<{ code: string; message: string }>;
+  errors: Array<{ code: string; message: string; details?: Record<string, unknown> }>;
 }
 
 type McpResponse = SuccessResponse | ErrorResponse;
@@ -40,7 +40,14 @@ export function successResponse(data: unknown, toolName?: string): { content: Ar
 export function errorResponse(errors: MaadError[]): { content: Array<{ type: 'text'; text: string }> } {
   const response: McpResponse = {
     ok: false,
-    errors: errors.map(e => ({ code: e.code, message: e.message })),
+    errors: errors.map(e => {
+      const base: { code: string; message: string; details?: Record<string, unknown> } = {
+        code: e.code,
+        message: e.message,
+      };
+      if (e.details !== undefined) base.details = e.details;
+      return base;
+    }),
   };
   return { content: [{ type: 'text', text: JSON.stringify(response) }] };
 }
