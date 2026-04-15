@@ -1,9 +1,12 @@
 ---
 enabled: true
-current: 0.4.0
+current: 0.4.1
 ---
 
 # Version History
+
+## 0.4.1 — 2026-04-15
+Production hardening pass on the write path and operational surface. Per-engine FIFO write mutex serializes all mutating ops (`AsyncFifoMutex`, wrapped via `runExclusive`). Stale `.git/index.lock` recovery on init (30s mtime threshold). Idempotency keys on writes — optional client-supplied, per-(project, tool, key) scope, 10-min TTL LRU cache, replay identified via `_meta.replayed` + `_meta.original_request_id`. Per-session token-bucket rate limiting: 10 writes/sec, 60 writes/min, 5 concurrent in-flight, 1 MiB payload cap. Structured JSON logging via pino with separate ops + audit channels, one `tool_call` line per request, one `write` audit line per successful mutation. Per-request timeout (30s default) via `Promise.race`. Graceful shutdown state machine: running → draining → exiting; SIGTERM drain waits for mutex + in-flight to settle, bounded by `MAAD_SHUTDOWN_TIMEOUT_MS` (10s default), second signal accelerates, exit code 0 on clean drain / 1 on timeout. Extended `maad_health`: write queue depth, last write op, last write timestamp, repo size on disk (cached 60s), git clean flag, disk headroom. New error codes: `WRITE_TIMEOUT` (reserved for 0.8.5), `SHUTTING_DOWN`, `RATE_LIMITED`, `REQUEST_TIMEOUT`. `pino` added as production dependency. Canonical request flow order: session → role → project → shutdown → payload → idempotency → concurrent → write-rate → mutex → engine. 71 new tests (mutex, concurrency, idempotency, rate-limit, logging, lifecycle, health-extensions), 394 total passing.
 
 ## 0.4.0 — 2026-04-14
 Multi-project routing: one MCP server, many MAAD projects via `instance.yaml`. Sessions bind to a project (single mode) or whitelist (multi mode) with per-project roles and optional session-level downgrade (`as: reader`). Backward-compatible: `--project --role` still works as a synthetic single-project instance with auto-bind. New: `EnginePool` with eviction seam (policy deferred to 0.9.0), `SessionRegistry` keyed by MCP-SDK session IDs (HTTP/SSE-ready), 4 instance-level tools (`maad_projects`, `maad_use_project`, `maad_use_projects`, `maad_current_session`), `withSession` routing helper. Tool schemas gained an optional `project` field (additive). README and ROADMAP updated. Spec at `docs/specs/0.4.0-multi-project-routing.md`. 57 new tests, 323 total passing.
@@ -72,7 +75,6 @@ Initial engine build. Parser, registry, schema, extractor (11 primitives), SQLit
 
 ## Planned
 
-- **0.4.1** — Production hardening: per-engine write mutex (FIFO, blocking), stale git-lock recovery, idempotency keys, per-session rate limiting, structured JSON logging + audit channel, per-request timeouts + graceful shutdown, extended `maad_health`, concurrency smoke tests, new error codes
 - **0.5.0** — Remote MCP transport (pulled forward from 0.9.0): HTTP/SSE via `StreamableHTTPServerTransport`, token-based auth at handshake, single role tier, concurrent reads, `maad_changes_since` polling delta, deployment guide
 - **0.5.1** — Deployment workflow: `_skills/deploy.md`, `maad init-instance` + `maad add-project` CLI, platform-specific MCP config generation (stdio + HTTP)
 - **0.6.0** — npm package prep (pulled forward from 0.8.0): `npx maad serve`, published to npm, MCP configs simplify to `npx maad`

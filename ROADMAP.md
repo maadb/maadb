@@ -29,31 +29,39 @@
 - Static MAAD.md generation
 - 266 tests, 4 production dependencies
 
+### v0.4.0 — Multi-Project Routing (2026-04-14)
+
+- `instance.yaml` declares multiple projects served by one MCP server
+- Session-bound mode: `maad_use_project` (single) or `maad_use_projects` (multi whitelist); session-level role downgrade via `as=<role>`
+- `EnginePool` lazy-loads engines per project; eviction seam exposed, policy deferred to 0.9.0
+- `SessionRegistry` keyed by MCP-SDK session IDs — HTTP/SSE-ready for 0.5.0 remote transport
+- 4 instance-level tools (`maad_projects`, `maad_use_project`, `maad_use_projects`, `maad_current_session`); all 22 existing tools become routable
+- Backward-compatible `--project` / `--role` single-project mode (auto-bind to synthetic `default` project)
+- 57 new tests, 323 total passing
+
+### v0.4.1 — Production Hardening (2026-04-15)
+
+Hardened the write path and operational surface before exposing the engine over a network transport. No tool-surface changes beyond new error codes and extended `maad_health`.
+
+- Per-engine FIFO write mutex (`AsyncFifoMutex`, `runExclusive` wrapper) — serializes all 9 mutating engine methods
+- Stale `.git/index.lock` recovery on init (30s mtime threshold, refuses to start if lock is recent)
+- Idempotency keys — `(project, tool, key)` scoped LRU cache (10-min TTL, 10k max), replay identified via `_meta.replayed` + `_meta.original_request_id`
+- Per-session token-bucket rate limiting (writes/sec=10, writes/min=60, concurrent=5) + 1 MiB payload cap
+- Structured JSON logging (pino) with separate ops + audit channels, per-request `request_id` threaded through responses
+- Per-request timeout (30s default) + graceful shutdown state machine (running → draining → exiting)
+- Extended `maad_health`: writeQueueDepth, lastWriteOp, lastWriteAt, repoSizeBytes (cached 60s), gitClean, diskHeadroomMb
+- New error codes: `RATE_LIMITED`, `REQUEST_TIMEOUT`, `SHUTTING_DOWN`, `WRITE_TIMEOUT` (reserved for 0.8.5)
+- 71 new tests across mutex/concurrency/idempotency/rate-limit/logging/lifecycle/health-extensions modules, 394 total passing
+
 ---
 
-## Current: v0.4.0
+## Current: v0.4.1
 
-Multi-project routing shipped. One MCP server serves multiple MAAD projects via `instance.yaml` with session-bound mode (single or multi), per-project roles, and session-level role downgrade. `EnginePool` lazy-loads engines with an eviction seam (policy deferred). `SessionRegistry` keyed by MCP-SDK session IDs (HTTP/SSE-ready for remote transport). 4 instance-level tools, backward-compatible `--project`/`--role` single-project mode. 13 reader / 18 writer / 22 admin tools, all routable. 323 tests passing.
+See Shipped block above.
 
 ---
 
 ## Planned
-
-### 0.4.1 — Production Hardening
-
-Harden the write path and operational surface before exposing the engine over a network transport. Everything here is internal — no tool-surface changes beyond a handful of new error codes and extended `maad_health` fields.
-
-- [ ] Write concurrency spec — `docs/specs/0.4.1-write-concurrency.md` covering mutex shape, FIFO ordering, timeout policy, stale `.git/index.lock` recovery, error codes, test plan
-- [ ] Per-engine write mutex (FIFO, blocking) — serializes all mutating operations per project engine
-- [ ] Stale git lock recovery on engine `init()` — detect and clear orphaned `.git/index.lock` from crashed prior process
-- [ ] Idempotency keys on writes — optional client-supplied UUID deduplicated within a TTL window; prevents duplicate records on retry
-- [ ] Rate limiting — per-session token bucket (starting: 10 writes/sec burst, 60/min sustained, 5 concurrent in-flight, 1MB max payload); tunable via env
-- [ ] Structured JSON logging — pino-based, `request_id` / `session_id` / `project` / `tool` / `role` / `payload_size` / `latency_ms` / `result` / `error_code` on every MCP call; token redaction
-- [ ] Separate audit log channel — writes only, with before/after version, suitable for compliance review
-- [ ] Per-request timeouts + graceful shutdown — SIGTERM flushes in-flight writes, closes SQLite cleanly, releases git lock
-- [ ] `maad_health` extensions — queue depth, last-write timestamp, repo size on disk, git clean flag, disk headroom
-- [ ] Concurrency smoke tests — two-writer race, N-writer flood, writer + concurrent readers, stale lock recovery
-- [ ] New error codes — `WRITE_CONFLICT`, `WRITE_TIMEOUT`, `RATE_LIMITED`, `IDEMPOTENCY_REPLAY`, `SHUTTING_DOWN`
 
 ### 0.5.0 — Remote MCP Transport
 
