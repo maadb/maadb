@@ -4,7 +4,7 @@
 // ============================================================================
 
 import { simpleGit, type SimpleGit } from 'simple-git';
-import { existsSync, writeFileSync } from 'node:fs';
+import { existsSync, writeFileSync, statSync, unlinkSync } from 'node:fs';
 import path from 'node:path';
 
 import type {
@@ -37,6 +37,30 @@ export class GitLayer {
     // Check if .git exists at the project root specifically — not a parent repo
     const gitDir = path.join(this.projectRoot, '.git');
     return existsSync(gitDir);
+  }
+
+  /**
+   * Detect and recover from a stale .git/index.lock left by a prior crashed
+   * process. Returns a recovery action string if the lock was removed, or
+   * throws if the lock is recent (likely live) and should block startup.
+   *
+   * Threshold: 30 seconds. A lock younger than that is treated as a concurrent
+   * process signal and not touched.
+   */
+  recoverStaleIndexLock(): { action: 'none' | 'removed' } | { action: 'conflict'; mtime: Date } {
+    const lockPath = path.join(this.projectRoot, '.git', 'index.lock');
+    if (!existsSync(lockPath)) return { action: 'none' };
+
+    const stat = statSync(lockPath);
+    const ageMs = Date.now() - stat.mtimeMs;
+    const STALE_MS = 30_000;
+
+    if (ageMs < STALE_MS) {
+      return { action: 'conflict', mtime: stat.mtime };
+    }
+
+    unlinkSync(lockPath);
+    return { action: 'removed' };
   }
 
   async initRepo(): Promise<void> {

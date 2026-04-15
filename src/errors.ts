@@ -38,7 +38,9 @@ export type ErrorCode =
   | 'SESSION_UNBOUND'
   | 'SESSION_ALREADY_BOUND'
   | 'INSUFFICIENT_ROLE'
-  | 'ROLE_UPGRADE_DENIED';
+  | 'ROLE_UPGRADE_DENIED'
+  | 'WRITE_TIMEOUT'
+  | 'SHUTTING_DOWN';
 
 export interface MaadError {
   code: ErrorCode;

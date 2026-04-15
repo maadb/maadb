@@ -7,6 +7,8 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { ok, singleErr, type Result } from '../errors.js';
+import { AsyncFifoMutex } from './mutex.js';
+import { logger } from './logger.js';
 import type {
   DocId,
   DocType,
@@ -62,6 +64,12 @@ export interface HealthReport {
   recoveryActions: string[];
   emptyProject: boolean;
   bootstrapHint: string | null;
+  writeQueueDepth: number;
+  lastWriteOp: {
+    op: string;
+    startedAt: string;
+    elapsedMs: number;
+  } | null;
 }
 
 export class MaadEngine {
@@ -74,6 +82,32 @@ export class MaadEngine {
   private initialized = false;
   private _readOnly = false;
   private startupRecovery: string[] = [];
+
+  // Write mutex — serializes all mutating engine operations per instance.
+  // FIFO. Blocks indefinitely in 0.4.1; timeout deferred to 0.8.5.
+  private writeLock = new AsyncFifoMutex();
+  private lastWriteOp: { op: string; startedAtMs: number } | null = null;
+
+  private async runExclusive<T>(op: string, fn: () => Promise<T>): Promise<T> {
+    const depthOnEnter = this.writeLock.depth();
+    const release = await this.writeLock.acquire();
+    const startedAtMs = Date.now();
+    this.lastWriteOp = { op, startedAtMs };
+    try {
+      return await fn();
+    } finally {
+      const elapsedMs = Date.now() - startedAtMs;
+      if (elapsedMs > 500) {
+        logger.degraded('engine', 'write_slow', `${op} held write lock ${elapsedMs}ms`, {
+          op,
+          elapsedMs,
+          queueDepthOnEnter: depthOnEnter,
+        });
+      }
+      this.lastWriteOp = null;
+      release();
+    }
+  }
 
   async init(projectRoot: string, opts?: { readOnly?: boolean }): Promise<Result<void>> {
     this.projectRoot = path.resolve(projectRoot);
@@ -128,7 +162,19 @@ export class MaadEngine {
 
     this.gitLayer = new GitLayer(this.projectRoot);
     if (await this.gitLayer.isRepo()) {
-      // Git is available
+      // Git is available — check for stale index.lock from a crashed prior process.
+      const lockResult = this.gitLayer.recoverStaleIndexLock();
+      if (lockResult.action === 'conflict') {
+        return singleErr(
+          'GIT_ERROR',
+          `Git index.lock exists and is recent (mtime ${lockResult.mtime.toISOString()}); refusing to start. Another engine process may be running on this project.`,
+          undefined,
+          { reason: 'index-lock-recent', path: path.join(this.projectRoot, '.git', 'index.lock'), mtime: lockResult.mtime.toISOString() },
+        );
+      }
+      if (lockResult.action === 'removed') {
+        this.startupRecovery.push('index_lock_stale_removed');
+      }
     } else {
       this.gitLayer = null;
     }
@@ -142,15 +188,24 @@ export class MaadEngine {
   }
 
   async reload(): Promise<Result<void>> {
-    if (this.backend) this.backend.close();
-    this.initialized = false;
-    return this.init(this.projectRoot, { readOnly: this._readOnly });
+    return this.runExclusive('reload', async () => {
+      if (this.backend) this.backend.close();
+      this.initialized = false;
+      return this.init(this.projectRoot, { readOnly: this._readOnly });
+    });
   }
 
   health(): HealthReport {
     this.assertInit();
     const stats = this.backend.getStats();
     const emptyProject = this.registry.types.size === 0 && stats.totalDocuments === 0;
+    const lastWriteOp = this.lastWriteOp
+      ? {
+          op: this.lastWriteOp.op,
+          startedAt: new Date(this.lastWriteOp.startedAtMs).toISOString(),
+          elapsedMs: Date.now() - this.lastWriteOp.startedAtMs,
+        }
+      : null;
     return {
       projectRoot: this.projectRoot,
       initialized: this.initialized,
@@ -163,7 +218,17 @@ export class MaadEngine {
       recoveryActions: this.startupRecovery,
       emptyProject,
       bootstrapHint: emptyProject ? '_skills/architect-core.md' : null,
+      writeQueueDepth: this.writeLock.depth(),
+      lastWriteOp,
     };
+  }
+
+  /**
+   * Test/drain accessor for the write mutex's current queue depth (held + waiting).
+   * Used by the lifecycle drain loop (0.4.1 H7) and the concurrency test suite.
+   */
+  writeQueueDepth(): number {
+    return this.writeLock.depth();
   }
 
   getStartupRecovery(): string[] {
@@ -194,9 +259,17 @@ export class MaadEngine {
   }
 
   // --- Indexing ---
-  async indexAll(opts?: { force?: boolean }) { return indexing.indexAll(this.ctx(), opts); }
-  async indexFile(absolutePath: FilePath) { return indexing.indexFile(this.ctx(), absolutePath); }
-  async reindex(opts?: { docId?: DocId; force?: boolean }) { return indexing.reindex(this.ctx(), opts); }
+  // Public indexing methods acquire the write mutex. Internal callers in
+  // writes.ts call indexing.indexFile() directly on ctx to avoid deadlock.
+  async indexAll(opts?: { force?: boolean }) {
+    return this.runExclusive('indexAll', () => indexing.indexAll(this.ctx(), opts));
+  }
+  async indexFile(absolutePath: FilePath) {
+    return this.runExclusive('indexFile', () => indexing.indexFile(this.ctx(), absolutePath));
+  }
+  async reindex(opts?: { docId?: DocId; force?: boolean }) {
+    return this.runExclusive('reindex', () => indexing.reindex(this.ctx(), opts));
+  }
 
   // --- Reads ---
   async getDocument(id: DocId, depth: 'hot' | 'warm' | 'cold', blockIdOrHeading?: string) { return reads.getDocument(this.ctx(), id, depth, blockIdOrHeading); }
@@ -215,26 +288,36 @@ export class MaadEngine {
   // --- Composites (Tier 2, provisional) ---
   async getDocumentFull(id: DocId) { return composites.getDocumentFull(this.ctx(), id); }
 
-  // --- Writes (read-only guarded) ---
+  // --- Writes (read-only guarded, serialized under write mutex) ---
   async createDocument(dt: DocType, fields: Record<string, unknown>, body?: string, customDocId?: string) {
     if (this._readOnly) return singleErr('READ_ONLY', 'Engine is in read-only mode');
-    return writes.createDocument(this.ctx(), dt, fields, body, customDocId);
+    return this.runExclusive('createDocument',
+      () => writes.createDocument(this.ctx(), dt, fields, body, customDocId),
+    );
   }
   async updateDocument(id: DocId, fields?: Record<string, unknown>, body?: string, appendBody?: string, expectedVersion?: number) {
     if (this._readOnly) return singleErr('READ_ONLY', 'Engine is in read-only mode');
-    return writes.updateDocument(this.ctx(), id, fields, body, appendBody, expectedVersion);
+    return this.runExclusive('updateDocument',
+      () => writes.updateDocument(this.ctx(), id, fields, body, appendBody, expectedVersion),
+    );
   }
   async deleteDocument(id: DocId, mode: 'soft' | 'hard') {
     if (this._readOnly) return singleErr('READ_ONLY', 'Engine is in read-only mode');
-    return writes.deleteDocument(this.ctx(), id, mode);
+    return this.runExclusive('deleteDocument',
+      () => writes.deleteDocument(this.ctx(), id, mode),
+    );
   }
   async bulkCreate(records: import('./types.js').BulkCreateInput[]) {
     if (this._readOnly) return singleErr('READ_ONLY', 'Engine is in read-only mode');
-    return writes.bulkCreate(this.ctx(), records);
+    return this.runExclusive('bulkCreate',
+      () => writes.bulkCreate(this.ctx(), records),
+    );
   }
   async bulkUpdate(updates: import('./types.js').BulkUpdateInput[]) {
     if (this._readOnly) return singleErr('READ_ONLY', 'Engine is in read-only mode');
-    return writes.bulkUpdate(this.ctx(), updates);
+    return this.runExclusive('bulkUpdate',
+      () => writes.bulkUpdate(this.ctx(), updates),
+    );
   }
 
   // --- Maintenance ---
