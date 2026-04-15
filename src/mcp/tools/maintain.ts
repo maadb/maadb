@@ -9,6 +9,7 @@ import { resultToResponse, successResponse, getProvenanceMode } from '../respons
 import { isDryRun, dryRunResponse, auditToolCall } from '../guardrails.js';
 import type { InstanceCtx } from '../ctx.js';
 import { withEngine } from '../with-session.js';
+import { getTransportSnapshot, isInitialized as telemetryInitialized } from '../transport/telemetry.js';
 
 export function register(server: McpServer, ctx: InstanceCtx): void {
   server.registerTool('maad_delete', {
@@ -45,13 +46,22 @@ export function register(server: McpServer, ctx: InstanceCtx): void {
   }));
 
   server.registerTool('maad_health', {
-    description: 'Returns engine health status: initialized, read-only mode, git availability, document count, last indexed timestamp, provenance mode, recovery actions.',
+    description: 'Returns engine health status plus transport posture and session telemetry: initialized, read-only mode, git availability, document count, last indexed timestamp, provenance mode, recovery actions, transport {kind,host?,port?,uptimeSeconds}, sessions {active,openedTotal,closedTotal,lastOpenedAt,lastClosedAt,idleSweepLastRunAt}.',
     inputSchema: z.object({
       project: z.string().optional().describe('Project name (multi-project mode only)'),
     }),
   }, async (args, extra) => withEngine(ctx, extra, 'maad_health', args, ({ engine }) => {
     const health = engine.health();
     const provMode = getProvenanceMode();
-    return successResponse({ ...health, provenance: provMode }, 'maad_health');
+    // Telemetry may be uninitialized in test contexts that build an engine
+    // without going through startServer. Fall back gracefully so maad_health
+    // stays useful in those environments.
+    const telemetry = telemetryInitialized()
+      ? getTransportSnapshot(ctx.sessions.size())
+      : null;
+    const payload = telemetry
+      ? { ...health, provenance: provMode, transport: telemetry.transport, sessions: telemetry.sessions }
+      : { ...health, provenance: provMode };
+    return successResponse(payload, 'maad_health');
   }));
 }

@@ -16,6 +16,8 @@ import { logger } from '../../engine/logger.js';
 import { logAuthFailure } from '../../logging.js';
 import { validateBearer } from './auth.js';
 import type { SessionRegistry } from '../../instance/session.js';
+import { recordIdleSweep, recordSessionOpen } from './telemetry.js';
+import { isShuttingDown } from '../shutdown.js';
 
 export interface HttpTransportOptions {
   host: string;
@@ -105,6 +107,26 @@ export async function startHttpTransport(opts: HttpTransportOptions): Promise<Ht
       }
 
       const url = new URL(req.url ?? '/', `http://${opts.host}`);
+
+      // Liveness probe — unauthenticated, minimal, no state leak. Routed
+      // BEFORE auth so container runtimes and orchestrators can probe the
+      // process without holding a copy of the bearer token. Returns 503
+      // SHUTTING_DOWN during drain so an orchestrator's failing probe during
+      // deploy signals "process is exiting" rather than "process is broken".
+      if (url.pathname === '/healthz' && req.method === 'GET') {
+        const draining = isShuttingDown();
+        res.statusCode = draining ? 503 : 200;
+        res.setHeader('Content-Type', 'application/json');
+        res.setHeader('Cache-Control', 'no-store');
+        res.setHeader('X-Content-Type-Options', 'nosniff');
+        if (draining) {
+          res.end(JSON.stringify({ ok: false, errors: [{ code: 'SHUTTING_DOWN', message: 'server is draining' }] }));
+        } else {
+          res.end(JSON.stringify({ ok: true }));
+        }
+        return;
+      }
+
       if (url.pathname !== '/mcp') {
         writeJsonError(res, 404, 'NOT_FOUND', 'Unknown path');
         return;
@@ -161,7 +183,13 @@ export async function startHttpTransport(opts: HttpTransportOptions): Promise<Ht
           // dispose, audit handlers) never runs. withSession may also
           // create(sid) lazily on first tool call; create() is idempotent.
           opts.sessions.create(sid);
-          logger.info('mcp', 'http', `session opened sid=${sid} remote=${remoteAddr}`);
+          const ua = req.headers['user-agent'];
+          recordSessionOpen({
+            session_id: sid,
+            remote_addr: remoteAddr,
+            user_agent: typeof ua === 'string' ? ua : null,
+            transport: 'http',
+          });
         },
       });
       transport.onclose = (): void => {
@@ -171,7 +199,6 @@ export async function startHttpTransport(opts: HttpTransportOptions): Promise<Ht
           // Fan out to the registry — this fires close handlers the server
           // wired in (rate-limit dispose, session_close audit, etc.).
           opts.sessions.destroy(sid, 'transport');
-          logger.info('mcp', 'http', `session closed sid=${sid} reason=transport`);
         }
       };
 
@@ -217,6 +244,7 @@ export async function startHttpTransport(opts: HttpTransportOptions): Promise<Ht
   const idleSweeper = setInterval(() => {
     const now = Date.now();
     const threshold = now - opts.idleMs;
+    let swept = 0;
     for (const [sid, entry] of entries) {
       if (entry.lastActivityAt < threshold) {
         // Mark the registry first so the fan-out reason reflects WHY it
@@ -226,8 +254,11 @@ export async function startHttpTransport(opts: HttpTransportOptions): Promise<Ht
         entries.delete(sid);
         // Close the SSE transport — frees sockets and triggers SDK cleanup.
         void entry.transport.close().catch(() => { /* best-effort */ });
-        logger.info('mcp', 'http', `session closed sid=${sid} reason=idle`);
+        swept += 1;
       }
+    }
+    if (swept > 0) {
+      recordIdleSweep({ swept, remaining: entries.size });
     }
   }, sweepIntervalMs);
   idleSweeper.unref?.();

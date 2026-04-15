@@ -8,6 +8,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { buildConfig } from './config.js';
 import { startHttpTransport, type HttpTransportHandle } from './transport/http.js';
+import { initTransportTelemetry, recordSessionClose } from './transport/telemetry.js';
 
 const require = createRequire(import.meta.url);
 const pkg = require('../../package.json') as { version: string };
@@ -144,13 +145,15 @@ export async function startServer(opts: ServeOptions): Promise<void> {
     logger.info('mcp', 'startup',
       `${toolCount} tools registered — instance "${instance.name}" (${instance.source}), ${instance.projects.length} project(s)${dryRun ? ' (dry-run)' : ''} [transport=http]`);
 
+    initTransportTelemetry({ kind: 'http', host: opts.http.host, port: opts.http.port });
+
     // Wire session-close fan-out: when a session is destroyed (for any
     // reason — client DELETE, transport drop, idle sweep, shutdown), release
-    // its per-session rate-limit state. Other handlers (audit logging, etc.)
-    // can stack on top as the close-handler chain grows.
+    // its per-session rate-limit state and emit the session_close audit event
+    // with the measured duration. Additional handlers stack in registration order.
     ctx.sessions.registerCloseHandler((sid, reason) => {
       getRateLimiter().disposeSession(sid);
-      logger.info('mcp', 'session', `session_close sid=${sid} reason=${reason}`);
+      recordSessionClose({ session_id: sid, reason });
     });
 
     const handle: HttpTransportHandle = await startHttpTransport({
@@ -179,6 +182,7 @@ export async function startServer(opts: ServeOptions): Promise<void> {
   }
 
   // stdio — single server, single transport, lifetime of the process
+  initTransportTelemetry({ kind: 'stdio' });
   const { server, toolCount } = buildMcpServer();
   logger.info('mcp', 'startup',
     `${toolCount} tools registered — instance "${instance.name}" (${instance.source}), ${instance.projects.length} project(s)${dryRun ? ' (dry-run)' : ''}`);
