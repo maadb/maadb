@@ -72,11 +72,14 @@ Initial engine build. Parser, registry, schema, extractor (11 primitives), SQLit
 
 ## Planned
 
-- **0.4.5** — Deployment workflow: `_skills/deploy.md`, `maad init-instance` + `maad add-project` CLI, platform-specific MCP config generation teaching the instance model
-- **0.5.0** — Import workflow: `_inbox/` convention, source tracking (`source_file`, `source_hash`), duplicate detection, readonly type flag
-- **0.5.5** — Provenance refinement + admin dashboard tool + `maad_export`
-- **0.6.0** — Query power: FTS5, fuzzy entity matching, compound filters (AND/OR), cursor-based pagination
-- **0.7.0** — Object attributes: user-defined tags on extracted objects, stored as YAML, indexed on reindex
-- **0.8.0** — npm package prep: `npx maad serve`, published to npm, MCP configs simplify to `npx maad`
-- **0.9.0** — Remote MCP: HTTP/SSE transport (`StreamableHTTPServerTransport`), per-connection roles, concurrent read access, EnginePool eviction policy activation
+- **0.4.1** — Production hardening: per-engine write mutex (FIFO, blocking), stale git-lock recovery, idempotency keys, per-session rate limiting, structured JSON logging + audit channel, per-request timeouts + graceful shutdown, extended `maad_health`, concurrency smoke tests, new error codes
+- **0.5.0** — Remote MCP transport (pulled forward from 0.9.0): HTTP/SSE via `StreamableHTTPServerTransport`, token-based auth at handshake, single role tier, concurrent reads, `maad_changes_since` polling delta, deployment guide
+- **0.5.1** — Deployment workflow: `_skills/deploy.md`, `maad init-instance` + `maad add-project` CLI, platform-specific MCP config generation (stdio + HTTP)
+- **0.6.0** — npm package prep (pulled forward from 0.8.0): `npx maad serve`, published to npm, MCP configs simplify to `npx maad`
+- **0.7.0** — Import workflow: `_inbox/` convention, source tracking, duplicate detection, readonly type flag
+- **0.7.5** — LLM evaluation (deferred from 0.3.0): multi-model testing, friction inventory, benchmarks
+- **0.8.0** — Provenance refinement + admin dashboard tool + `maad_export`
+- **0.8.5** — Remote MCP hardening: per-connection role tiers, rate-limit policy, backpressure thresholds, mutex timeout, stress suite, metrics export, `git gc` automation
+- **0.9.0** — Query power: FTS5, fuzzy entity matching, compound filters (AND/OR), cursor-based pagination
+- **0.9.5** — Object attributes: user-defined tags on extracted objects, stored as YAML, indexed on reindex
 - **1.0.0** — Stable release: API locked, npm published, full test coverage, migration guide

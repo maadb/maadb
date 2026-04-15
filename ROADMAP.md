@@ -31,55 +31,66 @@
 
 ---
 
-## Current: v0.2.13
+## Current: v0.4.0
 
-Engine is stable, public, and feature-complete for single-project MCP use. Recent additions: version tracking on reads, query sort, list field index fix, summary warnings, validation messages, bulk_update batching, read-back verification, `maad_verify` fact-checking tool, grounding rules, env var config, dynamic server version, empty-project boot + tool name rename. 13 reader / 18 writer / 22 admin tools.
+Multi-project routing shipped. One MCP server serves multiple MAAD projects via `instance.yaml` with session-bound mode (single or multi), per-project roles, and session-level role downgrade. `EnginePool` lazy-loads engines with an eviction seam (policy deferred). `SessionRegistry` keyed by MCP-SDK session IDs (HTTP/SSE-ready for remote transport). 4 instance-level tools, backward-compatible `--project`/`--role` single-project mode. 13 reader / 18 writer / 22 admin tools, all routable. 323 tests passing.
 
 ---
 
 ## Planned
 
-### 0.3.0 — LLM Evaluation
+### 0.4.1 — Production Hardening
 
-Prove the engine works across models and use cases with real data.
+Harden the write path and operational surface before exposing the engine over a network transport. Everything here is internal — no tool-surface changes beyond a handful of new error codes and extended `maad_health` fields.
 
-- [ ] Multi-model testing (Claude, GPT, Gemini) against maadb-demo
-- [ ] Identify friction points in tool usage, schema design, and boot flow
-- [ ] Document what works and what breaks per model
-- [ ] Benchmark: token usage, call count, accuracy on structured tasks
-- [ ] Test the Architect skill end-to-end: vague prompt → working database
+- [ ] Write concurrency spec — `docs/specs/0.4.1-write-concurrency.md` covering mutex shape, FIFO ordering, timeout policy, stale `.git/index.lock` recovery, error codes, test plan
+- [ ] Per-engine write mutex (FIFO, blocking) — serializes all mutating operations per project engine
+- [ ] Stale git lock recovery on engine `init()` — detect and clear orphaned `.git/index.lock` from crashed prior process
+- [ ] Idempotency keys on writes — optional client-supplied UUID deduplicated within a TTL window; prevents duplicate records on retry
+- [ ] Rate limiting — per-session token bucket (starting: 10 writes/sec burst, 60/min sustained, 5 concurrent in-flight, 1MB max payload); tunable via env
+- [ ] Structured JSON logging — pino-based, `request_id` / `session_id` / `project` / `tool` / `role` / `payload_size` / `latency_ms` / `result` / `error_code` on every MCP call; token redaction
+- [ ] Separate audit log channel — writes only, with before/after version, suitable for compliance review
+- [ ] Per-request timeouts + graceful shutdown — SIGTERM flushes in-flight writes, closes SQLite cleanly, releases git lock
+- [ ] `maad_health` extensions — queue depth, last-write timestamp, repo size on disk, git clean flag, disk headroom
+- [ ] Concurrency smoke tests — two-writer race, N-writer flood, writer + concurrent readers, stale lock recovery
+- [ ] New error codes — `WRITE_CONFLICT`, `WRITE_TIMEOUT`, `RATE_LIMITED`, `IDEMPOTENCY_REPLAY`, `SHUTTING_DOWN`
 
-### 0.4.0 — Multi-Project Routing
+### 0.5.0 — Remote MCP Transport
 
-One MCP server, multiple projects, session-bound mode. Foundation for everything multi-project and for remote MCP (0.9.0). Inherits the 0.2.13 empty-project bootstrap: each pooled engine self-heals via `engine.init()` and `ensureProjectSkills()` runs per project on first bind, so `maad_use_project` works against empty directories without any manual init step.
+Pulled forward from 0.9.0. Reuses the `SessionRegistry` model built in 0.4.0 — same routing logic keyed by HTTP session ID instead of stdio process. Lands on the hardened engine from 0.4.1.
 
-- [ ] `instance.yaml` — declares projects with name, path, role, description
-- [ ] `EnginePool` — lazy-loads engines per session, no eviction in v1
-- [ ] `SessionState` — per-connection mode + active project + whitelist
-- [ ] `maad_use_project <name>` — bind session to single mode (locked to one project)
-- [ ] `maad_use_projects [names]` — bind session to multi mode (whitelist + explicit `project=` required on every call)
-- [ ] `maad_projects` — list available projects (works pre-session)
-- [ ] `maad_current_session` — debug session state
-- [ ] `withSession()` wrapper on every project-level tool — routes to correct engine, enforces mode
-- [ ] No mid-session mode switching (end and reconnect)
-- [ ] Backward compat: `--project <path>` still works, auto-binds session to single mode
-- [ ] `--instance <path>` and `MAAD_INSTANCE` env var
-- [ ] Tool count: 4 new instance-level tools, all 22 existing tools become routable
+- [ ] HTTP/SSE transport via `StreamableHTTPServerTransport` from the MCP SDK
+- [ ] Token-based auth at MCP handshake — bearer token maps to role
+- [ ] Single role tier at launch (authenticated = effective role); per-connection role refinement deferred
+- [ ] Concurrent read access (multiple agents, one instance)
+- [ ] `maad_changes_since <timestamp|version>` polling delta endpoint — cheap "what changed" for agents that want freshness between calls
+- [ ] Deployment guide for Docker / Azure Functions / VM
+- [ ] TLS terminated at reverse proxy (documented, not enforced in-engine)
 
-### 0.4.5 — Deployment Workflow
+### 0.5.1 — Deployment Workflow
 
-Zero-to-operational in one agent session. Builds on 0.4.0 — deploy skill and CLI teach the instance model natively instead of single-project paths.
+Zero-to-operational in one agent session. Builds on 0.4.0 multi-project mode and the 0.4.1 hardened engine.
 
 - [ ] `_skills/deploy.md` — agent-guided instance setup (prerequisites, scaffolding, `instance.yaml`, MCP config, Architect handoff per project)
 - [ ] README deployment section validated against fresh installs (instance-first)
-- [ ] Platform-specific MCP config generation (Claude Code, Claude Desktop, generic stdio) — emits instance-mode configs by default, single-project as fallback
+- [ ] Platform-specific MCP config generation (Claude Code, Claude Desktop, generic stdio + HTTP) — emits instance-mode configs by default
 - [ ] `maad init-instance` CLI command — scaffolds `instance.yaml` and directory layout
 - [ ] `maad add-project <name> <path>` CLI command — appends to `instance.yaml`, creates project dir if missing
 - [ ] Verify deploy → `maad_use_project` → architect → operational flow end-to-end
 
-### 0.5.0 — Import Workflow
+### 0.6.0 — npm Package Prep
 
-Recurring import of raw files into MAADB projects. Built on multi-project routing from day one.
+Pulled forward from 0.8.0. Makes the engine trivially installable into container images and remote deployments.
+
+- [ ] Clean up public API surface
+- [ ] `npx maad serve` works without cloning the repo
+- [ ] Package published to npm
+- [ ] MCP configs simplify to `npx maad` instead of absolute paths
+- [ ] Getting started guide for new users
+
+### 0.7.0 — Import Workflow
+
+Recurring import of raw files into MAADB projects.
 
 - [ ] `_inbox/` directory convention (drop zone for raw files)
 - [ ] `_skills/import-workflow.md` — agent-guided inbox processing
@@ -87,9 +98,19 @@ Recurring import of raw files into MAADB projects. Built on multi-project routin
 - [ ] Duplicate detection via `source_hash` query before create
 - [ ] Readonly type flag — engine rejects updates on readonly types
 - [ ] Delete source from `_inbox/` after successful import
-- [ ] Test with static catalog archetype (research papers, book collection)
+- [ ] Test with static catalog archetype
 
-### 0.5.5 — Provenance + Admin Tooling
+### 0.7.5 — LLM Evaluation
+
+Prove the engine works across models and use cases with real data. Deferred from 0.3.0 slot — production hardening and remote transport took priority.
+
+- [ ] Multi-model testing (Claude, GPT, Gemini) against maadb-demo
+- [ ] Identify friction points in tool usage, schema design, and boot flow
+- [ ] Document what works and what breaks per model
+- [ ] Benchmark: token usage, call count, accuracy on structured tasks
+- [ ] Test the Architect skill end-to-end: vague prompt → working database
+
+### 0.8.0 — Provenance + Admin Tooling
 
 Better visibility into what happened and why.
 
@@ -98,7 +119,19 @@ Better visibility into what happened and why.
 - [ ] `maad_export` — dump project data in portable format
 - [ ] Improved error messages with actionable guidance
 
-### 0.6.0 — Query Power
+### 0.8.5 — Remote MCP Hardening
+
+Promote remote transport from "minimal" to "operator-grade" based on real 0.5.0 usage signal.
+
+- [ ] Per-connection role tiers (reader / writer / admin) with token → role mapping
+- [ ] Configurable rate limit policy per token or tier
+- [ ] Backpressure / queue depth thresholds with tunable 429 response
+- [ ] Mutex timeout with `WRITE_TIMEOUT` error path (replaces infinite block from 0.4.1)
+- [ ] Full concurrency stress test suite
+- [ ] Metrics export (Prometheus or OTEL)
+- [ ] `git gc` automation / scheduled maintenance
+
+### 0.9.0 — Query Power
 
 Make the index smarter.
 
@@ -108,7 +141,7 @@ Make the index smarter.
 - [ ] Sort by any indexed field
 - [ ] Cursor-based pagination tokens
 
-### 0.7.0 — Object Attributes
+### 0.9.5 — Object Attributes
 
 User-defined metadata on extracted objects.
 
@@ -117,27 +150,6 @@ User-defined metadata on extracted objects.
 - [ ] SQLite `object_attributes` table, rebuilt on reindex
 - [ ] Query support: filter objects by attribute values
 - [ ] CLI/MCP commands to read/write attributes (writes go to YAML + git commit)
-
-### 0.8.0 — npm Package Prep
-
-Make MAAD installable.
-
-- [ ] Clean up public API surface
-- [ ] `npx maad serve` works without cloning the repo
-- [ ] Package published to npm
-- [ ] MCP configs simplify to `npx maad` instead of absolute paths
-- [ ] Getting started guide for new users
-
-### 0.9.0 — Remote MCP
-
-Hosted deployment with enforced access control. Reuses the `SessionState` model built in 0.4.0 — same routing logic, keyed by HTTP session ID instead of stdio process.
-
-- [ ] HTTP/SSE transport (`StreamableHTTPServerTransport` from MCP SDK)
-- [ ] Per-connection roles (endpoint-based or token-based)
-- [ ] Concurrent read access (multiple agents, one instance)
-- [ ] Deployment guide for Docker / Azure Functions / VM
-- [ ] Roles enforced by architecture — agents can't bypass MCP when connecting over network
-- [ ] Session whitelist enables workload-aware routing at scale
 
 ### 1.0.0 — Stable Release
 
