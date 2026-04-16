@@ -5,7 +5,8 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { docId, docType } from '../../types.js';
-import { resultToResponse, errorResponse } from '../response.js';
+import type { CreateResult, UpdateResult, BulkResult } from '../../engine/types.js';
+import { resultToResponse, errorResponse, attachWarnings } from '../response.js';
 import { maadError } from '../../errors.js';
 import { isDryRun, dryRunResponse, auditToolCall } from '../guardrails.js';
 import type { InstanceCtx } from '../ctx.js';
@@ -123,7 +124,8 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
           null, // version_before: null on create
         );
       }
-      return resultToResponse(result, 'maad_create');
+      const response = resultToResponse(result, 'maad_create');
+      return result.ok ? attachWarnings(response, (result.value as CreateResult).validation.warnings) : response;
     }),
   ));
 
@@ -162,7 +164,8 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
           versionBefore,
         );
       }
-      return resultToResponse(result, 'maad_update');
+      const response = resultToResponse(result, 'maad_update');
+      return result.ok ? attachWarnings(response, (result.value as UpdateResult).validation.warnings) : response;
     }),
   ));
 
@@ -205,7 +208,8 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
           );
         }
       }
-      return resultToResponse(result);
+      const response = resultToResponse(result);
+      return result.ok ? attachWarnings(response, (result.value as BulkResult).warnings) : response;
     }),
   ));
 
@@ -237,7 +241,8 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
           );
         }
       }
-      return resultToResponse(result);
+      const response = resultToResponse(result);
+      return result.ok ? attachWarnings(response, (result.value as BulkResult).warnings) : response;
     }),
   ));
 

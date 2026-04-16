@@ -4,6 +4,7 @@
 // ============================================================================
 
 import type { Result, MaadError } from '../errors.js';
+import type { ValidationWarning } from '../types.js';
 import type { ProvenanceMode } from './config.js';
 
 let provenanceMode: ProvenanceMode = 'off';
@@ -81,4 +82,18 @@ export function attachMeta(
   const existing = (parsed._meta as Record<string, unknown> | undefined) ?? {};
   parsed._meta = { ...existing, ...meta };
   return { content: [{ type: 'text', text: JSON.stringify(parsed) }] };
+}
+
+/**
+ * Attach validation warnings to `_meta.warnings[]`. No-op when the input is
+ * empty or undefined — avoids polluting responses for writes that produced
+ * no warnings. Used by write-tool handlers (maad_create / maad_update /
+ * maad_bulk_*) after a successful engine call.
+ */
+export function attachWarnings(
+  response: { content: Array<{ type: 'text'; text: string }> },
+  warnings: ValidationWarning[] | undefined,
+): { content: Array<{ type: 'text'; text: string }> } {
+  if (!warnings || warnings.length === 0) return response;
+  return attachMeta(response, { warnings });
 }

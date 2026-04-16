@@ -10,6 +10,7 @@ import type {
   ObjectMatch,
   Relationship,
   ValidationResult,
+  ValidationWarning,
 } from '../types.js';
 
 export interface IndexResult {
@@ -48,10 +49,23 @@ export interface BulkVerification {
 }
 
 export interface BulkResult {
-  succeeded: Array<{ index: number; docId: string; filePath: string; version: number }>;
+  succeeded: Array<{
+    index: number;
+    docId: string;
+    filePath: string;
+    version: number;
+    warnings?: ValidationWarning[];
+  }>;
   failed: Array<{ index: number; docId: string | null; error: string }>;
   totalRequested: number;
   verification: BulkVerification;
+  /**
+   * Aggregated warnings across all succeeded records. Each entry carries the
+   * same `field` / `message` / `code` as the per-record warnings but prefixed
+   * with `{docId}.` in `field` so a caller reading the top-level channel can
+   * trace each warning back to its record without cross-referencing.
+   */
+  warnings: ValidationWarning[];
 }
 
 export interface GetResult {

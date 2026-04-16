@@ -278,11 +278,28 @@ export interface ValidatedField {
 export interface ValidationResult {
   valid: boolean;
   errors: ValidationError[];
+  warnings: ValidationWarning[];
 }
 
 export interface ValidationError {
   field: string;
   message: string;
+  location: SourceLocation | null;
+}
+
+/**
+ * Non-fatal signal emitted by the validator. Never blocks the write.
+ * Surfaces in response `_meta.warnings[]` and in the ops log so agents can
+ * self-correct and operators can see patterns.
+ *
+ * First use case is PRECISION_COARSER_THAN_DECLARED (0.6.7 Phase 4), but
+ * the channel is reusable for future soft-validations — deprecated fields,
+ * length hints, cross-field invariants, schema-evolution notices.
+ */
+export interface ValidationWarning {
+  field: string;
+  message: string;
+  code: string;
   location: SourceLocation | null;
 }
 

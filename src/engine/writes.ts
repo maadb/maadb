@@ -21,6 +21,7 @@ import { generateDocument, extractBody } from '../writer/index.js';
 import type { EngineContext } from './context.js';
 import { gitCommit } from './context.js';
 import type { CreateResult, UpdateResult, DeleteResult, BulkCreateInput, BulkUpdateInput, BulkResult, BulkVerification } from './types.js';
+import type { ValidationWarning } from '../types.js';
 import { indexFile } from './indexing.js';
 import { generateDocId, readFrontmatter } from './helpers.js';
 import { atomicWrite } from './journal.js';
@@ -353,12 +354,14 @@ export async function bulkCreate(
     }
 
     allFiles.push(fp);
-    succeeded.push({
+    const entry: BulkResult['succeeded'][number] = {
       index: i,
       docId: id,
       filePath: path.relative(ctx.projectRoot, fp),
       version: 1,
-    });
+    };
+    if (validation.warnings.length > 0) entry.warnings = validation.warnings;
+    succeeded.push(entry);
   }
 
   // Single git commit for all succeeded records
@@ -376,8 +379,9 @@ export async function bulkCreate(
   }
 
   const verification = await verifyBulkResults(ctx, succeeded, records.map(r => ({ fields: r.fields, body: r.body })));
+  const warnings = aggregateBulkWarnings(succeeded);
 
-  return ok({ succeeded, failed, totalRequested: records.length, verification });
+  return ok({ succeeded, failed, totalRequested: records.length, verification, warnings });
 }
 
 export async function bulkUpdate(
@@ -405,12 +409,16 @@ export async function bulkUpdate(
       const doc = ctx.backend.getDocument(upd.docId as DocId);
       const fp = doc ? path.join(ctx.projectRoot, doc.filePath as string) : '';
       allFiles.push(fp);
-      succeeded.push({
+      const entry: BulkResult['succeeded'][number] = {
         index: j,
         docId: upd.docId,
         filePath: doc?.filePath as string ?? '',
         version: result.value.version,
-      });
+      };
+      if (result.value.validation.warnings.length > 0) {
+        entry.warnings = result.value.validation.warnings;
+      }
+      succeeded.push(entry);
     } else {
       failed.push({
         index: j,
@@ -435,8 +443,25 @@ export async function bulkUpdate(
   }
 
   const verification = await verifyBulkResults(ctx, succeeded, updates.map(u => ({ fields: u.fields ?? {}, body: u.body, appendBody: u.appendBody })));
+  const warnings = aggregateBulkWarnings(succeeded);
 
-  return ok({ succeeded, failed, totalRequested: updates.length, verification });
+  return ok({ succeeded, failed, totalRequested: updates.length, verification, warnings });
+}
+
+/**
+ * Flatten per-record warnings into a single array, prefixing `field` with
+ * `{docId}.` so callers reading the top-level `warnings` channel can trace
+ * each entry back to its record without cross-referencing.
+ */
+function aggregateBulkWarnings(succeeded: BulkResult['succeeded']): ValidationWarning[] {
+  const out: ValidationWarning[] = [];
+  for (const entry of succeeded) {
+    if (!entry.warnings) continue;
+    for (const w of entry.warnings) {
+      out.push({ ...w, field: `${entry.docId}.${w.field}` });
+    }
+  }
+  return out;
 }
 
 // ---- Read-back verification ------------------------------------------------

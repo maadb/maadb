@@ -8,6 +8,7 @@ import type {
   Registry,
   ValidationResult,
   ValidationError,
+  ValidationWarning,
   FieldDefinition,
   FilePath,
 } from '../types.js';
@@ -19,6 +20,7 @@ export function validateFrontmatter(
   filePath?: FilePath | undefined,
 ): ValidationResult {
   const errors: ValidationError[] = [];
+  const warnings: ValidationWarning[] = [];
   const loc = filePath ? { file: filePath, line: 1, col: 1 } : null;
 
   // Check required fields
@@ -54,6 +56,7 @@ export function validateFrontmatter(
   return {
     valid: errors.length === 0,
     errors,
+    warnings,
   };
 }
 

@@ -38,6 +38,20 @@ describe('validateFrontmatter', () => {
     const result = validateFrontmatter(fm, caseSchema, registry);
     expect(result.valid).toBe(true);
     expect(result.errors).toHaveLength(0);
+    // Phase 3: warnings channel always present, empty until Phase 4 wires precision enforcement.
+    expect(result.warnings).toEqual([]);
+  });
+
+  it('ValidationResult always includes warnings array (0.6.7 Phase 3 channel)', () => {
+    const valid = validateFrontmatter(
+      { doc_id: 'cas-1', doc_type: 'case', schema: 'case.v1', title: 'T', client: 'cli-acme', status: 'open' },
+      caseSchema,
+      registry,
+    );
+    expect(Array.isArray(valid.warnings)).toBe(true);
+
+    const invalid = validateFrontmatter({ doc_id: 'cas-2', doc_type: 'case', schema: 'case.v1' }, caseSchema, registry);
+    expect(Array.isArray(invalid.warnings)).toBe(true);
   });
 
   it('rejects missing required fields', () => {
