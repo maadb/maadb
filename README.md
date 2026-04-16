@@ -347,12 +347,12 @@ All tools return `{ ok: true, data: {...} }` or `{ ok: false, errors: [...] }`.
 
 - TypeScript strict, Node.js 22+ (tested on v24)
 - 5 production dependencies: `better-sqlite3`, `gray-matter`, `simple-git`, `@modelcontextprotocol/sdk`, `pino`
-- 476 tests, Vitest
+- 554 tests, Vitest
 - See [FRAMEWORK.md](FRAMEWORK.md) for data doctrine, tier model, and engine design principles
 
 ## Current State
 
-**v0.5.0** — Remote MCP transport (HTTP/SSE) via `StreamableHTTPServerTransport`. Bearer-token auth at the handshake, per-session lifecycle with idle eviction, operation kinds (concurrent reads bypass the write mutex), `maad_changes_since` polling delta, extended `maad_health` with transport + session telemetry, unauthenticated `GET /healthz` liveness. Builds on the hardened 0.4.1 engine and the 0.4.0 multi-project routing model. stdio remains the default. 476 tests passing.
+**v0.6.7** — Schema Precision Hints. Date fields can declare `store_precision` (engine-enforced minimum on write) and `display_precision` (consumer rendering hint). Enforcement fires at write-time only — reads, reindex, and audit paths never judge historical data. Non-breaking by default: `on_coarser: warn` surfaces drift via response `_meta.warnings[]` and ops log without blocking the write; `on_coarser: error` opts into strict rejection. `maad_validate includePrecision: true` scans historical records for precision drift without counting them invalid. Builds on the 0.5.0 remote MCP transport and 0.4.1 hardened engine. 554 tests passing.
 
 ## Roadmap
 
@@ -362,14 +362,18 @@ All tools return `{ ok: true, data: {...} }` or `{ ok: false, errors: [...] }`.
 | ~~0.4.0~~ | ~~Multi-project routing — one MCP, many projects, session-bound mode~~ — **shipped** |
 | ~~0.4.1~~ | ~~Production hardening — write mutex, idempotency, rate limit, logging, lifecycle, health~~ — **shipped** |
 | ~~0.5.0~~ | ~~Remote MCP — HTTP/SSE transport, bearer auth, concurrent reads, `maad_changes_since`, deploy guides~~ — **shipped** |
+| ~~0.6.7~~ | ~~Schema precision hints — `store_precision`/`display_precision`, warn-or-error contract, round-trip preservation, `maad_validate includePrecision`~~ — **shipped** |
 | 0.5.1 | Deployment workflow — `_skills/deploy.md`, `maad init-instance`, platform-specific MCP config generation |
-| 0.6.0 | npm package prep — `npx maad serve`, published to npm |
-| 0.7.0 | Import workflow — `_inbox/`, duplicate detection, readonly types |
-| 0.7.5 | LLM evaluation — multi-model testing, friction inventory, benchmarks |
-| 0.8.0 | Provenance refinement + admin dashboard + `maad_export` |
-| 0.8.5 | Remote MCP hardening — per-token role tiers, rate-limit policy, stress suite, metrics export |
-| 0.9.0 | Query power — FTS5, fuzzy entity matching, compound filters |
-| 0.9.5 | Object attributes — user-defined tags on extracted objects |
+| 0.6.0 | Scoped auth & identity — per-token roles, token registry, audit identity attribution |
+| 0.6.5 | Live notifications — `maad_subscribe`, SSE push on writes |
+| 0.7.0 | npm package prep — `npx maad serve`, published to npm |
+| 0.7.5 | Import workflow — `_inbox/`, duplicate detection, readonly types |
+| 0.8.0 | LLM evaluation — multi-model testing, friction inventory, benchmarks |
+| 0.8.5 | Provenance refinement + admin dashboard + `maad_export` |
+| 0.8.7 | Storage backend abstraction (prep) — `StorageBackend` interface, extract git as `GitBackend` |
+| 0.9.0 | Remote MCP hardening — per-token rate-limit policy, stress suite, metrics export |
+| 0.9.5 | Query power — FTS5, fuzzy entity matching, compound filters |
+| 0.9.7 | Object attributes — user-defined tags on extracted objects |
 | 1.0.0 | Stable release — API locked, npm published |
 
 ## License

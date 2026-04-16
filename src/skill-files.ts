@@ -109,12 +109,51 @@ fields:
 |------|-------------|---------------|
 | \`string\` | Plain text | Exact match, contains |
 | \`number\` | Numeric value | Range queries (gt, lt, gte, lte) |
-| \`date\` | ISO date (YYYY-MM-DD) | Lexicographic range |
+| \`date\` | ISO date or datetime (YYYY-MM-DD, or full ISO 8601) | Lexicographic range |
 | \`enum\` | Constrained values | Exact match. Requires \`values\` list. |
 | \`ref\` | Reference to another record | Exact match. Requires \`target\` type. Creates relationship edges. |
 | \`boolean\` | true/false | Exact match |
 | \`list\` | Array of values | Requires \`itemType\`. Use \`target\` for list-of-ref. |
 | \`amount\` | Currency value (e.g. "1250000 USD") | Numeric range on extracted value |
+
+## Date precision (0.6.7+)
+
+Date fields accept three optional hints that let the schema declare the
+precision contract instead of relying on convention:
+
+| Key | Values | Default | Effect |
+|-----|--------|---------|--------|
+| \`store_precision\` | \`year\` / \`month\` / \`day\` / \`hour\` / \`minute\` / \`second\` / \`millisecond\` | unset (lenient) | Minimum precision the engine accepts on write |
+| \`on_coarser\` | \`warn\` / \`error\` | \`warn\` when \`store_precision\` declared | Behavior when a written value is coarser than declared. \`warn\` emits a response \`_meta.warnings[]\` entry; \`error\` rejects the write. |
+| \`display_precision\` | same enum | unset | Consumer-side rendering hint. Engine never enforces. Must be coarser-or-equal to \`store_precision\`. |
+
+### Example — event timestamp (rich storage, minute-level UI)
+
+\`\`\`yaml
+started_at:
+  type: date
+  store_precision: second      # engine enforces — writes coarser than second warn
+  on_coarser: warn
+  display_precision: minute    # consumer renders HH:MM, drops seconds
+\`\`\`
+
+### Example — birthday (identity date, no time component)
+
+\`\`\`yaml
+birthday:
+  type: date
+  store_precision: day         # day is the richest meaningful precision
+  on_coarser: error            # reject year-only or month-only writes
+  display_precision: day
+\`\`\`
+
+### Rules
+
+- **Storage wins.** \`store_precision\` is a *minimum*, not an exact match — writing finer than declared always passes. Rule: always capture the richest precision available.
+- **Write-time only.** Precision enforcement fires only on \`maad_create\`, \`maad_update\`, and \`maad_bulk_*\`. Reads, reindex, and \`maad_validate\` (without \`includePrecision\`) never judge historical data.
+- **Update-neighbor safe.** Updating a field that isn't the declared-precision date never fires a warning on the unchanged historical date — schemas can tighten precision without breaking records that predate the contract.
+- **Audit with \`maad_validate includePrecision: true\`** to plan migrations. Returns \`precisionDrift[]\` — informational, never counted as invalid.
+- Absent keys = pre-0.6.7 lenient behavior. Fully backward compatible.
 
 ## Required fields
 

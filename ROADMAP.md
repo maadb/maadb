@@ -71,9 +71,17 @@ Engine served over HTTP/SSE so MCP clients can connect across the network. One s
 
 82 new tests (transport/auth/lifecycle/concurrency/changes-since/healthz/health-telemetry), 476 total passing. Spec at [`docs/specs/0.5.0-remote-mcp.md`](docs/specs/0.5.0-remote-mcp.md).
 
+### v0.6.7 — Schema Precision Hints (2026-04-16)
+
+Schema-driven datetime precision contract. Date fields can now declare `store_precision` (engine-enforced minimum on write) and `display_precision` (consumer-side rendering hint). Non-breaking by construction: absent keys = pre-0.6.7 lenient behavior; default `on_coarser: warn` means opt-in schemas emit warnings rather than blocking on historical coarse data. Enforcement fires at write-time only — read, reindex, and audit paths never judge historical values. Ship gate for the hosted brain: coarse writes are permanent data loss, so the contract had to land before end-user data existed.
+
+Delivered in five phases (P1–P5) on branch `feat/0.6.7-schema-precision`. P1 (commit 793d4fa) landed the precision primitives — `detectPrecision()` honoring literal-string shape (`2026-04-16T00:00:00Z` is `second`, not day-padded), `comparePrecision()`, `isCoarserThan()`, `isPrecision()` type guard. P2 (commit 4962218) closed a load-bearing round-trip bug surfaced by Codex review (jrn-2026-025): gray-matter's default YAML engine coerced `!!timestamp` scalars into JS Date objects, and five downstream sites (writer/serializer, extractor/fields, engine/indexing, engine/reads, engine/writes) normalized Dates via `.toISOString().slice(0, 10)` — silently truncating any finer-than-day precision on every round-trip. Fix consolidates all 11 `matter()` callers through a single `parseMatter()` helper that injects a string-preserving YAML engine (`js-yaml` `CORE_SCHEMA` without the timestamp type), and changes the five slice sites to emit full ISO millisecond precision, quoted so external parsers can't re-coerce. `js-yaml@^4.1.0` promoted to direct dependency. P3 (commit f4cd65f) added the reusable `ValidationWarning[]` channel — `ValidationResult.warnings`, response `_meta.warnings[]` plumbing via new `attachWarnings()` helper, `BulkResult` gains per-record `succeeded[].warnings` plus top-level aggregated `warnings[]` with `{docId}.` field prefix. Four write tool handlers wired (maad_create, maad_update, maad_bulk_create, maad_bulk_update). Channel is reusable for future soft-validations — deprecated fields, length hints, cross-field invariants, schema-evolution notices all slot in without further plumbing. P4 (commit 988be25) turned on the contract. Schema DSL parses three new keys on date fields with schema-load-time validation that `display_precision` is coarser-or-equal to `store_precision` (inverted rejects with `SCHEMA_INVALID`). Validator gains `ValidationOptions {mode, changedFields?}` with default `mode: 'read'` — the safety default. Precision gate fires only when `mode === 'write'`, `fieldDef.storePrecision` is declared, `changedFields` includes the field (or is undefined for create), and structural validation passed. Five call sites pass explicit mode: `writes.ts` create/update/bulk → `'write'` (update also passes `changedFields` Set from the already-tracked array — the T4 backward-compat hinge), `indexing.ts` → `'index'`, `reads.ts` → `'read'`, `maintenance.ts` → `'audit'`. `maad_schema` response field entries include `storePrecision` / `onCoarser` / `displayPrecision` when declared. `maad_validate` gains `includePrecision: true` option producing informational `precisionDrift[]` array (never mutates valid/invalid counts). New `logValidationWarning()` emits one `warn`-level ops log line per warning with structured fields (request_id, session_id, project, tool, doc_id, doc_type, field, code, message). P5 shipped the docs — `_skills/schema-guide.md` gains a Date precision section with event-timestamp and birthday examples plus the rules (storage wins, write-time only, update-neighbor safe, audit-via-`includePrecision`), README Current State + Roadmap refreshed, this file, `Version.md` bumped, tag cut.
+
+78 new tests (precision primitives 23 + string-preserving YAML 7 + datetime round-trip 5 + warnings channel 7 + validator enforcement 16 + loader DSL 8 + engine integration 10 + bumped pre-existing 2), 554 total passing. New deps: `js-yaml@^4.1.0` + `@types/js-yaml` (dev), both already transitive via gray-matter. New error code: the warning code `PRECISION_COARSER_THAN_DECLARED` is the first tenant of the open-string `ValidationWarning.code` field — future codes introduced without type change. Spec at [`docs/specs/0.6.7-schema-precision.md`](docs/specs/0.6.7-schema-precision.md). Decision record `dec-maadb-067-schema-precision` in the project brain.
+
 ---
 
-## Current: v0.5.0
+## Current: v0.6.7
 
 See Shipped block above.
 
@@ -92,9 +100,37 @@ Zero-to-operational in one agent session. Builds on 0.4.0 multi-project mode and
 - [ ] `maad add-project <name> <path>` CLI command — appends to `instance.yaml`, creates project dir if missing
 - [ ] Verify deploy → `maad_use_project` → architect → operational flow end-to-end
 
-### 0.6.0 — npm Package Prep
+### 0.6.0 — Scoped Auth & Identity
 
-Pulled forward from 0.8.0. Makes the engine trivially installable into container images and remote deployments.
+Required for multi-user / multi-agent demos where one brain is shared with differentiated permissions and auditable provenance. Pulls the token → role mapping forward from 0.9.0 (was 0.8.5) and adds identity attribution on every write. File-backed token registry, no external IdP yet.
+
+- [ ] Token registry at `_auth/tokens.yaml` — each bearer maps to `{ role, user_id?, agent_id?, name?, created_at }`
+- [ ] Per-token role gating replaces server-wide `--role` as the source of truth (legacy `--role` stays as synthetic single-token fallback)
+- [ ] `withSession` reads role from authenticated token claim, not server config
+- [ ] Hash-indexed constant-time token lookup (no linear scan)
+- [ ] Audit log enriched — `user_id`, `agent_id` on every `tool_call`, `session_open`, `session_close`, `auth_failure`
+- [ ] Git commit messages include token-claimed identity (per-write attribution)
+- [ ] `maad_health.sessions` breakdown by role and identity for admin introspection
+- [ ] CLI: `maad issue-token --role <role> [--user <id>] [--agent <id>] [--name <label>]` — emits bearer + records registry entry
+- [ ] CLI: `maad revoke-token <id|hash>` — tombstones a token; subsequent requests hit 401
+- [ ] 401 response shape unchanged (no identity leak on unauth)
+- [ ] Scope out: external IdP (OIDC/JWT), rotation UX, per-tenant token quotas — future
+
+### 0.6.5 — Live Notifications
+
+Push-based change feed so subscribed agents see writes without polling `maad_changes_since`. Layered on the existing SSE channel — zero overhead when nobody subscribes.
+
+- [ ] `maad_subscribe` tool — session declares filter `{ docTypes?, project?, since? }`, server pushes matching events on the SSE stream
+- [ ] `notifications/resources/updated` notification fires per successful write, payload shaped like a `changes_since` item so subscribers can resume on reconnect
+- [ ] Per-session queue cap — drops oldest on overflow, emits `notifications/resources/list_changed` as a catch-up-via-polling hint
+- [ ] Writes notify after commit, not before — preserves read-after-write consistency
+- [ ] Reentrant-safe: write mutex held through notify dispatch
+- [ ] Multi-subscriber fan-out within one process; cross-process broadcast deferred
+- [ ] Scope out: WebSockets (SSE suffices for unidirectional push), cross-project subscriptions (scope to bound project only)
+
+### 0.7.0 — npm Package Prep
+
+Was 0.6.0. Makes the engine trivially installable into container images and remote deployments.
 
 - [ ] Clean up public API surface
 - [ ] `npx maad serve` works without cloning the repo
@@ -102,7 +138,7 @@ Pulled forward from 0.8.0. Makes the engine trivially installable into container
 - [ ] MCP configs simplify to `npx maad` instead of absolute paths
 - [ ] Getting started guide for new users
 
-### 0.7.0 — Import Workflow
+### 0.7.5 — Import Workflow
 
 Recurring import of raw files into MAADB projects.
 
@@ -114,9 +150,9 @@ Recurring import of raw files into MAADB projects.
 - [ ] Delete source from `_inbox/` after successful import
 - [ ] Test with static catalog archetype
 
-### 0.7.5 — LLM Evaluation
+### 0.8.0 — LLM Evaluation
 
-Prove the engine works across models and use cases with real data. Deferred from 0.3.0 slot — production hardening and remote transport took priority.
+Was 0.7.5. Prove the engine works across models and use cases with real data. Deferred from 0.3.0 slot — production hardening and remote transport took priority.
 
 - [ ] Multi-model testing (Claude, GPT, Gemini) against maadb-demo
 - [ ] Identify friction points in tool usage, schema design, and boot flow
@@ -124,30 +160,40 @@ Prove the engine works across models and use cases with real data. Deferred from
 - [ ] Benchmark: token usage, call count, accuracy on structured tasks
 - [ ] Test the Architect skill end-to-end: vague prompt → working database
 
-### 0.8.0 — Provenance + Admin Tooling
+### 0.8.5 — Provenance + Admin Tooling
 
-Better visibility into what happened and why.
+Was 0.8.0. Better visibility into what happened and why.
 
 - [ ] Provenance refinement — cleaner source attribution in responses
 - [ ] Admin dashboard tool — project health, index stats, schema drift detection
 - [ ] `maad_export` — dump project data in portable format
 - [ ] Improved error messages with actionable guidance
 
-### 0.8.5 — Remote MCP Hardening
+### 0.8.7 — Storage Backend Abstraction (prep)
 
-Promote remote transport from "minimal" to "operator-grade" based on real 0.5.0 usage signal.
+Placeholder — design work only, no runtime migration. Locks in a `StorageBackend` interface so future work (alternative backends, enterprise hosted tier) can slot in without unwinding git assumptions across 20+ files. Not launch-blocking. Git remains backend #1 indefinitely; "every brain is a clonable git repo" stays a product feature.
 
-- [ ] Per-connection role tiers (reader / writer / admin) with token → role mapping
-- [ ] Configurable rate limit policy per token or tier
+- [ ] Define `StorageBackend` interface — required ops: `commit(files[], message, metadata)`, `getAtRevision(path, rev)`, `listHistory(path, limit)`, `atomicMultiFile(mutations)`, `isClean()`, `repoSizeBytes()`
+- [ ] Refactor write path to route through the interface — no direct `git` shell-outs outside `GitBackend`
+- [ ] Extract current git logic into `GitBackend` as reference implementation — behavior unchanged, 476+ tests pass
+- [ ] Spec doc: migration guidance for future candidates (libgit2/isomorphic-git for perf, Postgres + audit table for enterprise query scale, object store + metadata DB for cloud-native)
+- [ ] Document the commit-as-transaction-boundary guarantee — any future backend MUST preserve it or re-solve 0.4.1's mutex/idempotency/stale-lock-recovery
+- [ ] Scope out: actual alternative backend implementations (post-1.0 if product demands); local dev and self-hosted deployments stay on `GitBackend`
+
+### 0.9.0 — Remote MCP Hardening
+
+Was 0.8.5 (token → role line moved to 0.6.0). Promote remote transport from "minimal" to "operator-grade" based on real 0.5.0 usage signal.
+
+- [ ] Configurable rate limit policy per token or tier (builds on 0.6.0 token metadata)
 - [ ] Backpressure / queue depth thresholds with tunable 429 response
 - [ ] Mutex timeout with `WRITE_TIMEOUT` error path (replaces infinite block from 0.4.1)
 - [ ] Full concurrency stress test suite
 - [ ] Metrics export (Prometheus or OTEL)
 - [ ] `git gc` automation / scheduled maintenance
 
-### 0.9.0 — Query Power
+### 0.9.5 — Query Power
 
-Make the index smarter.
+Was 0.9.0. Make the index smarter.
 
 - [ ] Full-text search via SQLite FTS5
 - [ ] Fuzzy entity matching (typo-tolerant search)
@@ -155,9 +201,9 @@ Make the index smarter.
 - [ ] Sort by any indexed field
 - [ ] Cursor-based pagination tokens
 
-### 0.9.5 — Object Attributes
+### 0.9.7 — Object Attributes
 
-User-defined metadata on extracted objects.
+Was 0.9.5. User-defined metadata on extracted objects.
 
 - [ ] Attribute definitions in `_registry/object_types.yaml`
 - [ ] Attribute assignments in `_registry/object_tags.yaml`
