@@ -251,6 +251,11 @@ export interface SchemaInfoResult {
     target: string | null;
     format: string | null;
     default: unknown;
+    // 0.6.7 — omitted when null/unset; only present on date fields with
+    // declared precision. Consumers may render using displayPrecision.
+    storePrecision?: string;
+    onCoarser?: 'warn' | 'error';
+    displayPrecision?: string;
   }>;
   templateHeadings: Array<{ level: number; text: string }> | null;
 }
@@ -260,4 +265,16 @@ export interface ValidationReport {
   valid: number;
   invalid: number;
   errors: Array<{ docId: DocId; errors: Array<{ field: string; message: string }> }>;
+  /**
+   * 0.6.7 — populated only when the caller passes `includePrecision: true`.
+   * Informational; never counted as invalid. Each entry reports a date
+   * field whose stored precision is coarser than the schema's declared
+   * store_precision. Use to plan migrations without blocking reads.
+   */
+  precisionDrift?: Array<{
+    docId: DocId;
+    field: string;
+    declared: string;
+    actual: string;
+  }>;
 }

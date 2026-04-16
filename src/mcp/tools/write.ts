@@ -13,7 +13,8 @@ import type { InstanceCtx } from '../ctx.js';
 import { withEngine } from '../with-session.js';
 import { withIdempotency } from '../idempotency.js';
 import { getRateLimiter } from '../rate-limit.js';
-import { logWriteAudit } from '../../logging.js';
+import { logWriteAudit, logValidationWarning } from '../../logging.js';
+import type { ValidationWarning } from '../../types.js';
 
 function checkWriteRate(sessionId: string, toolName: string): ReturnType<typeof errorResponse> | null {
   const rejection = getRateLimiter().tryAcquireWrite(sessionId);
@@ -44,6 +45,27 @@ interface AuditContext {
   projectName: string;
   tool: string;
   docType?: string;
+}
+
+function logWarnings(
+  audit: AuditContext,
+  docId: string | null,
+  warnings: ValidationWarning[] | undefined,
+): void {
+  if (!warnings || warnings.length === 0) return;
+  for (const w of warnings) {
+    logValidationWarning({
+      request_id: audit.requestId,
+      session_id: audit.sessionId,
+      project: audit.projectName,
+      tool: audit.tool,
+      doc_id: docId,
+      doc_type: audit.docType ?? null,
+      field: w.field,
+      code: w.code,
+      message: w.message,
+    });
+  }
 }
 
 /**
@@ -118,11 +140,13 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
         args.docId ?? undefined,
       );
       if (result.ok) {
+        const ctxAudit = { requestId, sessionId, projectName, tool: 'maad_create', docType: args.docType };
         auditSingleWrite(
-          { requestId, sessionId, projectName, tool: 'maad_create', docType: args.docType },
+          ctxAudit,
           result.value as { docId?: unknown; version?: number; changedFields?: string[] },
           null, // version_before: null on create
         );
+        logWarnings(ctxAudit, String((result.value as CreateResult).docId ?? ''), (result.value as CreateResult).validation.warnings);
       }
       const response = resultToResponse(result, 'maad_create');
       return result.ok ? attachWarnings(response, (result.value as CreateResult).validation.warnings) : response;
@@ -158,11 +182,9 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
       if (result.ok) {
         const value = result.value as { docId?: unknown; version?: number; changedFields?: string[] };
         const versionBefore = typeof value.version === 'number' ? value.version - 1 : null;
-        auditSingleWrite(
-          { requestId, sessionId, projectName, tool: 'maad_update' },
-          value,
-          versionBefore,
-        );
+        const ctxAudit = { requestId, sessionId, projectName, tool: 'maad_update' };
+        auditSingleWrite(ctxAudit, value, versionBefore);
+        logWarnings(ctxAudit, String((result.value as UpdateResult).docId ?? ''), (result.value as UpdateResult).validation.warnings);
       }
       const response = resultToResponse(result, 'maad_update');
       return result.ok ? attachWarnings(response, (result.value as UpdateResult).validation.warnings) : response;
@@ -170,13 +192,15 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
   ));
 
   server.registerTool('maad_validate', {
-    description: 'Validates one or all documents against their schemas. Returns validation report with any errors.',
+    description: 'Validates one or all documents against their schemas. Returns validation report with any errors. Pass includePrecision: true to audit date fields for stored values coarser than their declared store_precision (0.6.7+) — informational, never counted as invalid.',
     inputSchema: z.object({
       docId: z.string().optional().describe('Validate a specific document (all if omitted)'),
+      includePrecision: z.boolean().optional().describe('If true, report historical date values coarser than the schema\'s store_precision. Non-blocking; returns a precisionDrift array in the report.'),
       project: z.string().optional().describe('Project name (multi-project mode only)'),
     }),
   }, async (args, extra) => withEngine(ctx, extra, 'maad_validate', args, async ({ engine }) => {
-    const result = await engine.validate(args.docId ? docId(args.docId) : undefined);
+    const options = args.includePrecision !== undefined ? { includePrecision: args.includePrecision } : undefined;
+    const result = await engine.validate(args.docId ? docId(args.docId) : undefined, options);
     return resultToResponse(result);
   }));
 
@@ -200,13 +224,12 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
       if (isDryRun()) return dryRunResponse('maad_bulk_create', { count: args.records.length });
       const result = await engine.bulkCreate(args.records as any);
       if (result.ok) {
-        const value = result.value as { succeeded: Array<{ docId: string; version?: number }> };
-        if (value.succeeded.length > 0) {
-          auditBulkWrite(
-            { requestId, sessionId, projectName, tool: 'maad_bulk_create' },
-            value,
-          );
+        const bulk = result.value as BulkResult;
+        const ctxAudit = { requestId, sessionId, projectName, tool: 'maad_bulk_create' };
+        if (bulk.succeeded.length > 0) {
+          auditBulkWrite(ctxAudit, bulk);
         }
+        for (const s of bulk.succeeded) logWarnings(ctxAudit, s.docId, s.warnings);
       }
       const response = resultToResponse(result);
       return result.ok ? attachWarnings(response, (result.value as BulkResult).warnings) : response;
@@ -233,13 +256,12 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
       if (isDryRun()) return dryRunResponse('maad_bulk_update', { count: args.updates.length });
       const result = await engine.bulkUpdate(args.updates as any);
       if (result.ok) {
-        const value = result.value as { succeeded: Array<{ docId: string; version?: number }> };
-        if (value.succeeded.length > 0) {
-          auditBulkWrite(
-            { requestId, sessionId, projectName, tool: 'maad_bulk_update' },
-            value,
-          );
+        const bulk = result.value as BulkResult;
+        const ctxAudit = { requestId, sessionId, projectName, tool: 'maad_bulk_update' };
+        if (bulk.succeeded.length > 0) {
+          auditBulkWrite(ctxAudit, bulk);
         }
+        for (const s of bulk.succeeded) logWarnings(ctxAudit, s.docId, s.warnings);
       }
       const response = resultToResponse(result);
       return result.ok ? attachWarnings(response, (result.value as BulkResult).warnings) : response;

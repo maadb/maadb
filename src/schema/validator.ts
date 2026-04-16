@@ -12,16 +12,43 @@ import type {
   FieldDefinition,
   FilePath,
 } from '../types.js';
+import { detectPrecision, isCoarserThan } from './precision.js';
+
+/**
+ * Validator call mode. Determines whether precision enforcement fires.
+ *
+ * - `write`: create / update / bulk — precision enforced per schema contract.
+ * - `read`: read path validation — precision NEVER enforced. Historical
+ *   records stay valid regardless of current schema declarations.
+ * - `index`: reindex / index-on-load — precision NEVER enforced. Same rule.
+ * - `audit`: explicit audit via `maad_validate` — precision drift can be
+ *   reported as informational by passing through via
+ *   `validateFrontmatter`'s structural errors path, but never counted as
+ *   invalid. Kept here as a distinct mode so callers signal intent.
+ */
+export type ValidationMode = 'write' | 'read' | 'index' | 'audit';
+
+export interface ValidationOptions {
+  mode: ValidationMode;
+  /** Update-path hint: precision enforcement skips fields NOT in this set. */
+  changedFields?: Set<string>;
+}
 
 export function validateFrontmatter(
   frontmatter: Record<string, unknown>,
   schema: SchemaDefinition,
   registry: Registry,
   filePath?: FilePath | undefined,
+  options?: ValidationOptions,
 ): ValidationResult {
   const errors: ValidationError[] = [];
   const warnings: ValidationWarning[] = [];
   const loc = filePath ? { file: filePath, line: 1, col: 1 } : null;
+  // Safe default: callers that haven't been updated to the 0.6.7 mode
+  // parameter land in 'read' mode, which never fires precision enforcement.
+  // Every write-path caller must explicitly opt in to mode: 'write'.
+  const mode: ValidationMode = options?.mode ?? 'read';
+  const changedFields = options?.changedFields;
 
   // Check required fields
   for (const req of schema.required) {
@@ -51,12 +78,85 @@ export function validateFrontmatter(
 
     const fieldErrors = validateField(fieldName, value, fieldDef, registry);
     errors.push(...fieldErrors);
+
+    // Precision enforcement — write-mode only. Never on read / index / audit.
+    // Skip unchanged fields on update path (changedFields filter). Skip when
+    // structural validation already failed — no point reporting precision on
+    // a value the validator will reject anyway.
+    if (
+      mode === 'write' &&
+      fieldErrors.length === 0 &&
+      fieldDef.type === 'date' &&
+      fieldDef.storePrecision !== null &&
+      (changedFields === undefined || changedFields.has(fieldName))
+    ) {
+      const precEntry = checkPrecision(fieldName, value, fieldDef, loc);
+      if (precEntry?.kind === 'error') errors.push(precEntry.entry);
+      else if (precEntry?.kind === 'warn') warnings.push(precEntry.entry);
+    }
   }
 
   return {
     valid: errors.length === 0,
     errors,
     warnings,
+  };
+}
+
+/**
+ * Precision enforcement for a single date field with a declared
+ * `storePrecision`. Returns a validator entry (error or warning) when the
+ * actual value is coarser than declared; null otherwise.
+ *
+ * - Caller is responsible for the write-mode gate.
+ * - Date-object values (rare post-Phase-2 string-preserving parser) are
+ *   classified as `millisecond` precision.
+ * - Strings that fail detection (malformed) are passed through — the
+ *   structural validator catches format errors separately.
+ */
+type PrecisionCheckResult =
+  | { kind: 'error'; entry: ValidationError }
+  | { kind: 'warn'; entry: ValidationWarning };
+
+function checkPrecision(
+  fieldName: string,
+  value: unknown,
+  fieldDef: FieldDefinition,
+  loc: { file: FilePath; line: number; col: number } | null,
+): PrecisionCheckResult | null {
+  const declared = fieldDef.storePrecision;
+  if (declared === null) return null;
+
+  const actual = value instanceof Date
+    ? 'millisecond'
+    : typeof value === 'string'
+      ? detectPrecision(value)
+      : null;
+
+  if (actual === null) return null; // malformed — structural validator handles
+  if (!isCoarserThan(actual, declared)) return null; // at or finer than declared
+
+  const message =
+    `Value "${value instanceof Date ? value.toISOString() : String(value)}" ` +
+    `is ${actual}-precision but schema declares store_precision=${declared}`;
+
+  if (fieldDef.onCoarser === 'error') {
+    return {
+      kind: 'error',
+      entry: { field: fieldName, message, location: loc },
+    };
+  }
+
+  // Default to warn (also covers explicit warn + the case where onCoarser is
+  // null while storePrecision is set, which the loader normalizes to 'warn').
+  return {
+    kind: 'warn',
+    entry: {
+      field: fieldName,
+      message,
+      code: 'PRECISION_COARSER_THAN_DECLARED',
+      location: loc,
+    },
   };
 }
 

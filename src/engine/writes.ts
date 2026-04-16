@@ -53,7 +53,7 @@ export async function createDocument(
     ...fields,
   };
 
-  const validation = validateFrontmatter(frontmatter, schema, ctx.registry);
+  const validation = validateFrontmatter(frontmatter, schema, ctx.registry, undefined, { mode: 'write' });
   if (!validation.valid) {
     return err(validation.errors.map(e => maadError('VALIDATION_FAILED', `${e.field}: ${e.message}`)));
   }
@@ -160,7 +160,10 @@ export async function updateDocument(
     }
   }
 
-  const validation = validateFrontmatter(updatedFm, schema, ctx.registry);
+  const validation = validateFrontmatter(updatedFm, schema, ctx.registry, undefined, {
+    mode: 'write',
+    changedFields: new Set(changedFields),
+  });
   if (!validation.valid) {
     return err(validation.errors.map(e => maadError('VALIDATION_FAILED', `${e.field}: ${e.message}`)));
   }
@@ -328,7 +331,7 @@ export async function bulkCreate(
       ...rec.fields,
     };
 
-    const validation = validateFrontmatter(frontmatter, schema, ctx.registry);
+    const validation = validateFrontmatter(frontmatter, schema, ctx.registry, undefined, { mode: 'write' });
     if (!validation.valid) {
       const msg = validation.errors.map(e => `${e.field}: ${e.message}`).join('; ');
       failed.push({ index: i, docId: id, error: msg });

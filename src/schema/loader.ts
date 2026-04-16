@@ -7,6 +7,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parseMatter } from '../parser/matter.js';
 import { ok, err, maadError, type Result, type MaadError } from '../errors.js';
+import { isPrecision, comparePrecision, type Precision } from './precision.js';
 import {
   docType,
   schemaRef as toSchemaRef,
@@ -228,6 +229,69 @@ function parseFieldDefinition(
 
   const defaultValue = fd['default'] ?? null;
 
+  // --- 0.6.7 schema precision hints (only meaningful on date fields) -----
+  let storePrecision: Precision | null = null;
+  let onCoarser: 'warn' | 'error' | null = null;
+  let displayPrecision: Precision | null = null;
+
+  if (fieldType === 'date') {
+    const spRaw = fd['store_precision'];
+    if (spRaw !== undefined) {
+      if (!isPrecision(spRaw)) {
+        errors.push(maadError('SCHEMA_INVALID',
+          `Schema "${schemaRef}" field "${name}" has invalid store_precision "${String(spRaw)}". ` +
+          `Valid: year, month, day, hour, minute, second, millisecond`));
+      } else {
+        storePrecision = spRaw;
+      }
+    }
+
+    const ocRaw = fd['on_coarser'];
+    if (ocRaw !== undefined) {
+      if (ocRaw !== 'warn' && ocRaw !== 'error') {
+        errors.push(maadError('SCHEMA_INVALID',
+          `Schema "${schemaRef}" field "${name}" has invalid on_coarser "${String(ocRaw)}". ` +
+          `Valid: warn, error`));
+      } else {
+        onCoarser = ocRaw;
+      }
+    } else if (storePrecision !== null) {
+      // Default to warn when store_precision is declared — the non-breaking
+      // rollout target. Callers who want strict behavior must opt in.
+      onCoarser = 'warn';
+    }
+
+    const dpRaw = fd['display_precision'];
+    if (dpRaw !== undefined) {
+      if (!isPrecision(dpRaw)) {
+        errors.push(maadError('SCHEMA_INVALID',
+          `Schema "${schemaRef}" field "${name}" has invalid display_precision "${String(dpRaw)}". ` +
+          `Valid: year, month, day, hour, minute, second, millisecond`));
+      } else {
+        displayPrecision = dpRaw;
+      }
+    }
+
+    // display_precision must be coarser-or-equal to store_precision (i.e.
+    // display no finer than storage). Inverted is nonsense — render finer
+    // than what's actually captured.
+    if (storePrecision !== null && displayPrecision !== null) {
+      if (comparePrecision(displayPrecision, storePrecision) > 0) {
+        errors.push(maadError('SCHEMA_INVALID',
+          `Schema "${schemaRef}" field "${name}" has display_precision "${displayPrecision}" finer than ` +
+          `store_precision "${storePrecision}". display must be coarser-or-equal to store.`));
+      }
+    }
+  } else {
+    // Non-date fields must not declare precision keys.
+    for (const k of ['store_precision', 'on_coarser', 'display_precision']) {
+      if (fd[k] !== undefined) {
+        errors.push(maadError('SCHEMA_INVALID',
+          `Schema "${schemaRef}" field "${name}" of type "${fieldType}" cannot declare "${k}" — only valid on date fields`));
+      }
+    }
+  }
+
   if (errors.length > 0) return err(errors);
 
   return ok({
@@ -240,6 +304,9 @@ function parseFieldDefinition(
     values,
     defaultValue,
     itemType,
+    storePrecision,
+    onCoarser,
+    displayPrecision,
   });
 }
 

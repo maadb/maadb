@@ -193,7 +193,9 @@ export function summary(ctx: EngineContext): SummaryResult {
     if (!schema) { validationErrors++; continue; }
     const fm = readFrontmatterSync(ctx.projectRoot, doc);
     if (fm) {
-      const result = validateFrontmatter(fm, schema, ctx.registry);
+      // Read mode: precision enforcement skipped (historical records must
+      // never be judged on the way out).
+      const result = validateFrontmatter(fm, schema, ctx.registry, undefined, { mode: 'read' });
       if (!result.valid) validationErrors++;
     }
   }
@@ -236,7 +238,7 @@ export function schemaInfo(ctx: EngineContext, dt: DocType): Result<SchemaInfoRe
 
     const format = field.format ?? (field.type === 'amount' ? '<number> <currency> (e.g. 1250.00 USD)' : null);
 
-    fields.push({
+    const entry: SchemaInfoResult['fields'][number] = {
       name,
       type: typeStr,
       required: schema.required.includes(name),
@@ -245,7 +247,13 @@ export function schemaInfo(ctx: EngineContext, dt: DocType): Result<SchemaInfoRe
       target: field.target as string | null,
       format,
       default: field.defaultValue,
-    });
+    };
+    // 0.6.7: expose precision hints on date fields so consumers can render
+    // per displayPrecision and trace enforcement contract.
+    if (field.storePrecision !== null) entry.storePrecision = field.storePrecision;
+    if (field.onCoarser !== null) entry.onCoarser = field.onCoarser;
+    if (field.displayPrecision !== null) entry.displayPrecision = field.displayPrecision;
+    fields.push(entry);
   }
 
   const templateHeadings = schema.template

@@ -483,7 +483,7 @@ export class MaadEngine {
   }
 
   // --- Maintenance ---
-  async validate(docId?: DocId) { return maintenance.validate(this.ctx(), docId); }
+  async validate(docId?: DocId, options?: maintenance.ValidateOptions) { return maintenance.validate(this.ctx(), docId, options); }
 
   // --- Audit ---
   async history(id: DocId, opts?: { limit?: number; since?: string }) { return auditOps.history(this.ctx(), id, opts); }

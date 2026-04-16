@@ -212,6 +212,11 @@ export interface FieldDefinition {
   values: string[] | null;
   defaultValue: unknown;
   itemType: FieldType | null;
+  // 0.6.7 schema precision hints — only meaningful on `type: date` fields.
+  // Null when unset: field behaves as it did pre-0.6.7 (fully lenient).
+  storePrecision: import('./schema/precision.js').Precision | null;
+  onCoarser: 'warn' | 'error' | null;
+  displayPrecision: import('./schema/precision.js').Precision | null;
 }
 
 export interface TemplateHeading {

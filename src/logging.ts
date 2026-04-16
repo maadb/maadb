@@ -146,3 +146,26 @@ export interface AuthFailureFields {
 export function logAuthFailure(fields: AuthFailureFields): void {
   opsLog.info(fields, 'auth_failure');
 }
+
+// ---- Validation warning event (ops) ---------------------------------------
+// 0.6.7 — one `warn`-level line per ValidationWarning emitted on a write.
+// Operators see patterns across agents without having to scrape response
+// bodies. Code is part of the structured payload so filtering by
+// `code=PRECISION_COARSER_THAN_DECLARED` (or future soft-check codes) is
+// straightforward.
+
+export interface ValidationWarningFields {
+  request_id: string;
+  session_id: string;
+  project: string;
+  tool: string;
+  doc_id: string | null;
+  doc_type: string | null;
+  field: string;
+  code: string;
+  message: string;
+}
+
+export function logValidationWarning(fields: ValidationWarningFields): void {
+  opsLog.warn(fields, 'validation_warning');
+}

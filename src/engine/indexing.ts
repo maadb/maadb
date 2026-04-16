@@ -108,7 +108,10 @@ export function processDocument(ctx: EngineContext, parsed: ParsedDocument): Res
     return singleErr('UNKNOWN_TYPE', `Type "${fmDocType}" not in registry`);
   }
 
-  const validation = validateFrontmatter(parsed.frontmatter, schema, ctx.registry, parsed.filePath);
+  // Index mode: structural validation only. Precision enforcement is write-
+  // time only — historical records on disk must stay indexable regardless
+  // of current schema precision declarations.
+  const validation = validateFrontmatter(parsed.frontmatter, schema, ctx.registry, parsed.filePath, { mode: 'index' });
 
   const validatedFields: Record<string, ValidatedField> = {};
   for (const [fieldName, fieldDef] of schema.fields) {
