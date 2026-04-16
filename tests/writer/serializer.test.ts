@@ -100,9 +100,16 @@ describe('serializeField', () => {
     expect(serializeField('val', '')).toBe('val: ""');
   });
 
-  it('handles Date objects', () => {
-    const date = new Date('2026-04-01T00:00:00Z');
-    const result = serializeField('opened_at', date);
-    expect(result).toBe('opened_at: 2026-04-01');
+  it('handles Date objects with full ISO precision (0.6.7 — never slice, always quote)', () => {
+    // Pre-0.6.7 the serializer truncated Date objects to YYYY-MM-DD, which
+    // silently destroyed any time component on round-trip. Under 0.6.7's
+    // schema-precision contract, Dates must serialize at full millisecond
+    // precision. Quoted so external YAML parsers don't coerce back to Date
+    // via the !!timestamp resolver.
+    const midnightDate = new Date('2026-04-01T00:00:00Z');
+    expect(serializeField('opened_at', midnightDate)).toBe('opened_at: "2026-04-01T00:00:00.000Z"');
+
+    const preciseDate = new Date('2026-04-16T17:20:30.500Z');
+    expect(serializeField('started_at', preciseDate)).toBe('started_at: "2026-04-16T17:20:30.500Z"');
   });
 });

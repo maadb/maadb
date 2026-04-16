@@ -3,7 +3,7 @@
 // Extracts YAML frontmatter from a markdown file using gray-matter.
 // ============================================================================
 
-import matter from 'gray-matter';
+import { parseMatter } from './matter.js';
 import { ok, singleErr, type Result } from '../errors.js';
 import type { FilePath } from '../types.js';
 
@@ -15,7 +15,7 @@ export interface FrontmatterResult {
 
 export function parseFrontmatter(raw: string, filePath: FilePath): Result<FrontmatterResult> {
   try {
-    const parsed = matter(raw);
+    const parsed = parseMatter(raw);
 
     if (typeof parsed.data !== 'object' || parsed.data === null || Array.isArray(parsed.data)) {
       return singleErr('PARSE_ERROR', 'Frontmatter must be a YAML mapping', { file: filePath, line: 1, col: 1 });

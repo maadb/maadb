@@ -6,7 +6,7 @@
 import { readFile } from 'node:fs/promises';
 import { existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
-import matter from 'gray-matter';
+import { parseMatter } from '../parser/matter.js';
 import { ok, err, singleErr, maadError, type Result } from '../errors.js';
 import { isContainedIn } from '../engine/pathguard.js';
 import {
@@ -44,11 +44,11 @@ export async function loadRegistry(projectRoot: string): Promise<Result<Registry
     // gray-matter can parse bare YAML files (no frontmatter delimiters needed)
     // but we need to handle both cases
     if (raw.trimStart().startsWith('---')) {
-      const parsed = matter(raw);
+      const parsed = parseMatter(raw);
       data = parsed.data as Record<string, unknown>;
     } else {
       // Parse as bare YAML — wrap in frontmatter delimiters for gray-matter
-      const parsed = matter(`---\n${raw}\n---`);
+      const parsed = parseMatter(`---\n${raw}\n---`);
       data = parsed.data as Record<string, unknown>;
     }
   } catch (e) {

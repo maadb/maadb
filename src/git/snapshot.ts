@@ -4,7 +4,7 @@
 // ============================================================================
 
 import type { SimpleGit } from 'simple-git';
-import matter from 'gray-matter';
+import { parseMatter } from '../parser/matter.js';
 import {
   commitSha as toCommitSha,
   type DocId,
@@ -58,7 +58,7 @@ export async function getSnapshot(
   let frontmatter: Record<string, unknown> = {};
   let body = content;
   try {
-    const parsed = matter(content);
+    const parsed = parseMatter(content);
     frontmatter = parsed.data as Record<string, unknown>;
     body = parsed.content.trim();
   } catch {

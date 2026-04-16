@@ -9,7 +9,7 @@
 import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
-import matter from 'gray-matter';
+import { parseMatter } from '../parser/matter.js';
 import { ok, err, singleErr, maadError, type Result } from '../errors.js';
 import { parseRole, type Role } from '../mcp/roles.js';
 
@@ -47,9 +47,9 @@ export async function loadInstance(configPath: string): Promise<Result<InstanceC
   let data: Record<string, unknown>;
   try {
     if (raw.trimStart().startsWith('---')) {
-      data = matter(raw).data as Record<string, unknown>;
+      data = parseMatter(raw).data as Record<string, unknown>;
     } else {
-      data = matter(`---\n${raw}\n---`).data as Record<string, unknown>;
+      data = parseMatter(`---\n${raw}\n---`).data as Record<string, unknown>;
     }
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Unknown parse error';

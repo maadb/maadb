@@ -64,7 +64,11 @@ export function serializeField(key: string, value: unknown): string {
   }
 
   if (value instanceof Date) {
-    return `${key}: ${value.toISOString().slice(0, 10)}`;
+    // Full ISO millisecond precision. Never slice — precision on round-trip
+    // is contract-critical for 0.6.7 schema precision hints. Quoted so the
+    // emitted YAML parses as a literal string under any schema (including
+    // default js-yaml outside our pipeline), never as a !!timestamp.
+    return `${key}: "${value.toISOString()}"`;
   }
 
   const str = String(value);

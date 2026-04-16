@@ -45,9 +45,11 @@ export function extractFields(
       const contactPrimitive = detectContactPrimitive(String(field.value));
       if (contactPrimitive) primitive = contactPrimitive;
     }
-    // gray-matter parses date strings as JS Date objects — convert back to ISO
+    // Defensive: with the string-preserving YAML engine (parser/matter.ts)
+    // Dates are rare here, but a caller may still pass `new Date(...)`
+    // directly. Preserve full ISO precision — never slice.
     const valueStr = field.value instanceof Date
-      ? field.value.toISOString().slice(0, 10)
+      ? field.value.toISOString()
       : String(field.value);
     const normalizedValue = normalize(primitive, valueStr);
 

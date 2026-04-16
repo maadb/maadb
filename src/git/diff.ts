@@ -4,7 +4,7 @@
 // ============================================================================
 
 import type { SimpleGit } from 'simple-git';
-import matter from 'gray-matter';
+import { parseMatter } from '../parser/matter.js';
 import {
   commitSha as toCommitSha,
   type DocId,
@@ -65,7 +65,7 @@ export async function getDiff(
 
 function parseFm(content: string): Record<string, unknown> {
   try {
-    return matter(content).data as Record<string, unknown>;
+    return parseMatter(content).data as Record<string, unknown>;
   } catch {
     return {};
   }

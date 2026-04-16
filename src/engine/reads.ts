@@ -364,10 +364,15 @@ export async function verifyField(
   const fm = await readFrontmatter(ctx.projectRoot, doc);
   const actual = fm[field] ?? null;
 
-  // Canonical comparison (handles dates, arrays, type coercion)
-  const actualStr = actual instanceof Date ? actual.toISOString().slice(0, 10) : String(actual ?? '');
-  const expectedStr = expected instanceof Date ? expected.toISOString().slice(0, 10) : String(expected ?? '');
+  // Canonical comparison (handles dates, arrays, type coercion).
+  // For Date values, compare against full ISO string. Day-form fallback
+  // kept so pre-0.6.7 callers passing day-form strings still match
+  // records that happen to have been parsed as Date objects.
+  const actualStr = actual instanceof Date ? actual.toISOString() : String(actual ?? '');
+  const expectedStr = expected instanceof Date ? expected.toISOString() : String(expected ?? '');
   const grounded = actualStr === expectedStr
+    || (actual instanceof Date && String(expected ?? '') === actual.toISOString().slice(0, 10))
+    || (expected instanceof Date && String(actual ?? '') === expected.toISOString().slice(0, 10))
     || (Array.isArray(expected) && Array.isArray(actual) && JSON.stringify(expected) === JSON.stringify(actual));
 
   return ok({

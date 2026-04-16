@@ -162,7 +162,7 @@ export function processDocument(ctx: EngineContext, parsed: ParsedDocument): Res
       if (field.fieldType === 'list' && Array.isArray(field.value)) {
         for (const item of field.value) {
           const itemValue = item instanceof Date
-            ? item.toISOString().slice(0, 10)
+            ? item.toISOString()
             : String(item);
           fieldIndex.push({
             name,
@@ -173,7 +173,7 @@ export function processDocument(ctx: EngineContext, parsed: ParsedDocument): Res
         }
       } else {
         const fieldValue = field.value instanceof Date
-          ? field.value.toISOString().slice(0, 10)
+          ? field.value.toISOString()
           : String(field.value);
         fieldIndex.push({
           name,

@@ -6,13 +6,13 @@ import { readFile } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { glob } from 'node:fs/promises';
-import matter from 'gray-matter';
+import { parseMatter } from '../parser/matter.js';
 import type { DocumentRecord } from '../types.js';
 
 export async function readFrontmatter(projectRoot: string, doc: DocumentRecord): Promise<Record<string, unknown>> {
   const absPath = path.join(projectRoot, doc.filePath as string);
   const raw = await readFile(absPath, 'utf-8');
-  const parsed = matter(raw);
+  const parsed = parseMatter(raw);
   return parsed.data as Record<string, unknown>;
 }
 
@@ -20,7 +20,7 @@ export function readFrontmatterSync(projectRoot: string, doc: DocumentRecord): R
   try {
     const absPath = path.join(projectRoot, doc.filePath as string);
     const raw = readFileSync(absPath, 'utf-8');
-    const parsed = matter(raw);
+    const parsed = parseMatter(raw);
     return parsed.data as Record<string, unknown>;
   } catch {
     return null;

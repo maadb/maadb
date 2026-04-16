@@ -7,7 +7,7 @@
 import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
-import matter from 'gray-matter';
+import { parseMatter } from './parser/matter.js';
 import { parseBlocks } from './parser/blocks.js';
 import { extractAnnotations } from './parser/annotations.js';
 import { extractValueCalls } from './parser/tags.js';
@@ -66,7 +66,7 @@ export async function scanFile(filePath: string): Promise<FileScanResult> {
   let bodyStartLine = 1;
 
   try {
-    const parsed = matter(raw);
+    const parsed = parseMatter(raw);
     if (parsed.data && typeof parsed.data === 'object' && !Array.isArray(parsed.data)) {
       frontmatter = parsed.data as Record<string, unknown>;
       body = parsed.content;

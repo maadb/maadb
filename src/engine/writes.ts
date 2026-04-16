@@ -15,7 +15,7 @@ import {
   type FilePath,
   type DocumentRecord,
 } from '../types.js';
-import matter from 'gray-matter';
+import { parseMatter } from '../parser/matter.js';
 import { validateFrontmatter } from '../schema/index.js';
 import { generateDocument, extractBody } from '../writer/index.js';
 import type { EngineContext } from './context.js';
@@ -490,7 +490,7 @@ async function verifyBulkResults(
     try {
       const absPath = path.join(ctx.projectRoot, doc.filePath as string);
       const raw = await readFile(absPath, 'utf-8');
-      fm = matter(raw).data as Record<string, unknown>;
+      fm = parseMatter(raw).data as Record<string, unknown>;
       rawBody = extractBody(raw);
     } catch {
       mismatches.push({ docId: entry.docId, field: '_readable', expected: 'readable', actual: 'file read failed' });
@@ -547,14 +547,18 @@ function valuesMatch(expected: unknown, actual: unknown): boolean {
   if (expected == null && actual == null) return true;
   if (expected == null || actual == null) return false;
 
-  // Date handling: gray-matter parses date strings as Date objects
+  // Date handling: with the string-preserving YAML engine (parser/matter.ts),
+  // parsed frontmatter values stay as strings. Dates only appear here if a
+  // caller passed `new Date(...)` directly. When they do, accept either the
+  // full ISO or the day-form representation on the opposite side — the
+  // day-form arm keeps callers that read values before 0.6.7 compatible.
   if (actual instanceof Date) {
-    const iso = actual.toISOString().slice(0, 10);
-    return String(expected) === iso || String(expected) === actual.toISOString();
+    const full = actual.toISOString();
+    return String(expected) === full || String(expected) === full.slice(0, 10);
   }
   if (expected instanceof Date) {
-    const iso = expected.toISOString().slice(0, 10);
-    return String(actual) === iso || String(actual) === expected.toISOString();
+    const full = expected.toISOString();
+    return String(actual) === full || String(actual) === full.slice(0, 10);
   }
 
   // Arrays: deep compare via JSON
