@@ -114,20 +114,16 @@ export async function startServer(opts: ServeOptions): Promise<void> {
     const server = new McpServer({ name: 'maad', version: pkg.version });
     let toolCount = 0;
     if (instance.source === 'file') {
-      instanceTools.register(server, ctx);
-      toolCount += 4;
+      toolCount += instanceTools.register(server, ctx);
     }
-    discoverTools.register(server, ctx);
-    readTools.register(server, ctx);
-    auditTools.register(server, ctx);
-    toolCount += 13;
+    toolCount += discoverTools.register(server, ctx);
+    toolCount += readTools.register(server, ctx);
+    toolCount += auditTools.register(server, ctx);
     if (legacyRole === 'writer' || legacyRole === 'admin') {
-      writeTools.register(server, ctx);
-      toolCount += 5;
+      toolCount += writeTools.register(server, ctx);
     }
     if (legacyRole === 'admin') {
-      maintainTools.register(server, ctx);
-      toolCount += 4;
+      toolCount += maintainTools.register(server, ctx);
     }
     return { server, toolCount };
   };

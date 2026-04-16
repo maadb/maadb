@@ -11,7 +11,7 @@ import { isContainedIn } from '../../engine/pathguard.js';
 import type { InstanceCtx } from '../ctx.js';
 import { withEngine } from '../with-session.js';
 
-export function register(server: McpServer, ctx: InstanceCtx): void {
+export function register(server: McpServer, ctx: InstanceCtx): number {
   server.registerTool('maad_scan', {
     description: 'Analyze raw markdown structure. Works without registry. Use for onboarding new files. Pass a file path for detailed analysis or a directory for corpus-level patterns.',
     inputSchema: z.object({
@@ -87,4 +87,6 @@ export function register(server: McpServer, ctx: InstanceCtx): void {
   }, async (args, extra) => withEngine(ctx, extra, 'maad_describe', args, ({ engine }) => {
     return successResponse(engine.describe());
   }));
+
+  return 3;
 }

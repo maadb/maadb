@@ -7,7 +7,7 @@ export type Role = 'reader' | 'writer' | 'admin';
 const READER_TOOLS = [
   'maad_scan', 'maad_summary', 'maad_describe',
   'maad_get', 'maad_query', 'maad_search', 'maad_related', 'maad_schema', 'maad_aggregate', 'maad_join',
-  'maad_changes_since',
+  'maad_verify', 'maad_changes_since',
   'maad_history', 'maad_audit',
 ] as const;
 

@@ -11,7 +11,7 @@ import type { InstanceCtx } from '../ctx.js';
 import { withEngine } from '../with-session.js';
 import { getTransportSnapshot, isInitialized as telemetryInitialized } from '../transport/telemetry.js';
 
-export function register(server: McpServer, ctx: InstanceCtx): void {
+export function register(server: McpServer, ctx: InstanceCtx): number {
   server.registerTool('maad_delete', {
     description: 'Deletes a record. Soft: renames file with _deleted prefix. Hard: removes file entirely.',
     inputSchema: z.object({
@@ -64,4 +64,6 @@ export function register(server: McpServer, ctx: InstanceCtx): void {
       : { ...health, provenance: provMode };
     return successResponse(payload, 'maad_health');
   }));
+
+  return 4;
 }

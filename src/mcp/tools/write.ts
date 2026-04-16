@@ -91,7 +91,7 @@ function auditBulkWrite(
   });
 }
 
-export function register(server: McpServer, ctx: InstanceCtx): void {
+export function register(server: McpServer, ctx: InstanceCtx): number {
   server.registerTool('maad_create', {
     description: 'Creates a new markdown record. Schema-validated. Auto-commits to git. Returns the new docId, filePath, and version. Pass fields as an object: { name: "Acme", status: "active" }',
     inputSchema: z.object({
@@ -240,4 +240,6 @@ export function register(server: McpServer, ctx: InstanceCtx): void {
       return resultToResponse(result);
     }),
   ));
+
+  return 5;
 }

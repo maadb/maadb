@@ -9,7 +9,7 @@ import { resultToResponse } from '../response.js';
 import type { InstanceCtx } from '../ctx.js';
 import { withEngine } from '../with-session.js';
 
-export function register(server: McpServer, ctx: InstanceCtx): void {
+export function register(server: McpServer, ctx: InstanceCtx): number {
   server.registerTool('maad_history', {
     description: 'Returns git commit history for a specific document.',
     inputSchema: z.object({
@@ -40,4 +40,6 @@ export function register(server: McpServer, ctx: InstanceCtx): void {
     if (args.docType !== undefined) opts.docType = docType(args.docType);
     return resultToResponse(await engine.audit(opts));
   }));
+
+  return 2;
 }

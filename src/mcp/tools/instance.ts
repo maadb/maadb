@@ -14,7 +14,7 @@ import type { InstanceCtx } from '../ctx.js';
 
 const ROLE_ENUM = z.enum(['reader', 'writer', 'admin']);
 
-export function register(server: McpServer, ctx: InstanceCtx): void {
+export function register(server: McpServer, ctx: InstanceCtx): number {
   server.registerTool('maad_projects', {
     description: 'Lists projects declared in this MCP instance. Returns name, description, configured role, and whether the current session has access. Call this before maad_use_project.',
     inputSchema: z.object({}),
@@ -112,4 +112,6 @@ export function register(server: McpServer, ctx: InstanceCtx): void {
       lastActivityAt: state.lastActivityAt.toISOString(),
     }, 'maad_current_session');
   });
+
+  return 4;
 }

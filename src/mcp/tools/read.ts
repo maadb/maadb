@@ -10,7 +10,7 @@ import { resultToResponse } from '../response.js';
 import type { InstanceCtx } from '../ctx.js';
 import { withEngine } from '../with-session.js';
 
-export function register(server: McpServer, ctx: InstanceCtx): void {
+export function register(server: McpServer, ctx: InstanceCtx): number {
   server.registerTool('maad_get', {
     description: 'Reads a markdown-backed record at increasing depth: hot (frontmatter), warm (+block), cold (full body), full (resolved refs+objects+related, provisional composite).',
     inputSchema: z.object({
@@ -189,4 +189,6 @@ export function register(server: McpServer, ctx: InstanceCtx): void {
     if (args.docTypes !== undefined) q.docTypes = args.docTypes;
     return resultToResponse(engine.changesSince(q), 'maad_changes_since');
   }));
+
+  return 9;
 }
