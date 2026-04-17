@@ -18,18 +18,38 @@ import { getProject } from './config.js';
 
 export type SessionMode = 'single' | 'multi';
 
+/**
+ * How a session was bound to its project(s). Load-bearing for gateway-pinned
+ * sessions: rebind-rejection in maad_use_project/maad_use_projects checks
+ * `bindingSource === 'gateway_pin'` to distinguish trusted-gateway pins from
+ * client-initiated binds. `null` = session exists but is unbound.
+ *
+ * - `client_tool`  — bound by client calling maad_use_project/maad_use_projects
+ * - `gateway_pin`  — bound by HTTP transport honoring X-Maad-Pin-Project header
+ *                    (multi-tenant hosted deployments, 0.6.8+); irrevocable
+ */
+export type BindingSource = 'client_tool' | 'gateway_pin';
+
 export interface SessionState {
   sessionId: string;
   mode: SessionMode | null;
   activeProject?: string;
   whitelist?: string[];
   effectiveRoles: Map<string, Role>;
+  bindingSource: BindingSource | null;
   createdAt: Date;
   lastActivityAt: Date;
 }
 
 export interface BindOptions {
   as?: Role;
+  /**
+   * Who initiated the bind. Defaults to `client_tool`. HTTP transport passes
+   * `gateway_pin` when the X-Maad-Pin-Project header was honored at initialize.
+   * Once a session is bound with `gateway_pin`, rebind attempts via
+   * maad_use_project/maad_use_projects reject with SESSION_PINNED.
+   */
+  source?: BindingSource;
 }
 
 export type SessionCloseReason = 'client' | 'transport' | 'idle' | 'shutdown';
@@ -48,6 +68,7 @@ export class SessionRegistry {
       sessionId,
       mode: null,
       effectiveRoles: new Map(),
+      bindingSource: null,
       createdAt: new Date(),
       lastActivityAt: new Date(),
     };
@@ -102,6 +123,10 @@ export class SessionRegistry {
   bindSingle(sessionId: string, projectName: string, opts: BindOptions = {}): Result<SessionState> {
     const state = this.sessions.get(sessionId);
     if (!state) return singleErr('SESSION_UNBOUND', `Unknown session: ${sessionId}`);
+    if (state.bindingSource === 'gateway_pin') {
+      return singleErr('SESSION_PINNED',
+        `session is pinned to project '${state.activeProject}' by gateway; open a new session with a different X-Maad-Pin-Project header to switch projects`);
+    }
     if (state.mode !== null) {
       return singleErr('SESSION_ALREADY_BOUND', 'Session already bound — disconnect and reconnect to rebind');
     }
@@ -115,6 +140,7 @@ export class SessionRegistry {
     state.mode = 'single';
     state.activeProject = projectName;
     state.effectiveRoles.set(projectName, effective.value);
+    state.bindingSource = opts.source ?? 'client_tool';
     state.lastActivityAt = new Date();
     return ok(state);
   }
@@ -122,6 +148,10 @@ export class SessionRegistry {
   bindMulti(sessionId: string, projectNames: string[], opts: BindOptions = {}): Result<SessionState> {
     const state = this.sessions.get(sessionId);
     if (!state) return singleErr('SESSION_UNBOUND', `Unknown session: ${sessionId}`);
+    if (state.bindingSource === 'gateway_pin') {
+      return singleErr('SESSION_PINNED',
+        `session is pinned to project '${state.activeProject}' by gateway; open a new session with a different X-Maad-Pin-Project header to switch projects`);
+    }
     if (state.mode !== null) {
       return singleErr('SESSION_ALREADY_BOUND', 'Session already bound — disconnect and reconnect to rebind');
     }
@@ -141,6 +171,7 @@ export class SessionRegistry {
     state.mode = 'multi';
     state.whitelist = [...projectNames];
     state.effectiveRoles = effectiveRoles;
+    state.bindingSource = opts.source ?? 'client_tool';
     state.lastActivityAt = new Date();
     return ok(state);
   }

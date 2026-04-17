@@ -94,6 +94,29 @@ describe('SessionRegistry', () => {
       const result = reg.bindSingle('never-created', 'alpha');
       expect(result.ok).toBe(false);
     });
+
+    it('tags bindingSource=client_tool by default', () => {
+      reg.create('sid-1');
+      expect(reg.bindSingle('sid-1', 'alpha').ok).toBe(true);
+      expect(reg.get('sid-1')!.bindingSource).toBe('client_tool');
+    });
+
+    it('tags bindingSource=gateway_pin when source option is passed', () => {
+      reg.create('sid-1');
+      expect(reg.bindSingle('sid-1', 'alpha', { source: 'gateway_pin' }).ok).toBe(true);
+      expect(reg.get('sid-1')!.bindingSource).toBe('gateway_pin');
+    });
+
+    it('rejects rebind of a pinned session with SESSION_PINNED (precedes SESSION_ALREADY_BOUND)', () => {
+      reg.create('sid-1');
+      expect(reg.bindSingle('sid-1', 'alpha', { source: 'gateway_pin' }).ok).toBe(true);
+      const second = reg.bindSingle('sid-1', 'beta');
+      expect(second.ok).toBe(false);
+      if (second.ok) return;
+      expect(second.errors[0].code).toBe('SESSION_PINNED');
+      expect(second.errors[0].message).toContain("'alpha'");
+      expect(second.errors[0].message).toContain('X-Maad-Pin-Project');
+    });
   });
 
   describe('bindMulti', () => {
@@ -136,6 +159,15 @@ describe('SessionRegistry', () => {
       expect(result.ok).toBe(false);
       if (result.ok) return;
       expect(result.errors[0].code).toBe('PROJECT_UNKNOWN');
+    });
+
+    it('rejects bindMulti on a pinned session with SESSION_PINNED', () => {
+      reg.create('sid-1');
+      expect(reg.bindSingle('sid-1', 'alpha', { source: 'gateway_pin' }).ok).toBe(true);
+      const result = reg.bindMulti('sid-1', ['beta', 'gamma']);
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.errors[0].code).toBe('SESSION_PINNED');
     });
   });
 });

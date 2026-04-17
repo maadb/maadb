@@ -43,7 +43,11 @@ export type ErrorCode =
   | 'SHUTTING_DOWN'
   | 'RATE_LIMITED'
   | 'REQUEST_TIMEOUT'
-  | 'MISSING_OPERATION_KIND';
+  | 'MISSING_OPERATION_KIND'
+  | 'PIN_PROJECT_INVALID'
+  | 'PIN_PROJECT_NOT_FOUND'
+  | 'PIN_ON_EXISTING_SESSION'
+  | 'SESSION_PINNED';
 
 export interface MaadError {
   code: ErrorCode;

@@ -7,7 +7,7 @@
 // stdio is a single implicit session so open/close events aren't emitted.
 // ============================================================================
 
-import type { SessionCloseReason } from '../../instance/session.js';
+import type { BindingSource, SessionCloseReason } from '../../instance/session.js';
 import { getAuditLog, getOpsLog } from '../../logging.js';
 
 export type TransportKind = 'stdio' | 'http';
@@ -29,6 +29,13 @@ export interface SessionCounters {
 
 export interface SessionsBlock extends SessionCounters {
   active: number;
+  /**
+   * Count of currently-active sessions bound via X-Maad-Pin-Project header
+   * (bindingSource === 'gateway_pin'). 0 on stdio and on HTTP deployments
+   * that don't use gateway pinning. Operators track this to confirm their
+   * gateway is actually applying the pin.
+   */
+  pinned: number;
 }
 
 export interface TransportSnapshot {
@@ -88,6 +95,14 @@ export interface SessionOpenFields {
   remote_addr: string;
   user_agent: string | null;
   transport: TransportKind;
+  /**
+   * 0.6.8 — present when the session was pinned at initialize via the
+   * X-Maad-Pin-Project header. Omitted (undefined) when the session was
+   * created unbound; a later maad_use_project tool call does NOT emit an
+   * additional session_open event (binding_source at session_open captures
+   * the gateway-pin signal, not the eventual client bind).
+   */
+  binding_source?: BindingSource;
 }
 
 export function recordSessionOpen(fields: SessionOpenFields): void {
@@ -135,7 +150,7 @@ export function recordIdleSweep(fields: IdleSweepFields): void {
   getOpsLog().info(fields, 'idle_sweep');
 }
 
-export function getTransportSnapshot(activeSessions: number): TransportSnapshot {
+export function getTransportSnapshot(activeSessions: number, pinnedSessions = 0): TransportSnapshot {
   if (!state) throw new Error('transport telemetry not initialized');
   const s = state;
   const kind = s.info.kind;
@@ -145,11 +160,13 @@ export function getTransportSnapshot(activeSessions: number): TransportSnapshot 
       ? { kind, host: s.info.host, port: s.info.port, uptimeSeconds }
       : { kind, uptimeSeconds };
   // Stdio is a single implicit session — cap reported active at 1 regardless
-  // of registry state so the contract in the spec holds.
+  // of registry state so the contract in the spec holds. Pinned is always 0
+  // on stdio (header plumbing is HTTP-only).
   const active = kind === 'stdio' ? Math.min(1, activeSessions) : activeSessions;
+  const pinned = kind === 'stdio' ? 0 : pinnedSessions;
   return {
     transport,
-    sessions: { active, ...s.counters },
+    sessions: { active, pinned, ...s.counters },
   };
 }
 

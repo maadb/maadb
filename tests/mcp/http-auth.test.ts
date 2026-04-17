@@ -55,6 +55,7 @@ function baseOpts(overrides: Partial<Parameters<typeof startHttpTransport>[0]> =
     trustProxy: false,
     idleMs: 1_800_000,
     sessions: makeSessions(),
+    instance: { name: 'test', source: 'file', projects: [] },
     authToken: GOOD_TOKEN,
     serverFactory: makeFactory(),
     ...overrides,

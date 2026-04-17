@@ -147,6 +147,22 @@ export function logAuthFailure(fields: AuthFailureFields): void {
   opsLog.info(fields, 'auth_failure');
 }
 
+// ---- Pin rejection event (ops) --------------------------------------------
+// 0.6.8 — emitted when X-Maad-Pin-Project header validation fails at HTTP
+// initialize. Operators tracking hosted-deployment misconfiguration (bad
+// gateway, typo'd slug, request smuggling attempts) filter on
+// code=PIN_PROJECT_* to see the pattern quickly.
+
+export interface PinRejectedFields {
+  remote_addr: string;
+  code: 'PIN_PROJECT_INVALID' | 'PIN_PROJECT_NOT_FOUND' | 'PIN_ON_EXISTING_SESSION';
+  project: string | null;
+}
+
+export function logPinRejected(fields: PinRejectedFields): void {
+  opsLog.info(fields, 'pin_rejected');
+}
+
 // ---- Validation warning event (ops) ---------------------------------------
 // 0.6.7 — one `warn`-level line per ValidationWarning emitted on a write.
 // Operators see patterns across agents without having to scrape response

@@ -163,6 +163,7 @@ export async function startServer(opts: ServeOptions): Promise<void> {
       idleMs: opts.http.idleMs,
       authToken: opts.http.authToken,
       sessions: ctx.sessions,
+      instance,
       serverFactory: () => buildMcpServer().server,
     });
 

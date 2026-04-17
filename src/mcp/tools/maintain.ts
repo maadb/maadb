@@ -46,7 +46,7 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
   }));
 
   server.registerTool('maad_health', {
-    description: 'Returns engine health status plus transport posture and session telemetry: initialized, read-only mode, git availability, document count, last indexed timestamp, provenance mode, recovery actions, transport {kind,host?,port?,uptimeSeconds}, sessions {active,openedTotal,closedTotal,lastOpenedAt,lastClosedAt,idleSweepLastRunAt}.',
+    description: 'Returns engine health status plus transport posture and session telemetry: initialized, read-only mode, git availability, document count, last indexed timestamp, provenance mode, recovery actions, transport {kind,host?,port?,uptimeSeconds}, sessions {active,pinned,openedTotal,closedTotal,lastOpenedAt,lastClosedAt,idleSweepLastRunAt}.',
     inputSchema: z.object({
       project: z.string().optional().describe('Project name (multi-project mode only)'),
     }),
@@ -56,8 +56,9 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
     // Telemetry may be uninitialized in test contexts that build an engine
     // without going through startServer. Fall back gracefully so maad_health
     // stays useful in those environments.
+    const pinnedCount = ctx.sessions.snapshot().filter(s => s.bindingSource === 'gateway_pin').length;
     const telemetry = telemetryInitialized()
-      ? getTransportSnapshot(ctx.sessions.size())
+      ? getTransportSnapshot(ctx.sessions.size(), pinnedCount)
       : null;
     const payload = telemetry
       ? { ...health, provenance: provMode, transport: telemetry.transport, sessions: telemetry.sessions }

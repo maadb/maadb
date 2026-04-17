@@ -89,14 +89,14 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
   });
 
   server.registerTool('maad_current_session', {
-    description: 'Returns the current session state: mode, bound project(s), effective role per project. Useful for debugging routing issues.',
+    description: 'Returns the current session state: mode, bound project(s), effective role per project, and binding_source (how the session was bound — client_tool or gateway_pin). Useful for debugging routing issues and detecting pinned sessions.',
     inputSchema: z.object({}),
   }, async (_args, extra) => {
     const sessionId = resolveSessionId(extra);
     const state = ctx.sessions.get(sessionId);
 
     if (!state) {
-      return successResponse({ sessionId, mode: null, note: 'no session registered yet' }, 'maad_current_session');
+      return successResponse({ sessionId, mode: null, binding_source: null, note: 'no session registered yet' }, 'maad_current_session');
     }
 
     const effectiveRoles: Record<string, string> = {};
@@ -108,6 +108,7 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
       activeProject: state.activeProject ?? null,
       whitelist: state.whitelist ?? null,
       effectiveRoles,
+      binding_source: state.bindingSource,
       createdAt: state.createdAt.toISOString(),
       lastActivityAt: state.lastActivityAt.toISOString(),
     }, 'maad_current_session');

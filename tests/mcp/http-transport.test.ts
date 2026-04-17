@@ -55,6 +55,7 @@ function defaultOpts(overrides: Partial<Parameters<typeof startHttpTransport>[0]
     trustProxy: false,
     idleMs: 1_800_000,
     sessions: makeSessions(),
+    instance: { name: 'test', source: 'file', projects: [] },
     serverFactory: makeFactory(),
     ...overrides,
   };

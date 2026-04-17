@@ -112,7 +112,40 @@ describe('R6 transport telemetry', () => {
       'lastClosedAt',
       'lastOpenedAt',
       'openedTotal',
+      'pinned',
     ]);
+  });
+
+  it('pinned count passes through on http', () => {
+    initTransportTelemetry({ kind: 'http', host: '127.0.0.1', port: 7733 });
+    const snap = getTransportSnapshot(4, 2);
+    expect(snap.sessions.active).toBe(4);
+    expect(snap.sessions.pinned).toBe(2);
+  });
+
+  it('pinned is 0 on stdio regardless of input (header plumbing is HTTP-only)', () => {
+    initTransportTelemetry({ kind: 'stdio' });
+    const snap = getTransportSnapshot(1, 5);
+    expect(snap.sessions.pinned).toBe(0);
+  });
+
+  it('pinned defaults to 0 when caller omits the arg', () => {
+    initTransportTelemetry({ kind: 'http', host: '127.0.0.1', port: 7733 });
+    const snap = getTransportSnapshot(2);
+    expect(snap.sessions.pinned).toBe(0);
+  });
+
+  it('recordSessionOpen carries binding_source through to audit (gateway_pin)', () => {
+    initTransportTelemetry({ kind: 'http', host: '127.0.0.1', port: 7733 });
+    // Smoke check: field accepts the gateway_pin value without throwing. Full
+    // audit-log assertion is covered by the end-to-end acceptance suite (P5).
+    expect(() => recordSessionOpen({
+      session_id: 'sid-pinned',
+      remote_addr: '127.0.0.1',
+      user_agent: null,
+      transport: 'http',
+      binding_source: 'gateway_pin',
+    })).not.toThrow();
   });
 
   it('close with unknown session_id still bumps closedTotal (defensive)', () => {

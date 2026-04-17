@@ -205,6 +205,50 @@ docker compose up -d --force-recreate maad
 
 Clients update their copy out-of-band. In-flight writes get `MAAD_SHUTDOWN_TIMEOUT_MS` to drain before the container exits. Rotation without restart is on the roadmap (0.8.5).
 
+## Multi-tenant hosting with X-Maad-Pin-Project (0.6.8+)
+
+If you're running one engine container serving multiple projects and want a gateway (your own app, or traefik middleware) to lock each client to exactly one project, use the `X-Maad-Pin-Project` header. The engine binds the session to the named project at `initialize` and blocks any `maad_use_project` / `maad_use_projects` rebind with `SESSION_PINNED`.
+
+### Gateway-side contract
+
+The gateway MUST do two things on every request forwarded to the engine:
+
+1. **Strip any client-supplied `X-Maad-Pin-Project` header** before adding its own. Forwarding a client-set value defeats the pin — any authenticated client would just pick their own tenant.
+2. **Set `X-Maad-Pin-Project` to the project name corresponding to the authenticated user** (an opaque slug you mint at signup is the usual pattern).
+
+Add a unit test in the gateway that asserts a client-supplied `X-Maad-Pin-Project` is not forwarded. This is the single most important test for this pattern.
+
+### Load-bearing security invariant
+
+The header is trusted. If the engine is directly reachable from clients, the header has no security value. Run the engine behind a Docker network (as the compose stack above does — `MAAD_HTTP_HOST=0.0.0.0` inside the container's isolated namespace, accessible only via traefik). Never publish the engine port to the host.
+
+### traefik pin-strip middleware
+
+Traefik 3.x strips request headers via the `headers` middleware. To strip any client-supplied `X-Maad-Pin-Project` before forwarding:
+
+```yaml
+# compose.yaml — under the maad service labels
+labels:
+  - traefik.http.middlewares.maad-strip-pin.headers.customrequestheaders.X-Maad-Pin-Project=
+  - traefik.http.routers.maad.middlewares=maad-strip-pin@docker
+```
+
+An empty value in `customrequestheaders` replaces any client-supplied value with an empty string before forwarding — the engine treats that as "header absent" (no pin applied). You then inject the real pin from your app-level gateway after the authn step.
+
+If traefik is the only gateway AND you're authenticating via a forward-auth middleware, have the forward-auth service return the project slug in a response header and use traefik's `authResponseHeaders` to plumb it into `X-Maad-Pin-Project` on the forwarded request.
+
+### Observability
+
+- `maad_health.sessions.pinned` — count of currently active pinned sessions
+- `session_open` audit event — `binding_source: "gateway_pin"` on pinned sessions
+- `pin_rejected` ops event — emitted on every `PIN_PROJECT_INVALID` / `PIN_PROJECT_NOT_FOUND` / `PIN_ON_EXISTING_SESSION` with `{remote_addr, code, project}`
+
+If `maad_health.sessions.pinned` is 0 and you expect pinning, check the gateway container's logs and the headers hitting the engine.
+
+### Legacy / single-project mode
+
+If you run with `MAAD_PROJECT` instead of `MAAD_INSTANCE`, the engine logs `pin_ignored_legacy` once per process when it first sees the header and proceeds unpinned. Pinning has no meaning in single-project mode.
+
 ## Gotchas
 
 - **Token required at boot.** `--transport http` without `MAAD_AUTH_TOKEN` fails with `AUTH_TOKEN_REQUIRED`. Don't forget the `export` line in the entrypoint wrapper.

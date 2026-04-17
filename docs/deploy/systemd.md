@@ -253,6 +253,68 @@ Expected: `200 OK`, a `mcp-session-id` response header, and a JSON-RPC initializ
 
 Missing/wrong token returns `401 UNAUTHORIZED` before any session state is created — unauthenticated callers can't enumerate session IDs.
 
+## Multi-tenant hosting with X-Maad-Pin-Project (0.6.8+)
+
+If you're running one engine process with multiple projects in `instance.yaml` and want a gateway (your own app, or a proxy plugin) to lock each client to exactly one project, use the `X-Maad-Pin-Project` header. The engine binds the session to the named project at `initialize` and blocks any `maad_use_project` / `maad_use_projects` rebind with `SESSION_PINNED`.
+
+### Gateway-side contract
+
+The gateway MUST do two things on every request to `/mcp`:
+
+1. **Strip any client-supplied `X-Maad-Pin-Project` header** before adding its own. Forwarding a client-set value defeats the pin — any authenticated client would just pick their own tenant.
+2. **Set `X-Maad-Pin-Project` to the project name corresponding to the authenticated user** (e.g. an opaque slug you mint at signup).
+
+In node/express this looks like:
+
+```ts
+// ❌ BAD — forwards whatever the client sent
+fetch(engineUrl, { headers: req.headers })
+
+// ✅ GOOD — strip, then set
+const headers = { ...req.headers }
+delete headers['x-maad-pin-project']         // MANDATORY
+headers['X-Maad-Pin-Project'] = session.projectSlug
+headers['Authorization'] = `Bearer ${engineToken}`
+fetch(engineUrl, { headers })
+```
+
+Add a unit test in the gateway that asserts a client-supplied `X-Maad-Pin-Project` is not forwarded. This is the single most important test for this pattern.
+
+### Load-bearing security invariant
+
+The header is trusted. If the engine is directly reachable from clients, the header has no security value — clients set it themselves. The engine MUST bind to `127.0.0.1` (loopback) or a private network accessible only to the gateway. The systemd unit above already binds to `127.0.0.1`, which is correct.
+
+### nginx pin-strip configuration
+
+nginx does not strip client-supplied headers by default. Add this inside the `location /mcp` block if nginx is your gateway (not just a TLS terminator in front of an app-level gateway):
+
+```nginx
+location /mcp {
+    proxy_pass http://127.0.0.1:7733/mcp;
+    # ... existing proxy settings ...
+
+    # Strip client-supplied pin header before forwarding.
+    # The app-level gateway (or this nginx, if you set it via map / auth
+    # subrequest) is the only thing allowed to set X-Maad-Pin-Project.
+    proxy_set_header X-Maad-Pin-Project "";
+
+    # Then either let your app-level gateway inject it OR derive it here:
+    # proxy_set_header X-Maad-Pin-Project $some_map_lookup;
+}
+```
+
+### Observability
+
+- `maad_health.sessions.pinned` — count of currently active pinned sessions
+- `session_open` audit event — `binding_source: "gateway_pin"` on pinned sessions
+- `pin_rejected` ops event — emitted on every `PIN_PROJECT_INVALID` / `PIN_PROJECT_NOT_FOUND` / `PIN_ON_EXISTING_SESSION` with `{remote_addr, code, project}`
+
+If `maad_health.sessions.pinned` is 0 and you expect pinning, check the gateway log and the request headers hitting the engine.
+
+### Legacy / single-project mode
+
+If you run `--project /path` (not `--instance`) the engine logs `pin_ignored_legacy` once per process when it first sees the header and proceeds unpinned. There's only one project in legacy mode, so pinning has no meaning.
+
 ## Gotchas
 
 - **Token required at boot.** `--transport http` without `MAAD_AUTH_TOKEN` fails with `AUTH_TOKEN_REQUIRED`. This is intentional.

@@ -173,6 +173,7 @@ describe('R3 HTTP transport — close fan-out', () => {
       host: '127.0.0.1', port: 0, maxBodyBytes: 4096,
       headersTimeoutMs: 10_000, requestTimeoutMs: 60_000, keepAliveTimeoutMs: 5_000,
       trustProxy: false, idleMs: 1_800_000, sessions,
+      instance: { name: 'test', source: 'file', projects: [] },
       serverFactory: makeFactory(),
     });
     const addr = handle.httpServer.address();
@@ -216,6 +217,7 @@ describe('R3 HTTP transport — close fan-out', () => {
       host: '127.0.0.1', port: 0, maxBodyBytes: 4096,
       headersTimeoutMs: 10_000, requestTimeoutMs: 60_000, keepAliveTimeoutMs: 5_000,
       trustProxy: false, idleMs: 1_800_000, sessions,
+      instance: { name: 'test', source: 'file', projects: [] },
       serverFactory: makeFactory(),
     });
     const addr = handle.httpServer.address();
@@ -270,6 +272,7 @@ describe('R3 HTTP transport — idle sweeper', () => {
       host: '127.0.0.1', port: 0, maxBodyBytes: 4096,
       headersTimeoutMs: 10_000, requestTimeoutMs: 60_000, keepAliveTimeoutMs: 5_000,
       trustProxy: false, idleMs: 1_200, sessions,
+      instance: { name: 'test', source: 'file', projects: [] },
       serverFactory: makeFactory(),
     });
     const addr = handle.httpServer.address();
@@ -302,6 +305,7 @@ describe('R3 HTTP transport — idle sweeper', () => {
       host: '127.0.0.1', port: 0, maxBodyBytes: 4096,
       headersTimeoutMs: 10_000, requestTimeoutMs: 60_000, keepAliveTimeoutMs: 5_000,
       trustProxy: false, idleMs: 1_500, sessions,
+      instance: { name: 'test', source: 'file', projects: [] },
       serverFactory: makeFactory(),
     });
     const addr = handle.httpServer.address();

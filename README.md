@@ -3,8 +3,8 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/node-%E2%89%A522-brightgreen.svg)](package.json)
 [![TypeScript](https://img.shields.io/badge/typescript-strict-blue.svg)](tsconfig.json)
-[![Tests](https://img.shields.io/badge/tests-554%20passing-brightgreen.svg)](tests)
-[![Version](https://img.shields.io/badge/version-0.6.7-purple.svg)](Version.md)
+[![Tests](https://img.shields.io/badge/tests-575%20passing-brightgreen.svg)](tests)
+[![Version](https://img.shields.io/badge/version-0.6.8-purple.svg)](Version.md)
 
 > **Your data stays in markdown. The engine makes it queryable.**
 
@@ -186,17 +186,15 @@ In multi-project mode, session tools are always available pre-bind: `maad_projec
 
 ## Current state
 
-**v0.6.7 — Schema Precision Hints.** Date fields can declare `store_precision` (engine-enforced minimum on write) and `display_precision` (consumer rendering hint). Enforcement fires at write-time only — reads, reindex, and audit paths never judge historical data. Non-breaking by default: `on_coarser: warn` surfaces drift via `_meta.warnings[]` and ops log without blocking the write; `on_coarser: error` opts into strict rejection. `maad_validate includePrecision: true` scans historical records for precision drift without counting them invalid.
-
-Builds on the 0.5.0 remote MCP transport and 0.4.1 hardened engine. 554 tests passing.
+**v0.6.8 — Gateway Session Pinning.** HTTP transport honors a new `X-Maad-Pin-Project: <name>` header at MCP `initialize` — the session is bound to the named project synchronously before any tool call reaches a handler, and any subsequent `maad_use_project` / `maad_use_projects` attempt rejects with a new `SESSION_PINNED` error. Enables trusted-gateway multi-tenant hosting patterns (per-user sub-projects under one engine process) without requiring the gateway to parse MCP JSON-RPC. Fail-safe: absent header = identical behavior to 0.6.7; stdio is untouched. Builds on the 0.6.7 precision contract and the 0.5.0 remote transport. 575 tests passing.
 
 See [Version.md](Version.md) for full release history and [ROADMAP.md](ROADMAP.md) for the path to 1.0.
 
 ## Stack
 
 - TypeScript strict, Node.js 22+ (tested on v24)
-- 5 production dependencies: `better-sqlite3`, `gray-matter`, `simple-git`, `@modelcontextprotocol/sdk`, `pino`
-- 554 tests, Vitest
+- 6 production dependencies: `better-sqlite3`, `gray-matter`, `js-yaml`, `simple-git`, `@modelcontextprotocol/sdk`, `pino`
+- 575 tests, Vitest
 - MIT license, pre-1.0, actively developed
 
 ## License

@@ -13,9 +13,11 @@ import { randomBytes } from 'node:crypto';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { logger } from '../../engine/logger.js';
-import { logAuthFailure } from '../../logging.js';
+import { logAuthFailure, logPinRejected } from '../../logging.js';
 import { validateBearer } from './auth.js';
+import { validatePinHeader } from './pin.js';
 import type { SessionRegistry } from '../../instance/session.js';
+import type { InstanceConfig } from '../../instance/config.js';
 import { recordIdleSweep, recordSessionOpen } from './telemetry.js';
 import { isShuttingDown } from '../shutdown.js';
 
@@ -46,6 +48,12 @@ export interface HttpTransportOptions {
    * wired in (rate-limit dispose, audit log, etc.).
    */
   sessions: SessionRegistry;
+  /**
+   * Instance config — needed for X-Maad-Pin-Project header validation.
+   * The pin validator checks values against instance.projects[].name and
+   * skips validation entirely for synthetic (legacy single-project) mode.
+   */
+  instance: InstanceConfig;
   /** Factory called once per new session to produce a fresh McpServer with tools registered. */
   serverFactory: () => McpServer;
 }
@@ -93,6 +101,9 @@ function applyResponseHardening(res: ServerResponse, kind: 'json' | 'sse'): void
 
 export async function startHttpTransport(opts: HttpTransportOptions): Promise<HttpTransportHandle> {
   const entries = new Map<string, TransportEntry>();
+  // Fire `pin_ignored_legacy` at most once per process so operators see the
+  // signal without getting log spam when a legacy deployment is being probed.
+  let legacyPinWarned = false;
 
   const httpServer = createHttpServer(async (req, res) => {
     try {
@@ -144,6 +155,36 @@ export async function startHttpTransport(opts: HttpTransportOptions): Promise<Ht
         }
       }
 
+      // Middleware step 2: X-Maad-Pin-Project (0.6.8) — trusted-gateway
+      // session pinning for multi-tenant hosted deployments. Runs AFTER auth
+      // (rejections need an authenticated context) and BEFORE session
+      // resolution (pin is a session-creation property). Silent skip in
+      // synthetic/legacy single-project mode per spec §Interaction with
+      // existing features.
+      let pinnedProjectName: string | undefined;
+      if (opts.instance.source === 'synthetic') {
+        if (req.headers['x-maad-pin-project'] !== undefined && !legacyPinWarned) {
+          logger.info('mcp', 'http', 'X-Maad-Pin-Project received on synthetic single-project instance; ignoring (pin_ignored_legacy)');
+          legacyPinWarned = true;
+        }
+      } else {
+        const pin = validatePinHeader(req, opts.instance);
+        if (pin.status === 'rejected') {
+          const pinValueRaw = req.headers['x-maad-pin-project'];
+          const pinValue = typeof pinValueRaw === 'string' ? pinValueRaw : null;
+          logPinRejected({
+            remote_addr: remoteAddrFor(req, opts.trustProxy),
+            code: pin.code,
+            project: pinValue,
+          });
+          writeJsonError(res, 400, pin.code, pin.message);
+          return;
+        }
+        if (pin.status === 'valid') {
+          pinnedProjectName = pin.projectName;
+        }
+      }
+
       const sessionIdHeader = req.headers['mcp-session-id'];
       const sessionId = typeof sessionIdHeader === 'string' ? sessionIdHeader : undefined;
 
@@ -173,6 +214,7 @@ export async function startHttpTransport(opts: HttpTransportOptions): Promise<Ht
 
       // New session: transport delegates ID generation to us (128-bit CSPRNG)
       const remoteAddr = remoteAddrFor(req, opts.trustProxy);
+      const pinForClosure = pinnedProjectName;
       const transport: StreamableHTTPServerTransport = new StreamableHTTPServerTransport({
         sessionIdGenerator: () => randomBytes(16).toString('base64url'),
         onsessioninitialized: (sid: string) => {
@@ -183,13 +225,28 @@ export async function startHttpTransport(opts: HttpTransportOptions): Promise<Ht
           // dispose, audit handlers) never runs. withSession may also
           // create(sid) lazily on first tool call; create() is idempotent.
           opts.sessions.create(sid);
+          // Gateway pin (0.6.8): if the pin header validated, bind the session
+          // synchronously before any tool call can reach a handler. Rebind
+          // protection lives in SessionRegistry.bindSingle (SESSION_PINNED
+          // error on subsequent maad_use_project calls).
+          if (pinForClosure !== undefined) {
+            const pinBind = opts.sessions.bindSingle(sid, pinForClosure, { source: 'gateway_pin' });
+            if (!pinBind.ok) {
+              // Should be impossible — we validated the project exists before
+              // session creation. Log loudly if it ever fires.
+              const msg = pinBind.errors.map(e => `${e.code}: ${e.message}`).join('; ');
+              logger.error('mcp', 'http', `gateway pin bind failed for session ${sid}: ${msg}`);
+            }
+          }
           const ua = req.headers['user-agent'];
-          recordSessionOpen({
+          const openFields: Parameters<typeof recordSessionOpen>[0] = {
             session_id: sid,
             remote_addr: remoteAddr,
             user_agent: typeof ua === 'string' ? ua : null,
             transport: 'http',
-          });
+          };
+          if (pinForClosure !== undefined) openFields.binding_source = 'gateway_pin';
+          recordSessionOpen(openFields);
         },
       });
       transport.onclose = (): void => {

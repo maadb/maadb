@@ -71,6 +71,19 @@ Engine served over HTTP/SSE so MCP clients can connect across the network. One s
 
 82 new tests (transport/auth/lifecycle/concurrency/changes-since/healthz/health-telemetry), 476 total passing.
 
+### v0.6.8 — Gateway Session Pinning (2026-04-17)
+
+Trusted-gateway multi-tenant support. HTTP transport honors a new `X-Maad-Pin-Project: <name>` header at MCP `initialize` — the session is bound to the named project synchronously before any tool call reaches a handler, and any subsequent `maad_use_project` / `maad_use_projects` attempt rejects with a new `SESSION_PINNED` error. Fail-safe: absent header = identical behavior to 0.6.7; stdio is untouched; synthetic (legacy `--project`) instances log `pin_ignored_legacy` once and proceed as if the header weren't there. Industry-standard pattern (Envoy / Cloudflare Access / Kong shape) for moving tenant-boundary enforcement from the gateway's MCP-message parser to the engine's session-creation path.
+
+- [x] `X-Maad-Pin-Project` header parsed at HTTP initialize between auth and session resolution; rejected values emit dedicated HTTP 400 codes (`PIN_PROJECT_INVALID`, `PIN_PROJECT_NOT_FOUND`, `PIN_ON_EXISTING_SESSION`)
+- [x] `BindingSource` session-state discriminator (`client_tool | gateway_pin`) threaded through `bindSingle` / `bindMulti`; pinned sessions reject rebind with the new `SESSION_PINNED` error
+- [x] `maad_health.sessions.pinned` counter + `maad_current_session.binding_source` in responses; `session_open` audit event carries `binding_source` for pinned sessions; `pin_rejected` ops event on every 400
+- [x] Synthetic single-project instances silently skip validation with a one-time `pin_ignored_legacy` info log
+- [x] New deploy-guide section on the load-bearing gateway-must-strip-client-supplied-header invariant
+- [x] 21 new tests (4 session + 4 telemetry + 13 acceptance from spec), 575 total passing
+
+Unblocks hosted multi-tenant MAADB deployments by closing the tenant-isolation gap in the shared-MAADB multi-project deploy model — a gateway-enforced binding replaces the previous "trust the client to stay in its lane" model.
+
 ### v0.6.7 — Schema Precision Hints (2026-04-16)
 
 Schema-driven datetime precision contract. Date fields can now declare `store_precision` (engine-enforced minimum on write) and `display_precision` (consumer-side rendering hint). Non-breaking by construction: absent keys = pre-0.6.7 lenient behavior; default `on_coarser: warn` means opt-in schemas emit warnings rather than blocking on historical coarse data. Enforcement fires at write-time only — read, reindex, and audit paths never judge historical values. Ship gate for the hosted brain: coarse writes are permanent data loss, so the contract had to land before end-user data existed.
@@ -81,7 +94,7 @@ Delivered in five phases (P1–P5) on branch `feat/0.6.7-schema-precision`. P1 (
 
 ---
 
-## Current: v0.6.7
+## Current: v0.6.8
 
 See Shipped block above.
 
