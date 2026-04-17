@@ -27,3 +27,7 @@ CHANGELOG.md
 
 # Local scratch (instance configs, throwaway data)
 scratch/
+
+# Shipped-version specs live here locally for reference. Not tracked — the
+# Version.md history and brain decision records carry the durable rationale.
+docs/archive/

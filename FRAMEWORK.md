@@ -87,6 +87,7 @@ Single deterministic pass. One input, one output. No composition, no judgment.
 | `parse` | Parse one file, return structure |
 | `history` | Git log for one document |
 | `audit` | Git log for project (date-inclusive) |
+| `changes_since` | Opaque-cursor delta feed — records modified since a cursor point, ordered on `(updated_at, doc_id)` |
 
 ### Tier 2 — Deterministic Composite
 

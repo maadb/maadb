@@ -258,7 +258,7 @@ projects:
 }
 ```
 
-Agents call `maad_use_project <name>` (single mode) or `maad_use_projects [names...]` (multi mode) once per session before other tools. See [the 0.4.0 spec](docs/specs/0.4.0-multi-project-routing.md) for the routing model.
+Agents call `maad_use_project <name>` (single mode) or `maad_use_projects [names...]` (multi mode) once per session before other tools.
 
 ## Project Layout
 
