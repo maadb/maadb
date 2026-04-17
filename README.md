@@ -107,7 +107,7 @@ The Architect skill handles type discovery, schema design, registry creation, an
 
 ## Remote / hosted deployment
 
-MAADB serves over HTTP/SSE for multi-session hosted deployments. One process handles many concurrent client sessions with bearer-token auth at the handshake, concurrent reads, polling delta (`maad_changes_since`), and an unauthenticated `/healthz` liveness probe. TLS terminated upstream at a reverse proxy.
+MAADB serves over HTTP/SSE for multi-session hosted deployments. One process handles many concurrent client sessions with bearer-token auth at the handshake, concurrent reads, polling delta ([`maad_changes_since`](docs/change-feed.md)), and an unauthenticated `/healthz` liveness probe. TLS terminated upstream at a reverse proxy.
 
 ```bash
 MAAD_AUTH_TOKEN=$(openssl rand -base64 48 | tr -d '=' | tr '+/' '-_') \
@@ -119,6 +119,7 @@ Deployment guides:
 
 - [systemd + nginx (bare metal)](docs/deploy/systemd.md)
 - [Docker + traefik](docs/deploy/docker.md)
+- [Change feed — polling patterns + cadence](docs/change-feed.md)
 
 ## Access roles
 

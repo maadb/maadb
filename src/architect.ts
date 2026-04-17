@@ -229,6 +229,10 @@ After deployment, report to the requesting agent or user:
 
 Then transition to MAAD User mode for day-to-day operations, or hand control back to the upstream agent.
 
+## Change Propagation
+
+If the project will involve multiple agents, a hosted deployment, or scheduled workers, point the user at \`docs/change-feed.md\` in the engine repo. Key calls: \`maad_changes_since\` is the polling delta tool (shipped); cursor must be persisted between calls; in HTTP deployments polling belongs in the gateway, not the agent's reasoning loop; push via \`maad_subscribe\` is roadmapped for 0.6.5. Do not invent custom polling cadence in skill files — follow the patterns in the reference doc.
+
 ## What MAAD Is and Is Not
 
 **Good fit:**
