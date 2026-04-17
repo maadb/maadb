@@ -92,9 +92,49 @@ Use these patterns to fill gaps without asking. When the requester says a busine
 - If >1000 records/year → transaction pattern (append to parent file)
 - If <1000 records/year → master pattern (one file per record)
 - Status fields are almost always enums
-- Date fields use ISO format (YYYY-MM-DD)
+- Date fields: declare \`store_precision\` for the minimum precision the schema expects (\`year\` / \`month\` / \`day\` / \`hour\` / \`minute\` / \`second\` / \`millisecond\`). Default \`on_coarser: warn\` surfaces drift without blocking the write; \`error\` opts into strict rejection. \`display_precision\` is a consumer-side rendering hint; the engine never enforces it. Pick per field meaning: identity dates (birthdays, since_date) = \`day\`; event timestamps (opened_at, logged_at) = \`second\` or \`millisecond\`. See \`_skills/schema-guide.md\` for the full contract.
 - Money fields use amount type ("1250.00 USD")
 - Cross-entity links use ref type with target
+- Writes return \`_meta.warnings[]\` when values trip soft-validation (precision drift, etc.). Surface these to the caller instead of silently ignoring — agents should self-correct on warnings, not just on errors.
+
+### Example schema shape (current DSL)
+
+A typical modern schema file (\`_schema/case.v1.yaml\`):
+
+\`\`\`yaml
+type: case
+version: 1
+required: [doc_id, title, client, status]
+fields:
+  title:
+    type: string
+    index: true
+  client:
+    type: ref
+    target: client
+    index: true
+  status:
+    type: enum
+    values: [open, pending, closed]
+    index: true
+  opened_at:
+    type: date
+    store_precision: day        # contract minimum for this field
+    on_coarser: warn            # default; 'error' to reject coarser writes
+    display_precision: day
+    index: true
+  resolved_at:
+    type: date
+    store_precision: second     # events captured at event-moment granularity
+    display_precision: minute   # UIs drop seconds on render
+template:
+  headings:
+    - { level: 1, text: "{{title}}", id: summary }
+    - { level: 2, text: Timeline, id: timeline }
+    - { level: 2, text: Notes, id: notes }
+\`\`\`
+
+Only declare precision hints on date fields where the contract actually matters. Leaving them unset is fully backward-compatible (pre-0.6.7 lenient behavior).
 
 ### ID rules (critical — do not skip)
 - \`id_prefix\` in the registry MUST be 2-5 lowercase alphanumeric characters (e.g. \`cli\`, \`usr\`, \`cas\`, \`note\`, \`te\`)
@@ -151,8 +191,9 @@ After design is confirmed (or in autonomous mode):
 3. Call \`maad_reload\` to pick up new config
 4. Call \`maad_summary\` to verify engine loaded the types
 5. Optionally create 1-2 sample records per type to validate the schema
-6. Call \`maad_reindex\` if sample records were created
-7. Report: "Database deployed. X types, Y fields. Ready for data."
+6. Inspect \`_meta.warnings[]\` on sample-record responses — if intended-coarse values trip precision warnings, tighten the schema or adjust the sample input before proceeding
+7. Call \`maad_reindex\` if sample records were created
+8. Report: "Database deployed. X types, Y fields. Ready for data."
 
 ## Bulk Data Import
 
@@ -173,7 +214,9 @@ For importing large datasets, use \`maad_bulk_create\` instead of individual cre
 | create fails validation | Field value doesn't match schema | Check \`maad_schema <type>\` for expected types/enums |
 | missing type error | Registry has type but reload wasn't called | Call \`maad_reload\` |
 | search returns too many results | Missing query/value param | Use \`query\` (substring) or \`value\` (exact) param to filter |
-| parallel writes fail | SQLite single-writer lock | Execute writes sequentially, never in parallel |
+| writes queue under contention | Engine serializes mutating ops via FIFO write mutex (since 0.4.1) | Writes don't fail — they queue. If they hang, check \`maad_health\` for \`writeQueueDepth\` and \`lastWriteOp\`. Still: never issue parallel writes from one caller. |
+| write rejected with \`RATE_LIMITED\` | Session exceeded the per-session token bucket | Honor \`retryAfterMs\` from the error details; use exponential backoff |
+| write response includes \`_meta.warnings[]\` | Value tripped a soft-validation check (e.g. precision coarser than declared) | Write succeeded. Decide whether to re-issue with the declared precision or tighten the schema |
 
 ## Handoff
 

@@ -54,7 +54,7 @@ A **MAAD project** — a markdown-native database. Markdown files are the record
 
 ## How to access data
 
-Use **MAAD MCP tools** for all data operations. Do not use shell commands or direct file reads for data access. See CLAUDE.md for detailed agent workflow instructions.
+Use **MAAD MCP tools** for all data operations. Do not use shell commands or direct file reads for data access. If \`maad_summary\` reports an empty project, read \`_skills/architect-core.md\` and enter Architect mode to design and deploy the schema.
 
 If using CLI for debugging:
 \`\`\`
@@ -92,6 +92,8 @@ That's it. You're oriented. Now use the commands below as needed.
 function generateFullCommandRef(cmd: string): string {
   return `## All Commands
 
+> Commands shown below in CLI form for explicit syntax. **MCP tool names prefix \`maad_\`** (e.g. \`get\` → \`maad_get\`, \`bulk_create\` → \`maad_bulk_create\`). Agent workflows use the MCP variants; CLI is for operator debugging.
+
 ### Discover
 | Command | What it does |
 |---------|-------------|
@@ -119,6 +121,7 @@ function generateFullCommandRef(cmd: string): string {
 | \`join\` | Query + follow refs + project fields from both sides in one call |
 | \`verify mode=field\` | Fact-check a field value: grounded true/false + actual value + source |
 | \`verify mode=count\` | Fact-check a document count: grounded true/false + actual count |
+| \`changes_since <cursor>\` | Delta feed — records modified since cursor. Opaque base64url cursor, stable order on (updated_at ASC, doc_id ASC). Empty cursor = from the beginning. |
 
 ### Write
 | Command | What it does |
@@ -129,6 +132,7 @@ function generateFullCommandRef(cmd: string): string {
 | \`update <doc_id> --body "text"\` | Replace document body |
 | \`bulk_create\` | Create multiple records in one call (MCP only) |
 | \`bulk_update\` | Update multiple records in one call (MCP only) |
+| \`delete <doc_id>\` | Remove a record (soft by default, \`--hard\` for hard delete) |
 
 ### Maintain
 | Command | What it does |
@@ -136,6 +140,8 @@ function generateFullCommandRef(cmd: string): string {
 | \`validate\` | Validate all documents against schemas |
 | \`validate <doc_id>\` | Validate one document |
 | \`reindex --force\` | Rebuild the full index from markdown |
+| \`reload\` | Reload registry + schemas without restart (after editing \`_registry/\` or \`_schema/\`) |
+| \`health\` | Engine status — write queue depth, last write op, disk headroom, git clean flag, transport + session telemetry |
 | \`parse <file.md>\` | Parse one file, show structure |
 
 ### Audit (requires git)
@@ -179,11 +185,12 @@ function generateRules(): string {
 1. **Run \`summary\` first** in every new session — one call to orient
 2. **Use \`hot\` reads by default** — escalate to \`full\`, \`warm\`, then \`cold\` only when needed
 3. **Use \`schema <type>\` before writes** — know what fields are required
-4. **Use the CLI for writes** — never edit markdown files directly
+4. **Use MAAD MCP tools for writes** — never edit markdown files directly; CLI forms above are for operator debugging only
 5. **Use \`search\` for cross-document queries** — don't open files to find people/dates/amounts
 6. **Use \`related\` for graph traversal** — don't manually search for connected docs
 7. **Cite \`doc_id\` and \`block_id\`** in answers for traceability
 8. **\`reindex --force\`** recovers from any stale state
+9. **Inspect \`_meta.warnings[]\` on write responses** — the engine surfaces soft-validation signals (precision drift, deprecation hints) alongside successful writes. Agents self-correct on warnings, not just on errors
 
 ## Grounding Rules (CRITICAL)
 
