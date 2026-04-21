@@ -97,6 +97,12 @@ ExecStart=/usr/bin/node /opt/maad/maadb/dist/cli.js serve
 KillSignal=SIGTERM
 TimeoutStopSec=15
 
+# Hot-reload instance.yaml without a restart (0.6.9+). SIGHUP triggers
+# maad_instance_reload internally: added projects register lazily, removed
+# projects evict their engine and cancel sessions bound to them, path/role
+# mutations on existing projects are rejected (wait for 0.9.0).
+ExecReload=/bin/kill -HUP $MAINPID
+
 # ops/audit are JSON on stderr by default; journald captures stderr.
 # For a separate file, set MAAD_AUDIT_PATH in the env file (above) and
 # rely on the app to open that file handle.
@@ -128,6 +134,23 @@ sudo systemctl enable --now maad
 sudo systemctl status maad
 journalctl -u maad -f
 ```
+
+**Hot-reload after editing `instance.yaml`:**
+
+```bash
+# Edit /etc/maad/instance.yaml to add / remove projects, then:
+sudo systemctl reload maad
+
+# Or invoke the MCP tool from an admin session (HTTP transport):
+# Tool call: maad_instance_reload → { projectsAdded, projectsRemoved, ... }
+
+# Check what happened:
+journalctl -u maad --since=-1m | grep instance_reload
+# → instance_reload_start / instance_reload_complete
+# → audit: instance_reload { source: "sighup", projectsAdded: [...], ... }
+```
+
+Mutations of existing project paths / roles are rejected with `INSTANCE_MUTATION_UNSUPPORTED` — pending the 0.9.0 eviction policy, the pattern is remove-and-re-add (separate reload cycles) rather than an in-place edit.
 
 ## 5. nginx reverse proxy
 

@@ -39,6 +39,14 @@ export interface SessionState {
   bindingSource: BindingSource | null;
   createdAt: Date;
   lastActivityAt: Date;
+  /**
+   * Set to true by `cancelByProject` when the session's bound project was
+   * removed via instance reload. The next tool call checks this flag and
+   * returns SESSION_CANCELLED, then destroys the session. Multi-mode sessions
+   * whose whitelist merely contained the removed project are NOT cancelled —
+   * their whitelist is pruned via `pruneProjectFromWhitelist` instead.
+   */
+  cancelled?: boolean;
 }
 
 export interface BindOptions {
@@ -60,6 +68,15 @@ export class SessionRegistry {
   private closeHandlers: SessionCloseHandler[] = [];
 
   constructor(private instance: InstanceConfig) {}
+
+  /**
+   * Swap the live instance config. Called by the instance-reload path after
+   * the pool has applied diffs. Does not touch existing sessions — cancellation
+   * and whitelist pruning are separate explicit calls.
+   */
+  setInstance(newInstance: InstanceConfig): void {
+    this.instance = newInstance;
+  }
 
   create(sessionId: string): SessionState {
     const existing = this.sessions.get(sessionId);
@@ -118,6 +135,49 @@ export class SessionRegistry {
    */
   snapshot(): SessionState[] {
     return Array.from(this.sessions.values());
+  }
+
+  /**
+   * Mark sessions whose single-mode binding (or gateway-pin) targets the
+   * named project as `cancelled`. The next tool call on a cancelled session
+   * returns SESSION_CANCELLED and then destroys the session. Multi-mode
+   * sessions are NOT cancelled here — use `pruneProjectFromWhitelist` for
+   * those. Returns the session IDs that were cancelled.
+   */
+  cancelByProject(projectName: string): string[] {
+    const cancelled: string[] = [];
+    for (const state of this.sessions.values()) {
+      if (state.mode === 'single' && state.activeProject === projectName) {
+        state.cancelled = true;
+        cancelled.push(state.sessionId);
+      }
+    }
+    return cancelled;
+  }
+
+  /**
+   * Remove a project from multi-mode sessions' whitelist + effectiveRoles.
+   * Single-mode sessions are not touched (handled by `cancelByProject`).
+   * A multi-mode session whose whitelist becomes empty after pruning is
+   * marked cancelled — it has no remaining projects to route to.
+   * Returns { prunedSessions, cancelledSessions } lists.
+   */
+  pruneProjectFromWhitelist(projectName: string): { prunedSessions: string[]; cancelledSessions: string[] } {
+    const pruned: string[] = [];
+    const cancelledFromEmpty: string[] = [];
+    for (const state of this.sessions.values()) {
+      if (state.mode !== 'multi') continue;
+      const listHadProject = state.whitelist?.includes(projectName) ?? false;
+      if (!listHadProject) continue;
+      state.whitelist = state.whitelist!.filter(n => n !== projectName);
+      state.effectiveRoles.delete(projectName);
+      pruned.push(state.sessionId);
+      if (state.whitelist.length === 0) {
+        state.cancelled = true;
+        cancelledFromEmpty.push(state.sessionId);
+      }
+    }
+    return { prunedSessions: pruned, cancelledSessions: cancelledFromEmpty };
   }
 
   bindSingle(sessionId: string, projectName: string, opts: BindOptions = {}): Result<SessionState> {

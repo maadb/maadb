@@ -193,7 +193,26 @@ User responsibility. For Claude Code / Claude Desktop:
 
 Keep `MAAD_TOKEN` in the client's environment, never in the committed config.
 
-## 6. Rotating the token
+## 6. Hot-reload instance.yaml (0.6.9+)
+
+Edit `instance.yaml` on the mounted volume and send `SIGHUP` to the container:
+
+```bash
+# Edit /path/to/instance.yaml on the host (it's a bind-mount, picked up live)
+docker compose kill -s SIGHUP maad
+
+# Or invoke the MCP tool from an admin session (HTTP):
+# maad_instance_reload → { projectsAdded, projectsRemoved, ... }
+
+# Inspect what happened:
+docker compose logs maad --since 1m | grep instance_reload
+# instance_reload_start / instance_reload_complete
+# audit: instance_reload { source: "sighup", projectsAdded: [...], ... }
+```
+
+Added projects register lazily (first tool call on the new project boots its engine). Removed projects evict their engine and cancel sessions bound to them (single-mode → `SESSION_CANCELLED` on next call; multi-mode → whitelist pruned, session survives if it has other projects). Path or role mutations on existing projects reject with `INSTANCE_MUTATION_UNSUPPORTED` — until the 0.9.0 eviction policy lands, use remove-then-re-add across two reload cycles.
+
+## 7. Rotating the token
 
 Today this is a restart:
 

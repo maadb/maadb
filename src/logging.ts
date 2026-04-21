@@ -185,3 +185,43 @@ export interface ValidationWarningFields {
 export function logValidationWarning(fields: ValidationWarningFields): void {
   opsLog.warn(fields, 'validation_warning');
 }
+
+// ---- Instance reload events -----------------------------------------------
+// 0.6.9 — audit + ops events for maad_instance_reload + SIGHUP. Audit carries
+// the diff (projectsAdded / projectsRemoved) + source so operators can trace
+// tenant-membership changes. Ops channel carries start / complete / failed
+// progress lines for live debugging.
+
+export interface InstanceReloadAuditFields {
+  source: 'tool' | 'sighup';
+  projectsAdded: number;
+  projectsRemoved: number;
+  projectsAddedNames: string[];
+  projectsRemovedNames: string[];
+  sessionsCancelled: number;
+  sessionsPruned: number;
+  durationMs: number;
+}
+
+export function logInstanceReload(fields: InstanceReloadAuditFields): void {
+  auditLog.info(fields, 'instance_reload');
+}
+
+export interface InstanceReloadProgressFields {
+  source: 'tool' | 'sighup';
+  phase: 'start' | 'complete' | 'failed';
+  code?: string;
+  message?: string;
+  projectsAdded?: number;
+  projectsRemoved?: number;
+  durationMs?: number;
+}
+
+export function logInstanceReloadProgress(fields: InstanceReloadProgressFields): void {
+  const eventName = `instance_reload_${fields.phase}`;
+  if (fields.phase === 'failed') {
+    opsLog.warn(fields, eventName);
+  } else {
+    opsLog.info(fields, eventName);
+  }
+}

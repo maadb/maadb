@@ -18,6 +18,7 @@ import { initIdempotencyCache, readIdempotencyEnv } from './idempotency.js';
 import { initRateLimiter, readRateLimitEnv } from './rate-limit.js';
 import { initLogging, readLoggingEnv } from '../logging.js';
 import { installSignalHandlers } from './shutdown.js';
+import { installReloadSignalHandler } from './reload-signal.js';
 import { getRateLimiter } from './rate-limit.js';
 import { registerShutdownHooks } from './lifecycle.js';
 import { logger } from '../engine/logger.js';
@@ -124,6 +125,10 @@ export async function startServer(opts: ServeOptions): Promise<void> {
     }
     if (legacyRole === 'admin') {
       toolCount += maintainTools.register(server, ctx);
+      // maad_instance_reload always registers for admin, even on synthetic
+      // instances — handler rejects synthetic with INSTANCE_RELOAD_SYNTHETIC
+      // rather than an opaque "unknown tool" response.
+      toolCount += instanceTools.registerReload(server, ctx);
     }
     return { server, toolCount };
   };
@@ -175,6 +180,7 @@ export async function startServer(opts: ServeOptions): Promise<void> {
         },
       },
     );
+    installReloadSignalHandler(ctx);
     return;
   }
 
@@ -192,6 +198,7 @@ export async function startServer(opts: ServeOptions): Promise<void> {
       },
     },
   );
+  installReloadSignalHandler(ctx);
 
   const transport = new StdioServerTransport();
   await server.connect(transport);

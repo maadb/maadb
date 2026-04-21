@@ -46,7 +46,7 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
   }));
 
   server.registerTool('maad_health', {
-    description: 'Returns engine health status plus transport posture and session telemetry: initialized, read-only mode, git availability, document count, last indexed timestamp, provenance mode, recovery actions, transport {kind,host?,port?,uptimeSeconds}, sessions {active,pinned,openedTotal,closedTotal,lastOpenedAt,lastClosedAt,idleSweepLastRunAt}.',
+    description: 'Returns engine health status plus transport posture, session telemetry, and instance reload stats: initialized, read-only mode, git availability, document count, last indexed timestamp, provenance mode, recovery actions, transport {kind,host?,port?,uptimeSeconds}, sessions {active,pinned,openedTotal,closedTotal,lastOpenedAt,lastClosedAt,idleSweepLastRunAt}, instance {source,configPath?,projectCount,lastReloadAt?,reloadsAttempted,reloadsSucceeded,reloadsFailed,projectsAdded,projectsRemoved}.',
     inputSchema: z.object({
       project: z.string().optional().describe('Project name (multi-project mode only)'),
     }),
@@ -60,9 +60,27 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
     const telemetry = telemetryInitialized()
       ? getTransportSnapshot(ctx.sessions.size(), pinnedCount)
       : null;
+
+    // 0.6.9 — instance reload stats, always included. Operators watching
+    // hot-reload behavior (cohort expansion, tenant churn) filter on this
+    // block to verify their last reload landed + projectCount is current.
+    const reloadStats = ctx.pool.reloadStats();
+    const instanceBlock = {
+      name: ctx.instance.name,
+      source: ctx.instance.source,
+      configPath: ctx.instance.configPath ?? null,
+      projectCount: ctx.instance.projects.length,
+      lastReloadAt: reloadStats.lastReloadAt ? reloadStats.lastReloadAt.toISOString() : null,
+      reloadsAttempted: reloadStats.reloadsAttempted,
+      reloadsSucceeded: reloadStats.reloadsSucceeded,
+      reloadsFailed: reloadStats.reloadsFailed,
+      projectsAdded: reloadStats.projectsAdded,
+      projectsRemoved: reloadStats.projectsRemoved,
+    };
+
     const payload = telemetry
-      ? { ...health, provenance: provMode, transport: telemetry.transport, sessions: telemetry.sessions }
-      : { ...health, provenance: provMode };
+      ? { ...health, provenance: provMode, transport: telemetry.transport, sessions: telemetry.sessions, instance: instanceBlock }
+      : { ...health, provenance: provMode, instance: instanceBlock };
     return successResponse(payload, 'maad_health');
   }));
 

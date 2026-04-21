@@ -11,6 +11,9 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { successResponse, errorResponse } from '../response.js';
 import { resolveSessionId } from '../../instance/session.js';
 import type { InstanceCtx } from '../ctx.js';
+import { performInstanceReload } from '../instance-reload.js';
+import { roleSatisfies } from '../roles.js';
+import { maadError } from '../../errors.js';
 
 const ROLE_ENUM = z.enum(['reader', 'writer', 'admin']);
 
@@ -115,4 +118,54 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
   });
 
   return 4;
+}
+
+/**
+ * Registers the admin-only `maad_instance_reload` tool separately from the
+ * base instance tools. Called regardless of instance source so synthetic
+ * instances can surface a clear INSTANCE_RELOAD_SYNTHETIC error rather than
+ * an opaque "unknown tool" response.
+ *
+ * Role gate lives inside the handler (engine-less tools bypass the `withEngine`
+ * role check). Requires admin effective role on EVERY project in the session's
+ * binding — least privilege, since reload is instance-wide.
+ */
+export function registerReload(server: McpServer, ctx: InstanceCtx): number {
+  server.registerTool('maad_instance_reload', {
+    description: 'Reloads the instance config from disk — picks up new projects, applies removals, and cancels sessions bound to removed projects. Requires admin role on every project in the session binding. Path/role mutations of existing projects are rejected until 0.9.0 eviction policy lands.',
+    inputSchema: z.object({}),
+  }, async (_args, extra) => {
+    const sessionId = resolveSessionId(extra);
+    const state = ctx.sessions.get(sessionId);
+
+    // Session must be bound before an admin check makes sense.
+    if (!state || state.mode === null) {
+      return errorResponse([maadError('SESSION_UNBOUND',
+        'Session is not bound to any project. Call maad_use_project(s) before maad_instance_reload.')]);
+    }
+    // Admin on EVERY project in the binding. In single mode that's one project;
+    // in multi mode it's the whole whitelist. Prevents an operator who only
+    // has admin on one subproject from reloading the whole instance and
+    // affecting other tenants.
+    for (const [projectName, role] of state.effectiveRoles) {
+      if (!roleSatisfies(role, 'admin')) {
+        return errorResponse([maadError('INSUFFICIENT_ROLE',
+          `maad_instance_reload requires admin on every project in the session binding; session has "${role}" on "${projectName}".`)]);
+      }
+    }
+
+    const result = await performInstanceReload(ctx, 'tool');
+    if (!result.ok) return errorResponse(result.errors);
+
+    return successResponse({
+      source: result.value.source,
+      projectsAdded: result.value.projectsAdded,
+      projectsRemoved: result.value.projectsRemoved,
+      sessionsCancelled: result.value.sessionsCancelled.length,
+      sessionsPruned: result.value.sessionsPruned.length,
+      durationMs: result.value.durationMs,
+    }, 'maad_instance_reload');
+  });
+
+  return 1;
 }

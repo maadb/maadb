@@ -1,9 +1,20 @@
 ---
 enabled: true
-current: 0.6.8
+current: 0.6.9
 ---
 
 # Version History
+
+## 0.6.9 — 2026-04-21
+Instance Hot-Reload. New admin-only MCP tool `maad_instance_reload` plus a POSIX `SIGHUP` signal handler both re-parse `instance.yaml` from disk and apply the diff against the running `EnginePool` without restarting the process. Added projects register lazily (first `get(name)` initializes the engine). Removed projects are evicted — single-mode sessions bound to them are marked cancelled and emit `SESSION_CANCELLED` on their next tool call; multi-mode sessions have the removed project pruned from their whitelist + effectiveRoles, surviving if they still have other projects and being cancelled only when their whitelist drains to empty. Path or role mutations on existing projects fail the whole reload with `INSTANCE_MUTATION_UNSUPPORTED` — no partial apply — until the 0.9.0 eviction policy lands. Synthetic (legacy `--project`) instances reject with `INSTANCE_RELOAD_SYNTHETIC`. Concurrent reload attempts reject with `INSTANCE_RELOAD_IN_PROGRESS`; the in-progress slot is acquired BEFORE the yaml parse so two callers can't both pass the guard while one is still doing I/O.
+
+Tool registration is admin-only and enforces "admin effective role on every project in the session binding" inside the handler (engine-less tools bypass the `withEngine` role check). In single mode that's one project; in multi mode the whole whitelist. `maad_instance_reload` registers regardless of instance source so synthetic clients see a clear error rather than an opaque "unknown tool." `SIGHUP` bypasses role entirely — it's an OS-signal, implicit root-on-host trust. Windows has no SIGHUP concept; `installReloadSignalHandler` returns early there, so Windows operators use the MCP tool instead.
+
+`maad_health` gains an `instance` block: `{name, source, configPath, projectCount, lastReloadAt, reloadsAttempted, reloadsSucceeded, reloadsFailed, projectsAdded, projectsRemoved}`. Ops channel emits `instance_reload_start` / `_complete` / `_failed` progress lines; audit channel emits one `instance_reload` event per success with `{source, projectsAdded, projectsRemoved, projectsAddedNames, projectsRemovedNames, sessionsCancelled, sessionsPruned, durationMs}` so operators can trace tenant-membership changes against session fallout. `SIGHUP` failures additionally log `sighup_reload_failed` on the ops channel without crashing the process — a failed reload always leaves the prior instance state intact.
+
+Unblocks dynamic provisioning flows (e.g., a per-user account signup that regenerates `instance.yaml`): add the project, call the tool or `kill -HUP`, and the engine picks it up without a restart. Pair with the 0.6.8 gateway session pinning: a new user gets a project added by reload, their gateway then pins their session to the new project on next connect.
+
+Five new error codes: `INSTANCE_RELOAD_IN_PROGRESS`, `INSTANCE_RELOAD_FAILED`, `INSTANCE_MUTATION_UNSUPPORTED`, `INSTANCE_RELOAD_SYNTHETIC`, `SESSION_CANCELLED`. 13 new tests (`tests/mcp/instance-reload.test.ts` — 12 run on all platforms, 1 SIGHUP case skipped on Windows), 588 total passing (baseline 575 at 0.6.8, +13). `tsc --noEmit` clean. No new dependencies.
 
 ## 0.6.8 — 2026-04-17
 Gateway Session Pinning. HTTP transport honors a new `X-Maad-Pin-Project: <name>` request header at MCP `initialize`: the session is bound to the named project synchronously before any tool call reaches a handler, and any subsequent `maad_use_project` / `maad_use_projects` attempt rejects with a new `SESSION_PINNED` MCP error. Unblocks trusted-gateway multi-tenant deployments (hosted MAADB behind a per-user gateway) by moving tenant-boundary enforcement from the gateway's MCP-message parser to the engine's session-creation path — gateway sets one header, engine enforces the boundary for the life of the session. Feature is fail-safe: absent header = identical behavior to 0.6.7; stdio is untouched (header plumbing is HTTP-only); synthetic (legacy `--project`) instances log `pin_ignored_legacy` once per process and proceed as if the header weren't there.
@@ -98,12 +109,12 @@ Initial engine build. Parser, registry, schema, extractor (11 primitives), SQLit
 
 ## Planned
 
-- **0.5.1** — Deployment workflow: `_skills/deploy.md`, `maad init-instance` + `maad add-project` CLI, platform-specific MCP config generation (stdio + HTTP)
-- **0.6.0** — npm package prep (pulled forward from 0.8.0): `npx maad serve`, published to npm, MCP configs simplify to `npx maad`
-- **0.7.0** — Import workflow: `_inbox/` convention, source tracking, duplicate detection, readonly type flag
-- **0.7.5** — LLM evaluation (deferred from 0.3.0): multi-model testing, friction inventory, benchmarks
-- **0.8.0** — Provenance refinement + admin dashboard tool + `maad_export`
+- **0.6.10** — Live Notifications: `maad_subscribe` tool + `notifications/resources/updated` SSE push on writes; per-session queue cap with drop-oldest + `list_changed` catch-up hint; reentrant-safe through existing write mutex; zero overhead when nobody subscribes. Requires 0.6.11 bulk-commit fix to land first (notifications fire after commit — silent commit failure produces inconsistent events)
+- **0.6.11** — Bulk-write commit durability fix (fup-2026-066): audit `tools/write.ts` bulk paths + every `gitLayer.commit()` call site so the engine never acks a write until the commit confirms. Unblocks `MAAD_COMMIT_IDENTITY` default-on for 0.7.0
+- **0.7.0** — Scoped Auth & Identity: token registry at `_auth/tokens.yaml`, three-cap role model, `maad_pat_<32hex>` token format, immutable records (issue/rotate/revoke), identity-enriched audit + commit trail. Spec at `docs/specs/0.7.0-scoped-auth.md`, design lock at `dec-maadb-069`
+- **0.7.5** — Canonical `_skills/session-protocol.md` in engine (Level 3 +Agent onboarding) + followup `supersedes` schema field + `maad_status` cross-project rollup primitive
+- **0.8.0** — Import workflow: `_inbox/` convention, source tracking, duplicate detection, readonly type flag
 - **0.8.5** — Remote MCP hardening: per-connection role tiers, rate-limit policy, backpressure thresholds, mutex timeout, stress suite, metrics export, `git gc` automation
-- **0.9.0** — Query power: FTS5, fuzzy entity matching, compound filters (AND/OR), cursor-based pagination
+- **0.9.0** — Eviction policy + query power: in-place project mutations (lifts `INSTANCE_MUTATION_UNSUPPORTED`), FTS5, fuzzy entity matching, compound filters (AND/OR), cursor-based pagination
 - **0.9.5** — Object attributes: user-defined tags on extracted objects, stored as YAML, indexed on reindex
 - **1.0.0** — Stable release: API locked, npm published, full test coverage, migration guide

@@ -101,6 +101,16 @@ export async function withEngine(
   let state = ctx.sessions.get(sessionId);
   if (!state) state = ctx.sessions.create(sessionId);
 
+  // Session cancelled by instance-reload (its bound project was removed, or
+  // its multi-mode whitelist drained to empty). Emit the error once, then
+  // destroy so the client reconnects cleanly.
+  if (state.cancelled) {
+    const boundProject = state.activeProject ?? state.whitelist?.[0] ?? 'unknown';
+    ctx.sessions.destroy(sessionId, 'transport');
+    return finalize(mcpError('SESSION_CANCELLED',
+      `Session was cancelled because its bound project "${boundProject}" was removed by an instance reload. Reconnect to continue.`));
+  }
+
   // Legacy single-project instance: auto-bind to 'default' on first call.
   if (state.mode === null && ctx.instance.source === 'synthetic') {
     const bindResult = ctx.sessions.bindSingle(sessionId, 'default');
