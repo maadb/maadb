@@ -28,15 +28,16 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
   }));
 
   server.registerTool('maad_query', {
-    description: 'Finds documents by type with optional field filters and projection. Filters support operators: eq, neq, gt, gte, lt, lte (dates as ISO strings work for ranges), in, contains. Use fields to return frontmatter values instead of just IDs.',
+    description: 'Finds documents by type with optional field filters and projection. Filters: { field: value } shorthand (implicit eq) or { field: { op: "eq"|"neq"|"gt"|"gte"|"lt"|"lte"|"in"|"contains", value: ... } }. Use fields to return frontmatter values inline instead of chasing IDs.',
     inputSchema: z.object({
       docType: z.string().describe('Document type to query'),
-      filters: z.any().optional().describe('Field filters: { fieldName: { op: "eq"|"neq"|"gt"|"gte"|"lt"|"lte"|"in"|"contains", value: ... } }. Examples: { status: { op: "eq", value: "active" } }, { opened_at: { op: "gte", value: "2025-01-01" } }'),
-      fields: z.array(z.string()).optional().describe('Field names to return in results (e.g. ["name", "status", "opened_at"]). Only indexed fields available.'),
-      sortBy: z.string().optional().describe('Field name to sort results by (must be an indexed field)'),
+      filters: z.any().optional().describe('Field filters. Shorthand: { status: "active" } (implicit eq). Operator form: { status: { op: "eq", value: "active" } }, { opened_at: { op: "gte", value: "2025-01-01" } }.'),
+      fields: z.array(z.string()).optional().describe('Field names to return inline (e.g. ["name", "status"]). Indexed fields only.'),
+      sortBy: z.string().optional().describe('Indexed field to sort by'),
       sortOrder: z.enum(['asc', 'desc']).optional().describe('Sort direction (default desc)'),
       limit: z.number().optional().describe('Max results (default 50)'),
       offset: z.number().optional().describe('Skip first N results'),
+      includeFilePath: z.boolean().optional().describe('Include filePath in each result row (default false — omitted to trim response size)'),
       project: z.string().optional().describe('Project name (multi-project mode only)'),
     }),
   }, async (args, extra) => withEngine(ctx, extra, 'maad_query', args, ({ engine }) => {
@@ -47,7 +48,19 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
     if (args.sortOrder !== undefined) query.sortOrder = args.sortOrder;
     if (args.limit !== undefined) query.limit = args.limit;
     if (args.offset !== undefined) query.offset = args.offset;
-    return resultToResponse(engine.findDocuments(query), 'maad_query');
+    const result = engine.findDocuments(query);
+    // 0.7.0 — default-strip filePath to trim response size. Clients that
+    // need the on-disk path opt in via includeFilePath:true. Backend still
+    // produces the field; we drop it at the MCP boundary.
+    if (result.ok && args.includeFilePath !== true) {
+      const stripped = result.value.results.map(r => {
+        const { filePath, ...rest } = r;
+        void filePath;
+        return rest;
+      });
+      return resultToResponse({ ok: true, value: { total: result.value.total, results: stripped } } as typeof result, 'maad_query');
+    }
+    return resultToResponse(result, 'maad_query');
   }));
 
   server.registerTool('maad_search', {
