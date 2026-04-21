@@ -20,7 +20,8 @@ import { validateFrontmatter } from '../schema/index.js';
 import { generateDocument, extractBody } from '../writer/index.js';
 import type { EngineContext } from './context.js';
 import { gitCommit } from './context.js';
-import type { CreateResult, UpdateResult, DeleteResult, BulkCreateInput, BulkUpdateInput, BulkResult, BulkVerification } from './types.js';
+import type { CreateResult, UpdateResult, DeleteResult, BulkCreateInput, BulkUpdateInput, BulkResult, BulkVerification, CommitFailureDetail } from './types.js';
+import type { CommitOutcome } from '../git/index.js';
 import type { ValidationWarning } from '../types.js';
 import { indexFile } from './indexing.js';
 import { generateDocId, readFrontmatter } from './helpers.js';
@@ -81,7 +82,7 @@ export async function createDocument(
   }
   ctx.journal.advance(journalId, 'indexed');
 
-  await gitCommit(ctx, {
+  const commitOutcome = await gitCommit(ctx, {
     action: 'create',
     docId: toDocId(id),
     docType: dt,
@@ -92,12 +93,17 @@ export async function createDocument(
   ctx.journal.advance(journalId, 'committed');
   ctx.journal.complete(journalId);
 
-  return ok({
+  const result: CreateResult = {
     docId: toDocId(id),
     filePath: toFilePath(path.relative(ctx.projectRoot, fp)),
     version: 1,
     validation,
-  });
+    writeDurable: commitOutcome.status !== 'failed',
+  };
+  if (commitOutcome.status === 'failed') {
+    result.commitFailure = { code: commitOutcome.code, message: commitOutcome.message, action: 'create' };
+  }
+  return ok(result);
 }
 
 export async function updateDocument(
@@ -193,6 +199,7 @@ export async function updateDocument(
   }
   ctx.journal.advance(journalId, 'indexed');
 
+  let commitOutcome: CommitOutcome = { status: 'noop' };
   if (!skipGit) {
     const detail = changedFields.length > 0
       ? `fields:${changedFields.join(',')}`
@@ -200,7 +207,7 @@ export async function updateDocument(
     const summaryStr = changedFields.length > 0
       ? changedFields.map(f => `${f}: ${String(updatedFm[f] ?? '')}`).join(', ')
       : 'Body updated';
-    await gitCommit(ctx, {
+    commitOutcome = await gitCommit(ctx, {
       action: 'update',
       docId: id,
       docType: doc.docType,
@@ -214,12 +221,20 @@ export async function updateDocument(
 
   const newDoc = ctx.backend.getDocument(id);
 
-  return ok({
+  const result: UpdateResult = {
     docId: id,
     version: newDoc?.version ?? doc.version + 1,
     changedFields,
     validation,
-  });
+    // In skipGit mode the bulk wrapper owns the commit; report durable here
+    // so the inner result reflects the per-record outcome — the bulk path
+    // sets its own writeDurable based on its trailing commit.
+    writeDurable: commitOutcome.status !== 'failed',
+  };
+  if (commitOutcome.status === 'failed') {
+    result.commitFailure = { code: commitOutcome.code, message: commitOutcome.message, action: 'update' };
+  }
+  return ok(result);
 }
 
 export async function deleteDocument(ctx: EngineContext, id: DocId, mode: 'soft' | 'hard'): Promise<Result<DeleteResult>> {
@@ -256,8 +271,9 @@ export async function deleteDocument(ctx: EngineContext, id: DocId, mode: 'soft'
     ctx.backend.putDocument(updatedDoc);
   }
 
+  let commitOutcome: CommitOutcome;
   if (mode === 'hard') {
-    await gitCommit(ctx, {
+    commitOutcome = await gitCommit(ctx, {
       action: 'delete',
       docId: id,
       docType: doc.docType,
@@ -267,7 +283,7 @@ export async function deleteDocument(ctx: EngineContext, id: DocId, mode: 'soft'
     });
   } else {
     const deletedPath = path.join(path.dirname(absPath), `_deleted_${path.basename(absPath)}`);
-    await gitCommit(ctx, {
+    commitOutcome = await gitCommit(ctx, {
       action: 'delete',
       docId: id,
       docType: doc.docType,
@@ -280,11 +296,16 @@ export async function deleteDocument(ctx: EngineContext, id: DocId, mode: 'soft'
   ctx.journal.advance(journalId, 'committed');
   ctx.journal.complete(journalId);
 
-  return ok({
+  const result: DeleteResult = {
     docId: id,
     mode,
     filePath: doc.filePath,
-  });
+    writeDurable: commitOutcome.status !== 'failed',
+  };
+  if (commitOutcome.status === 'failed') {
+    result.commitFailure = { code: commitOutcome.code, message: commitOutcome.message, action: 'delete' };
+  }
+  return ok(result);
 }
 
 // ---- Bulk operations ------------------------------------------------------
@@ -369,9 +390,11 @@ export async function bulkCreate(
 
   // Single git commit for all succeeded records
   const first = succeeded[0];
+  let commitFailure: CommitFailureDetail | undefined;
+  let writeDurable = true;
   if (first) {
     const firstRec = records[first.index];
-    await gitCommit(ctx, {
+    const outcome = await gitCommit(ctx, {
       action: 'create',
       docId: toDocId(first.docId),
       docType: (firstRec?.docType ?? 'unknown') as DocType,
@@ -379,12 +402,18 @@ export async function bulkCreate(
       summary: `Bulk created ${succeeded.length} records`,
       files: allFiles,
     });
+    if (outcome.status === 'failed') {
+      writeDurable = false;
+      commitFailure = { code: outcome.code, message: outcome.message, action: 'create' };
+    }
   }
 
   const verification = await verifyBulkResults(ctx, succeeded, records.map(r => ({ fields: r.fields, body: r.body })));
   const warnings = aggregateBulkWarnings(succeeded);
 
-  return ok({ succeeded, failed, totalRequested: records.length, verification, warnings });
+  const result: BulkResult = { succeeded, failed, totalRequested: records.length, verification, warnings, writeDurable };
+  if (commitFailure) result.commitFailure = commitFailure;
+  return ok(result);
 }
 
 export async function bulkUpdate(
@@ -433,9 +462,11 @@ export async function bulkUpdate(
 
   // Single git commit for all succeeded records
   const first = succeeded[0];
+  let commitFailure: CommitFailureDetail | undefined;
+  let writeDurable = true;
   if (first) {
     const firstDoc = ctx.backend.getDocument(first.docId as DocId);
-    await gitCommit(ctx, {
+    const outcome = await gitCommit(ctx, {
       action: 'update',
       docId: toDocId(first.docId),
       docType: firstDoc?.docType ?? ('unknown' as DocType),
@@ -443,12 +474,18 @@ export async function bulkUpdate(
       summary: `Bulk updated ${succeeded.length} records`,
       files: allFiles,
     });
+    if (outcome.status === 'failed') {
+      writeDurable = false;
+      commitFailure = { code: outcome.code, message: outcome.message, action: 'update' };
+    }
   }
 
   const verification = await verifyBulkResults(ctx, succeeded, updates.map(u => ({ fields: u.fields ?? {}, body: u.body, appendBody: u.appendBody })));
   const warnings = aggregateBulkWarnings(succeeded);
 
-  return ok({ succeeded, failed, totalRequested: updates.length, verification, warnings });
+  const result: BulkResult = { succeeded, failed, totalRequested: updates.length, verification, warnings, writeDurable };
+  if (commitFailure) result.commitFailure = commitFailure;
+  return ok(result);
 }
 
 /**

@@ -5,7 +5,8 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { docId } from '../../types.js';
-import { resultToResponse, successResponse, getProvenanceMode } from '../response.js';
+import { resultToResponse, successResponse, getProvenanceMode, attachDurability } from '../response.js';
+import type { DeleteResult } from '../../engine/types.js';
 import { isDryRun, dryRunResponse, auditToolCall } from '../guardrails.js';
 import type { InstanceCtx } from '../ctx.js';
 import { withEngine } from '../with-session.js';
@@ -22,7 +23,11 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
   }, async (args, extra) => withEngine(ctx, extra, 'maad_delete', args, async ({ engine }) => {
     auditToolCall('maad_delete', args);
     if (isDryRun()) return dryRunResponse('maad_delete', args);
-    return resultToResponse(await engine.deleteDocument(docId(args.docId), args.mode));
+    const result = await engine.deleteDocument(docId(args.docId), args.mode);
+    const response = resultToResponse(result);
+    if (!result.ok) return response;
+    const value = result.value as DeleteResult;
+    return attachDurability(response, value.writeDurable, value.commitFailure);
   }));
 
   server.registerTool('maad_reindex', {

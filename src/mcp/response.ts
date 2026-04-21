@@ -97,3 +97,22 @@ export function attachWarnings(
   if (!warnings || warnings.length === 0) return response;
   return attachMeta(response, { warnings });
 }
+
+/**
+ * 0.6.10 — Stamp commit-durability signals onto a write response. Always
+ * attaches `write_durable`. When the commit failed (write landed on disk
+ * but the git commit didn't), also attaches `commit_failure` with the
+ * action / code / message so the client can log forensics or retry.
+ * `write_durable: true` attaches nothing else — existing clients that
+ * ignore `_meta` see zero behavioral change.
+ */
+export function attachDurability(
+  response: { content: Array<{ type: 'text'; text: string }> },
+  writeDurable: boolean,
+  commitFailure: { code: string; message: string; action: 'create' | 'update' | 'delete' } | undefined,
+): { content: Array<{ type: 'text'; text: string }> } {
+  if (writeDurable) return attachMeta(response, { write_durable: true });
+  const meta: Record<string, unknown> = { write_durable: false };
+  if (commitFailure) meta['commit_failure'] = commitFailure;
+  return attachMeta(response, meta);
+}

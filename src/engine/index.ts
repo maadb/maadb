@@ -32,7 +32,8 @@ import { loadSchemas } from '../schema/index.js';
 import { SqliteBackend } from '../backend/index.js';
 import type { MaadBackend } from '../backend/index.js';
 import { GitLayer } from '../git/index.js';
-import type { EngineContext } from './context.js';
+import type { EngineContext, CommitFailureTracker } from './context.js';
+import { newCommitFailureTracker } from './context.js';
 import { OperationJournal } from './journal.js';
 
 // Domain modules
@@ -84,6 +85,15 @@ export interface HealthReport {
   repoSizeBytes: number | null;    // .git directory size on disk; null if git unavailable
   gitClean: boolean | null;        // working-tree clean? null if git unavailable
   diskHeadroomMb: number | null;   // free space on the volume holding projectRoot
+  // 0.6.10 — commit durability counters. Bumped in `gitCommit` when a
+  // trailing commit after a write fails (staged files left uncommitted).
+  // Operators watching for fup-066-style drift filter on
+  // `commitFailuresTotal > 0` or grep for `commit_failed` ops events.
+  commitFailuresTotal: number;
+  lastCommitFailureAt: string | null;
+  lastCommitFailureCode: string | null;
+  lastCommitFailureAction: 'create' | 'update' | 'delete' | null;
+  lastCommitFailureDocId: string | null;
 }
 
 /** Recursive dir size in bytes. Best-effort — unreadable entries are skipped. */
@@ -120,6 +130,7 @@ export class MaadEngine {
   private backend!: MaadBackend;
   private gitLayer: GitLayer | null = null;
   private journal!: OperationJournal;
+  private commitFailures: CommitFailureTracker = newCommitFailureTracker();
   private initialized = false;
   private _readOnly = false;
   private startupRecovery: string[] = [];
@@ -310,6 +321,11 @@ export class MaadEngine {
       repoSizeBytes: this.probeRepoSize(),
       gitClean: this.probeGitClean(),
       diskHeadroomMb: this.probeDiskHeadroom(),
+      commitFailuresTotal: this.commitFailures.count,
+      lastCommitFailureAt: this.commitFailures.lastAt,
+      lastCommitFailureCode: this.commitFailures.lastCode,
+      lastCommitFailureAction: this.commitFailures.lastAction,
+      lastCommitFailureDocId: this.commitFailures.lastDocId,
     };
   }
 
@@ -408,6 +424,7 @@ export class MaadEngine {
       gitLayer: this.gitLayer,
       journal: this.journal,
       readOnly: this._readOnly,
+      commitFailures: this.commitFailures,
     };
   }
 

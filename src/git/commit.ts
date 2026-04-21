@@ -1,6 +1,14 @@
 // ============================================================================
 // Git Commit Builder
 // Formats structured commit messages and auto-commits on write operations.
+//
+// CommitOutcome is a three-state discriminated union so callers can tell
+// (a) we committed and here's the sha; (b) nothing was staged so no commit
+// was needed (benign — e.g. an update that didn't actually change the file);
+// (c) git failed and the working tree may now hold staged-but-uncommitted
+// changes. Before 0.6.10 we returned `sha | null` and swallowed all errors
+// silently — bulk_create races or a mid-run lock conflict would leave the
+// engine ack'ing writes as durable while git quietly held staged state.
 // ============================================================================
 
 import type { SimpleGit } from 'simple-git';
@@ -15,6 +23,16 @@ export interface CommitOptions {
   summary: string;
   files: string[];
 }
+
+/**
+ * 0.6.10 — Three-state commit outcome. Replaces the prior `CommitSha | null`
+ * return on autoCommit so callers can distinguish benign no-ops from real
+ * failures that left staged changes uncommitted.
+ */
+export type CommitOutcome =
+  | { status: 'committed'; sha: CommitSha }
+  | { status: 'noop' }
+  | { status: 'failed'; code: string; message: string };
 
 // Format: maad:<action> <doc_id> [<doc_type>] <detail> — <summary>
 export function formatCommitMessage(opts: CommitOptions): string {
@@ -48,21 +66,71 @@ export function parseCommitMessage(message: string): ParsedCommitMessage | null 
 export async function autoCommit(
   git: SimpleGit,
   opts: CommitOptions,
-): Promise<CommitSha | null> {
+): Promise<CommitOutcome> {
   try {
     // Stage specified files
-    await git.add(opts.files);
+    try {
+      await git.add(opts.files);
+    } catch (e) {
+      return {
+        status: 'failed',
+        code: 'GIT_ADD_FAILED',
+        message: `git add failed: ${e instanceof Error ? e.message : String(e)}`,
+      };
+    }
 
-    // Check if there's anything to commit
-    const status = await git.status();
-    if (status.staged.length === 0) return null;
+    // Check if there's anything to commit. Update paths where the file
+    // actually equals its on-disk form produce an empty staged list — this
+    // is benign (record is durable; git history matches state).
+    let status;
+    try {
+      status = await git.status();
+    } catch (e) {
+      return {
+        status: 'failed',
+        code: 'GIT_STATUS_FAILED',
+        message: `git status failed: ${e instanceof Error ? e.message : String(e)}`,
+      };
+    }
+    if (status.staged.length === 0) {
+      return { status: 'noop' };
+    }
 
     const message = formatCommitMessage(opts);
-    const result = await git.commit(message);
+    let result;
+    try {
+      result = await git.commit(message);
+    } catch (e) {
+      // The add succeeded but the commit itself failed — worst case, since
+      // the working tree is now dirty with staged but uncommitted changes.
+      // Callers use this signal to stamp `write_durable: false` on the MCP
+      // response so clients know to retry (or reconcile out-of-band).
+      return {
+        status: 'failed',
+        code: 'GIT_COMMIT_FAILED',
+        message: `git commit failed: ${e instanceof Error ? e.message : String(e)}`,
+      };
+    }
 
-    return result.commit ? commitSha(result.commit) : null;
-  } catch {
-    // Git errors during commit are non-fatal — the file write already succeeded
-    return null;
+    if (!result.commit) {
+      // simple-git returned an empty commit field — shouldn't happen after a
+      // successful commit, but defend against it so durability tracking is
+      // truthful rather than optimistic.
+      return {
+        status: 'failed',
+        code: 'GIT_COMMIT_EMPTY',
+        message: 'git commit returned no commit sha',
+      };
+    }
+    return { status: 'committed', sha: commitSha(result.commit) };
+  } catch (e) {
+    // Defense-in-depth: anything that escapes the inner try/catches above
+    // lands here so we never return undefined. Should be unreachable in
+    // practice.
+    return {
+      status: 'failed',
+      code: 'GIT_UNKNOWN_ERROR',
+      message: e instanceof Error ? e.message : String(e),
+    };
   }
 }

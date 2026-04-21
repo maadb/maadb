@@ -6,7 +6,7 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { docId, docType } from '../../types.js';
 import type { CreateResult, UpdateResult, BulkResult } from '../../engine/types.js';
-import { resultToResponse, errorResponse, attachWarnings } from '../response.js';
+import { resultToResponse, errorResponse, attachWarnings, attachDurability } from '../response.js';
 import { maadError } from '../../errors.js';
 import { isDryRun, dryRunResponse, auditToolCall } from '../guardrails.js';
 import type { InstanceCtx } from '../ctx.js';
@@ -149,7 +149,9 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
         logWarnings(ctxAudit, String((result.value as CreateResult).docId ?? ''), (result.value as CreateResult).validation.warnings);
       }
       const response = resultToResponse(result, 'maad_create');
-      return result.ok ? attachWarnings(response, (result.value as CreateResult).validation.warnings) : response;
+      if (!result.ok) return response;
+      const value = result.value as CreateResult;
+      return attachDurability(attachWarnings(response, value.validation.warnings), value.writeDurable, value.commitFailure);
     }),
   ));
 
@@ -187,7 +189,9 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
         logWarnings(ctxAudit, String((result.value as UpdateResult).docId ?? ''), (result.value as UpdateResult).validation.warnings);
       }
       const response = resultToResponse(result, 'maad_update');
-      return result.ok ? attachWarnings(response, (result.value as UpdateResult).validation.warnings) : response;
+      if (!result.ok) return response;
+      const value = result.value as UpdateResult;
+      return attachDurability(attachWarnings(response, value.validation.warnings), value.writeDurable, value.commitFailure);
     }),
   ));
 
@@ -232,7 +236,9 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
         for (const s of bulk.succeeded) logWarnings(ctxAudit, s.docId, s.warnings);
       }
       const response = resultToResponse(result);
-      return result.ok ? attachWarnings(response, (result.value as BulkResult).warnings) : response;
+      if (!result.ok) return response;
+      const value = result.value as BulkResult;
+      return attachDurability(attachWarnings(response, value.warnings), value.writeDurable, value.commitFailure);
     }),
   ));
 
@@ -264,7 +270,9 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
         for (const s of bulk.succeeded) logWarnings(ctxAudit, s.docId, s.warnings);
       }
       const response = resultToResponse(result);
-      return result.ok ? attachWarnings(response, (result.value as BulkResult).warnings) : response;
+      if (!result.ok) return response;
+      const value = result.value as BulkResult;
+      return attachDurability(attachWarnings(response, value.warnings), value.writeDurable, value.commitFailure);
     }),
   ));
 

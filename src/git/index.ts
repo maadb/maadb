@@ -16,13 +16,13 @@ import type {
   DiffResult,
   SnapshotResult,
 } from '../types.js';
-import { autoCommit, type CommitOptions } from './commit.js';
+import { autoCommit, type CommitOptions, type CommitOutcome } from './commit.js';
 import { getHistory, getAudit } from './log.js';
 import { getDiff } from './diff.js';
 import { getSnapshot } from './snapshot.js';
 
 export { formatCommitMessage, parseCommitMessage } from './commit.js';
-export type { CommitOptions } from './commit.js';
+export type { CommitOptions, CommitOutcome } from './commit.js';
 
 export class GitLayer {
   private git: SimpleGit;
@@ -79,7 +79,7 @@ export class GitLayer {
     await this.git.commit('maad:init — Initialize MAAD project');
   }
 
-  async commit(opts: CommitOptions): Promise<CommitSha | null> {
+  async commit(opts: CommitOptions): Promise<CommitOutcome> {
     return autoCommit(this.git, opts);
   }
 

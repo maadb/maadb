@@ -1,9 +1,22 @@
 ---
 enabled: true
-current: 0.6.9
+current: 0.6.10
 ---
 
 # Version History
+
+## 0.6.10 — 2026-04-21
+Commit Durability Signal (fup-2026-066 fix). `autoCommit` is refactored from `Promise<CommitSha | null>` to a three-state `CommitOutcome` discriminated union: `{status: 'committed', sha}` on the happy path, `{status: 'noop'}` when nothing was staged (benign — e.g. an idempotent update that didn't change the file), and `{status: 'failed', code, message}` when any git step throws. Before 0.6.10, every error path in `autoCommit` returned `null` and the caller treated it identically to "nothing to commit" — so a trailing bulk commit that failed (stale `.git/index.lock`, concurrent git command, mid-run crash) would leave ~100 staged-but-uncommitted records while the engine ack'd every one as durable. That's the exact symptom Codex hit on the brain-app droplet 2026-04-18 that `maad_health.gitClean:false` surfaced cosmetically but the engine never reported.
+
+Every write path now threads the outcome. `CreateResult`, `UpdateResult`, `DeleteResult`, and `BulkResult` gain `writeDurable: boolean` plus an optional `commitFailure: {code, message, action}` detail. `writeDurable: true` means either the commit landed or there was nothing to commit (in both cases the state is consistent). `writeDurable: false` means the file landed but the commit didn't — the client knows to retry or reconcile. MCP tool responses stamp `_meta.write_durable` on every successful write (`maad_create`, `maad_update`, `maad_delete`, `maad_bulk_create`, `maad_bulk_update`) plus `_meta.commit_failure` on the unhappy path. Existing clients that ignore `_meta` see zero behavioral change — all writes that land on disk still return `ok: true`, just with the durability signal attached.
+
+Engine-level counters added to `HealthReport` so operators don't have to scrape logs: `commitFailuresTotal`, `lastCommitFailureAt`, `lastCommitFailureCode`, `lastCommitFailureAction`, `lastCommitFailureDocId`. Cross-references the new `commit_failed` ops event emitted on the first failure (fields: `code`, `message`, `action`, `doc_id`, `doc_type`, `file_count`). The existing `logger.bestEffort` dev-facing line is preserved so humans tailing ops in non-JSON mode still see the signal. Counter is per-engine and resets on `maad_reload`.
+
+`EngineContext` grows a `commitFailures: CommitFailureTracker` field plumbed from `MaadEngine` so the `gitCommit` helper (in `src/engine/context.ts`) can bump counters without a back-reference to the engine. Same mutable-state pattern as the existing `journal` field on the context.
+
+New error codes emitted on the ops channel (visible via `commit_failed` events): `GIT_ADD_FAILED`, `GIT_STATUS_FAILED`, `GIT_COMMIT_FAILED`, `GIT_COMMIT_EMPTY`, `GIT_UNKNOWN_ERROR`. Not in the `ErrorCode` union because they never appear on MCP responses — they live inside `CommitOutcome` and feed `_meta.commit_failure.code`. 12 new tests (`tests/engine/commit-durability.test.ts` — 6 autoCommit contract + 6 engine integration with fault injection via stubbed `gitLayer.commit`), 600 total passing (baseline 588 at 0.6.9, +12). `tsc --noEmit` clean. No new dependencies.
+
+Unblocks 0.6.11 Live Notifications: subscribers must see events only for records that actually landed in git, and the durability signal is what lets the notification layer gate correctly. Also unblocks `MAAD_COMMIT_IDENTITY` default-on for 0.7.0 Scoped Auth — identity-enriched commits previously had amplified blast radius from silent failures.
 
 ## 0.6.9 — 2026-04-21
 Instance Hot-Reload. New admin-only MCP tool `maad_instance_reload` plus a POSIX `SIGHUP` signal handler both re-parse `instance.yaml` from disk and apply the diff against the running `EnginePool` without restarting the process. Added projects register lazily (first `get(name)` initializes the engine). Removed projects are evicted — single-mode sessions bound to them are marked cancelled and emit `SESSION_CANCELLED` on their next tool call; multi-mode sessions have the removed project pruned from their whitelist + effectiveRoles, surviving if they still have other projects and being cancelled only when their whitelist drains to empty. Path or role mutations on existing projects fail the whole reload with `INSTANCE_MUTATION_UNSUPPORTED` — no partial apply — until the 0.9.0 eviction policy lands. Synthetic (legacy `--project`) instances reject with `INSTANCE_RELOAD_SYNTHETIC`. Concurrent reload attempts reject with `INSTANCE_RELOAD_IN_PROGRESS`; the in-progress slot is acquired BEFORE the yaml parse so two callers can't both pass the guard while one is still doing I/O.
@@ -109,8 +122,7 @@ Initial engine build. Parser, registry, schema, extractor (11 primitives), SQLit
 
 ## Planned
 
-- **0.6.10** — Live Notifications: `maad_subscribe` tool + `notifications/resources/updated` SSE push on writes; per-session queue cap with drop-oldest + `list_changed` catch-up hint; reentrant-safe through existing write mutex; zero overhead when nobody subscribes. Requires 0.6.11 bulk-commit fix to land first (notifications fire after commit — silent commit failure produces inconsistent events)
-- **0.6.11** — Bulk-write commit durability fix (fup-2026-066): audit `tools/write.ts` bulk paths + every `gitLayer.commit()` call site so the engine never acks a write until the commit confirms. Unblocks `MAAD_COMMIT_IDENTITY` default-on for 0.7.0
+- **0.6.11** — Live Notifications: `maad_subscribe` tool + `notifications/resources/updated` SSE push on writes; per-session queue cap with drop-oldest + `list_changed` catch-up hint; reentrant-safe through existing write mutex; zero overhead when nobody subscribes. Gated on successful commit (0.6.10 durability signal) so subscribers never see events for records that didn't land in git
 - **0.7.0** — Scoped Auth & Identity: token registry at `_auth/tokens.yaml`, three-cap role model, `maad_pat_<32hex>` token format, immutable records (issue/rotate/revoke), identity-enriched audit + commit trail. Spec at `docs/specs/0.7.0-scoped-auth.md`, design lock at `dec-maadb-069`
 - **0.7.5** — Canonical `_skills/session-protocol.md` in engine (Level 3 +Agent onboarding) + followup `supersedes` schema field + `maad_status` cross-project rollup primitive
 - **0.8.0** — Import workflow: `_inbox/` convention, source tracking, duplicate detection, readonly type flag

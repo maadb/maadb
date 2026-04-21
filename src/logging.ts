@@ -225,3 +225,23 @@ export function logInstanceReloadProgress(fields: InstanceReloadProgressFields):
     opsLog.info(fields, eventName);
   }
 }
+
+// ---- Commit failure event (ops) -------------------------------------------
+// 0.6.10 — emitted when a git commit attached to a write fails (stage
+// succeeded but commit threw / returned no sha / status threw). Before this
+// release, commit failures were caught and silently dropped — producing the
+// fup-066 symptom where bulk writes ack'd durable while git held staged
+// state. Operators grep for `commit_failed` to detect durability drift.
+
+export interface CommitFailureFields {
+  code: string;
+  message: string;
+  action: 'create' | 'update' | 'delete';
+  doc_id: string;
+  doc_type: string;
+  file_count: number;
+}
+
+export function logCommitFailure(fields: CommitFailureFields): void {
+  opsLog.warn(fields, 'commit_failed');
+}

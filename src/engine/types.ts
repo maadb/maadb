@@ -20,11 +20,29 @@ export interface IndexResult {
   errors: import('../errors.js').MaadError[];
 }
 
+/**
+ * 0.6.10 — Commit-durability signal attached to every single or bulk write
+ * result. `writeDurable: true` means the file landed on disk AND either the
+ * commit succeeded OR there was nothing to commit (noop on an idempotent
+ * update). `writeDurable: false` means the file landed but the commit
+ * failed — the caller should surface this to the client (MCP tools stamp
+ * `_meta.write_durable: false` + `_meta.commit_failure`) so retries or
+ * out-of-band reconciliation can happen. See fup-2026-066 for the original
+ * symptom: bulk writes ack'ing durable while git held staged state.
+ */
+export interface CommitFailureDetail {
+  code: string;
+  message: string;
+  action: 'create' | 'update' | 'delete';
+}
+
 export interface CreateResult {
   docId: DocId;
   filePath: FilePath;
   version: number;
   validation: ValidationResult;
+  writeDurable: boolean;
+  commitFailure?: CommitFailureDetail;
 }
 
 export interface BulkCreateInput {
@@ -66,6 +84,14 @@ export interface BulkResult {
    * trace each warning back to its record without cross-referencing.
    */
   warnings: ValidationWarning[];
+  /**
+   * 0.6.10 — Single-commit durability signal for the whole batch. `false`
+   * means the per-record file writes succeeded but the final trailing
+   * git commit failed, leaving staged changes uncommitted. Callers use
+   * this to surface `write_durable: false` and trigger reconciliation.
+   */
+  writeDurable: boolean;
+  commitFailure?: CommitFailureDetail;
 }
 
 export interface GetResult {
@@ -84,12 +110,16 @@ export interface UpdateResult {
   version: number;
   changedFields: string[];
   validation: ValidationResult;
+  writeDurable: boolean;
+  commitFailure?: CommitFailureDetail;
 }
 
 export interface DeleteResult {
   docId: DocId;
   mode: 'soft' | 'hard';
   filePath: FilePath;
+  writeDurable: boolean;
+  commitFailure?: CommitFailureDetail;
 }
 
 // ---- 0.5.0 R5 — changes-since polling delta -------------------------------
