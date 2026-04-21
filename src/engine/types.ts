@@ -221,6 +221,18 @@ export interface DescribeResult {
   extractionPrimitives: string[];
   totalDocuments: number;
   lastIndexedAt: string | null;
+  /**
+   * 0.7.0 — Subtype inventory moved here from maad_summary. Summary is an
+   * orientation call (cheap, small); describe is the deep-dive call that
+   * ships the inventory detail. Consumers that relied on summary.subtypeInventory
+   * should switch to describe — the shape is unchanged.
+   */
+  subtypeInventory: Array<{
+    primitive: string;
+    subtype: string;
+    count: number;
+    topValues: string[];
+  }>;
 }
 
 export interface SummaryResult {
@@ -233,12 +245,6 @@ export interface SummaryResult {
   totalObjects: number;
   totalRelationships: number;
   lastIndexedAt: string | null;
-  subtypeInventory: Array<{
-    primitive: string;
-    subtype: string;
-    count: number;
-    topValues: string[];
-  }>;
   warnings: {
     brokenRefs: number;
     validationErrors: number;

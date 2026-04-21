@@ -274,7 +274,7 @@ describe('validate', () => {
 });
 
 describe('summary', () => {
-  it('returns one-call project orientation', () => {
+  it('returns one-call project orientation (lean — no subtype inventory)', () => {
     const result = engine.summary();
     expect(result.totalDocuments).toBe(4);
     expect(result.types.length).toBe(4);
@@ -285,16 +285,28 @@ describe('summary', () => {
     expect(clientType!.count).toBe(1);
     expect(clientType!.sampleIds).toContain('cli-acme');
 
-    // Subtype inventory should have entries
-    expect(result.subtypeInventory.length).toBeGreaterThan(0);
-    // Should have entity/person from the case's inline annotations
-    const personEntry = result.subtypeInventory.find(s => s.subtype === 'person');
-    expect(personEntry).toBeDefined();
-    expect(personEntry!.topValues.length).toBeGreaterThan(0);
-
     // Stats
     expect(result.totalObjects).toBeGreaterThan(0);
     expect(result.totalRelationships).toBeGreaterThan(0);
+
+    // 0.7.0 — subtype inventory NO LONGER ships on summary; moved to describe
+    // so the orientation call stays lean. Verify it's gone.
+    expect((result as unknown as { subtypeInventory?: unknown }).subtypeInventory).toBeUndefined();
+  });
+});
+
+describe('describe', () => {
+  it('returns registry types + extraction primitives + subtype inventory (the deep call)', () => {
+    const result = engine.describe();
+    expect(result.registryTypes.length).toBe(4);
+    expect(result.extractionPrimitives).toContain('entity');
+    expect(result.totalDocuments).toBe(4);
+
+    // 0.7.0 — subtype inventory moved here from summary.
+    expect(result.subtypeInventory.length).toBeGreaterThan(0);
+    const personEntry = result.subtypeInventory.find(s => s.subtype === 'person');
+    expect(personEntry).toBeDefined();
+    expect(personEntry!.topValues.length).toBeGreaterThan(0);
   });
 });
 

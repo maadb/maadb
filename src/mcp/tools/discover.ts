@@ -40,7 +40,7 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
   }));
 
   server.registerTool('maad_summary', {
-    description: 'Returns the live indexed project snapshot for session bootstrapping. Use this first every session. Returns types, counts, sample IDs, and object inventory.',
+    description: 'Lean project snapshot for session bootstrapping. Returns types, counts, sample IDs, totals, warnings. Call maad_describe for subtype inventory detail.',
     inputSchema: z.object({
       project: z.string().optional().describe('Project name (multi-project mode only)'),
     }),
@@ -80,7 +80,7 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
   }));
 
   server.registerTool('maad_describe', {
-    description: 'Returns registry types, extraction primitives, and document counts.',
+    description: 'Returns registry types, extraction primitives, document counts, and subtype inventory (deep detail; maad_summary is the lean orientation call).',
     inputSchema: z.object({
       project: z.string().optional().describe('Project name (multi-project mode only)'),
     }),

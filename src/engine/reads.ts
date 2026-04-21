@@ -168,6 +168,7 @@ export function describe(ctx: EngineContext): DescribeResult {
     ],
     totalDocuments: stats.totalDocuments,
     lastIndexedAt: stats.lastIndexedAt,
+    subtypeInventory: ctx.backend.getSubtypeInventory(20),
   };
 }
 
@@ -179,8 +180,6 @@ export function summary(ctx: EngineContext): SummaryResult {
     count: stats.documentCountByType[rt.name as string] ?? 0,
     sampleIds: ctx.backend.getSampleDocIds(rt.name, 3).map(id => id as string),
   }));
-
-  const subtypeInventory = ctx.backend.getSubtypeInventory(20);
 
   // Warnings: broken refs (cheap SQL) + validation errors (scan all docs)
   const brokenRefs = ctx.backend.countBrokenRefs();
@@ -208,7 +207,6 @@ export function summary(ctx: EngineContext): SummaryResult {
     totalObjects: stats.totalObjects,
     totalRelationships: stats.totalRelationships,
     lastIndexedAt: stats.lastIndexedAt,
-    subtypeInventory,
     warnings: { brokenRefs, validationErrors },
     emptyProject,
     bootstrapHint: emptyProject ? '_skills/architect-core.md' : null,
