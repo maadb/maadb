@@ -223,6 +223,7 @@ export async function updateDocument(
 
   const result: UpdateResult = {
     docId: id,
+    docType: doc.docType,
     version: newDoc?.version ?? doc.version + 1,
     changedFields,
     validation,
@@ -298,6 +299,7 @@ export async function deleteDocument(ctx: EngineContext, id: DocId, mode: 'soft'
 
   const result: DeleteResult = {
     docId: id,
+    docType: doc.docType,
     mode,
     filePath: doc.filePath,
     writeDurable: commitOutcome.status !== 'failed',
@@ -381,6 +383,7 @@ export async function bulkCreate(
     const entry: BulkResult['succeeded'][number] = {
       index: i,
       docId: id,
+      docType: rec.docType,
       filePath: path.relative(ctx.projectRoot, fp),
       version: 1,
     };
@@ -444,6 +447,7 @@ export async function bulkUpdate(
       const entry: BulkResult['succeeded'][number] = {
         index: j,
         docId: upd.docId,
+        docType: (doc?.docType ?? 'unknown') as string,
         filePath: doc?.filePath as string ?? '',
         version: result.value.version,
       };

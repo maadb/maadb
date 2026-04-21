@@ -190,6 +190,20 @@ export async function startServer(opts: ServeOptions): Promise<void> {
   logger.info('mcp', 'startup',
     `${toolCount} tools registered — instance "${instance.name}" (${instance.source}), ${instance.projects.length} project(s)${dryRun ? ' (dry-run)' : ''}`);
 
+  // 0.6.11 — stdio live-notification notifier. stdio has exactly one session
+  // per process, synthesized lazily on first tool call. Register on create so
+  // the sid is known before we install the notifier. Unregister on close.
+  const { registerNotifier: regN, unregisterNotifier: unregN } = await import('./notifications.js');
+  ctx.sessions.registerCreateHandler((sid) => {
+    regN(sid, async (event) => {
+      await server.server.sendResourceUpdated({
+        uri: `maad://records/${event.docId}`,
+        ...({ action: event.action, docId: event.docId, docType: event.docType, project: event.project, updatedAt: event.updatedAt } as Record<string, unknown>),
+      });
+    });
+  });
+  ctx.sessions.registerCloseHandler((sid) => { unregN(sid); });
+
   installSignalHandlers(
     { pool, rateLimiter: getRateLimiter() },
     {

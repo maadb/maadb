@@ -70,6 +70,7 @@ export interface BulkResult {
   succeeded: Array<{
     index: number;
     docId: string;
+    docType: string;
     filePath: string;
     version: number;
     warnings?: ValidationWarning[];
@@ -107,6 +108,7 @@ export interface GetResult {
 
 export interface UpdateResult {
   docId: DocId;
+  docType: DocType;
   version: number;
   changedFields: string[];
   validation: ValidationResult;
@@ -116,6 +118,7 @@ export interface UpdateResult {
 
 export interface DeleteResult {
   docId: DocId;
+  docType: DocType;
   mode: 'soft' | 'hard';
   filePath: FilePath;
   writeDurable: boolean;

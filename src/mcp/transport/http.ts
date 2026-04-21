@@ -20,6 +20,7 @@ import type { SessionRegistry } from '../../instance/session.js';
 import type { InstanceConfig } from '../../instance/config.js';
 import { recordIdleSweep, recordSessionOpen } from './telemetry.js';
 import { isShuttingDown } from '../shutdown.js';
+import { registerNotifier, unregisterNotifier, type ChangeEvent } from '../notifications.js';
 
 export interface HttpTransportOptions {
   host: string;
@@ -215,6 +216,10 @@ export async function startHttpTransport(opts: HttpTransportOptions): Promise<Ht
       // New session: transport delegates ID generation to us (128-bit CSPRNG)
       const remoteAddr = remoteAddrFor(req, opts.trustProxy);
       const pinForClosure = pinnedProjectName;
+      // Forward-reference to the McpServer built below. Captured by the
+      // onsessioninitialized closure so 0.6.11 live-notification registration
+      // can fire `sendResourceUpdated` through the right per-session server.
+      let mcpServerRef: McpServer | null = null;
       const transport: StreamableHTTPServerTransport = new StreamableHTTPServerTransport({
         sessionIdGenerator: () => randomBytes(16).toString('base64url'),
         onsessioninitialized: (sid: string) => {
@@ -238,6 +243,20 @@ export async function startHttpTransport(opts: HttpTransportOptions): Promise<Ht
               logger.error('mcp', 'http', `gateway pin bind failed for session ${sid}: ${msg}`);
             }
           }
+          // 0.6.11 — register per-session notifier keyed on this sid. Fires
+          // `notifications/resources/updated` with a synthetic maad://records/
+          // URI plus extra params carrying the full ChangeEvent shape.
+          // MCP clients that only read `uri` still get a valid notification;
+          // clients that read params get the typed event.
+          if (mcpServerRef) {
+            const capturedServer = mcpServerRef;
+            registerNotifier(sid, async (event: ChangeEvent): Promise<void> => {
+              await capturedServer.server.sendResourceUpdated({
+                uri: `maad://records/${event.docId}`,
+                ...({ action: event.action, docId: event.docId, docType: event.docType, project: event.project, updatedAt: event.updatedAt } as Record<string, unknown>),
+              });
+            });
+          }
           const ua = req.headers['user-agent'];
           const openFields: Parameters<typeof recordSessionOpen>[0] = {
             session_id: sid,
@@ -253,6 +272,10 @@ export async function startHttpTransport(opts: HttpTransportOptions): Promise<Ht
         const sid = transport.sessionId;
         if (sid && entries.has(sid)) {
           entries.delete(sid);
+          // 0.6.11 — drop the notifier before destroy so it can't race with
+          // in-flight writes. destroy() itself fires close handlers but the
+          // notifier lives outside that registry.
+          unregisterNotifier(sid);
           // Fan out to the registry — this fires close handlers the server
           // wired in (rate-limit dispose, session_close audit, etc.).
           opts.sessions.destroy(sid, 'transport');
@@ -260,6 +283,7 @@ export async function startHttpTransport(opts: HttpTransportOptions): Promise<Ht
       };
 
       const mcpServer = opts.serverFactory();
+      mcpServerRef = mcpServer;
       // SDK's StreamableHTTPServerTransport declares onclose/onerror/onmessage
       // as optional, but Server.connect's Transport interface declares them
       // non-optional under exactOptionalPropertyTypes. Widening cast is the

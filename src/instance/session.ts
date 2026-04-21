@@ -47,6 +47,19 @@ export interface SessionState {
    * their whitelist is pruned via `pruneProjectFromWhitelist` instead.
    */
   cancelled?: boolean;
+  /**
+   * 0.6.11 — Live notification subscription. Set by `maad_subscribe`,
+   * cleared by `maad_unsubscribe` or session destroy. When present, durable
+   * writes matching the filter fire `notifications/resources/updated` to
+   * this session via its registered notifier (see NotifierRegistry).
+   * docTypes null = match all types; project null = match the session's
+   * bound project (single-mode) or any project in the whitelist (multi-mode).
+   */
+  subscription?: {
+    docTypes: string[] | null;
+    project: string | null;
+    createdAt: Date;
+  };
 }
 
 export interface BindOptions {
@@ -62,10 +75,12 @@ export interface BindOptions {
 
 export type SessionCloseReason = 'client' | 'transport' | 'idle' | 'shutdown';
 export type SessionCloseHandler = (sessionId: string, reason: SessionCloseReason) => void;
+export type SessionCreateHandler = (sessionId: string) => void;
 
 export class SessionRegistry {
   private sessions = new Map<string, SessionState>();
   private closeHandlers: SessionCloseHandler[] = [];
+  private createHandlers: SessionCreateHandler[] = [];
 
   constructor(private instance: InstanceConfig) {}
 
@@ -90,6 +105,12 @@ export class SessionRegistry {
       lastActivityAt: new Date(),
     };
     this.sessions.set(sessionId, state);
+    // Fan-out to createHandlers — stdio uses this to register a per-session
+    // notifier once the synthesized stdio session ID becomes known. Cheap
+    // synchronous call path; handlers must be best-effort and non-throwing.
+    for (const h of this.createHandlers) {
+      try { h(sessionId); } catch { /* best-effort fan-out */ }
+    }
     return state;
   }
 
@@ -114,6 +135,16 @@ export class SessionRegistry {
    */
   registerCloseHandler(handler: SessionCloseHandler): void {
     this.closeHandlers.push(handler);
+  }
+
+  /**
+   * 0.6.11 — Register a handler fired when a session is created. Used by
+   * stdio mode to register a notifier once the synthesized stdio session ID
+   * becomes known (HTTP knows the sid earlier via onsessioninitialized).
+   * Same best-effort / non-throwing contract as closeHandlers.
+   */
+  registerCreateHandler(handler: SessionCreateHandler): void {
+    this.createHandlers.push(handler);
   }
 
   destroy(sessionId: string, reason: SessionCloseReason = 'client'): void {

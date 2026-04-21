@@ -114,10 +114,48 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
       binding_source: state.bindingSource,
       createdAt: state.createdAt.toISOString(),
       lastActivityAt: state.lastActivityAt.toISOString(),
+      subscription: state.subscription
+        ? { docTypes: state.subscription.docTypes, project: state.subscription.project, createdAt: state.subscription.createdAt.toISOString() }
+        : null,
     }, 'maad_current_session');
   });
 
-  return 4;
+  server.registerTool('maad_subscribe', {
+    description: 'Subscribes the current session to live-update notifications on durable writes. Optional filter: `docTypes` (array) restricts to listed types; `project` restricts to one project (defaults to the session\'s bound project in single-mode, or any whitelisted project in multi-mode). Emits `notifications/resources/updated` with `uri: maad://records/<docId>` plus extra params `{action, docId, docType, operation, updatedAt, project}`. Only fires on durable commits (0.6.10 signal) — subscribers never see events for non-durable writes or idempotent no-ops. One subscription per session — re-subscribe to change filter. Call `maad_changes_since` separately for historical catch-up.',
+    inputSchema: z.object({
+      docTypes: z.array(z.string()).optional().describe('Allowlist of doc types; omit for all types'),
+      project: z.string().optional().describe('Restrict to one project; defaults to session\'s bound scope'),
+    }),
+  }, async (args, extra) => {
+    const sessionId = resolveSessionId(extra);
+    if (!ctx.sessions.get(sessionId)) ctx.sessions.create(sessionId);
+    const state = ctx.sessions.get(sessionId)!;
+
+    const docTypes = (args.docTypes && args.docTypes.length > 0) ? args.docTypes : null;
+    const project = args.project ?? null;
+
+    state.subscription = { docTypes, project, createdAt: new Date() };
+
+    return successResponse({
+      subscribed: true,
+      filter: { docTypes, project },
+      note: 'Notifications fire only on durable commits. Use maad_changes_since for historical catch-up on reconnect.',
+    }, 'maad_subscribe');
+  });
+
+  server.registerTool('maad_unsubscribe', {
+    description: 'Releases the current session\'s live-update subscription. No-op if not subscribed.',
+    inputSchema: z.object({}),
+  }, async (_args, extra) => {
+    const sessionId = resolveSessionId(extra);
+    const state = ctx.sessions.get(sessionId);
+    const wasSubscribed = state?.subscription !== undefined;
+    if (state) delete state.subscription;
+
+    return successResponse({ subscribed: false, wasSubscribed }, 'maad_unsubscribe');
+  });
+
+  return 6;
 }
 
 /**

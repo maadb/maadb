@@ -7,6 +7,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { docId } from '../../types.js';
 import { resultToResponse, successResponse, getProvenanceMode, attachDurability } from '../response.js';
 import type { DeleteResult } from '../../engine/types.js';
+import { notifyWrite } from '../notifications.js';
 import { isDryRun, dryRunResponse, auditToolCall } from '../guardrails.js';
 import type { InstanceCtx } from '../ctx.js';
 import { withEngine } from '../with-session.js';
@@ -20,13 +21,22 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
       mode: z.enum(['soft', 'hard']).default('soft').describe('soft=rename, hard=remove file'),
       project: z.string().optional().describe('Project name (multi-project mode only)'),
     }),
-  }, async (args, extra) => withEngine(ctx, extra, 'maad_delete', args, async ({ engine }) => {
+  }, async (args, extra) => withEngine(ctx, extra, 'maad_delete', args, async ({ engine, projectName }) => {
     auditToolCall('maad_delete', args);
     if (isDryRun()) return dryRunResponse('maad_delete', args);
     const result = await engine.deleteDocument(docId(args.docId), args.mode);
     const response = resultToResponse(result);
     if (!result.ok) return response;
     const value = result.value as DeleteResult;
+    if (value.writeDurable) {
+      await notifyWrite(ctx, {
+        action: 'delete',
+        docId: String(value.docId),
+        docType: String(value.docType),
+        project: projectName,
+        updatedAt: new Date().toISOString(),
+      });
+    }
     return attachDurability(response, value.writeDurable, value.commitFailure);
   }));
 

@@ -1,9 +1,24 @@
 ---
 enabled: true
-current: 0.6.10
+current: 0.6.11
 ---
 
 # Version History
+
+## 0.6.11 — 2026-04-21
+Live Notifications (fup-2026-035). New reader-level tools `maad_subscribe({docTypes?, project?})` and `maad_unsubscribe()` register a per-session filter on `SessionState.subscription`. After every durable write (0.6.10 commit signal confirms `writeDurable:true`), the MCP tool handler fans out `notifications/resources/updated` to every subscribed session whose filter matches the event. Emitted payload carries a synthetic `uri: maad://records/<docId>` (satisfies the MCP-spec required field) plus extra params `{action, docId, docType, project, updatedAt}` — clients that only read `uri` still get a valid notification; clients that read params get the typed ChangeEvent shape. This is the push-based alternative to polling `maad_changes_since`, unblocking consistent multi-agent project-work patterns where one agent's write should propagate to other active sessions watching the same project without round-tripping a cursor.
+
+Durability gate is upstream: the write tool handlers skip `notifyWrite()` when `writeDurable === false` (commit failed) or when an update produced no state change (empty `changedFields` + no body mutation = noop, engine reports `writeDurable:true` but nothing actually changed). Subscribers only ever see events for records that actually landed in git — the whole point of shipping 0.6.10 durability first. `bulk_create` and `bulk_update` fan out one event per successful record; `maad_delete` emits `action:'delete'` with the docType captured before deletion.
+
+Filter semantics: `docTypes` omitted or empty = match all types; `project` omitted = match the session's visible scope (single-mode → activeProject, multi-mode → any project in the whitelist). Explicit `project` overrides the session default, letting multi-mode subscribers narrow to one project. One subscription per session — re-calling `maad_subscribe` replaces the filter. `maad_current_session` response gains a `subscription` field so clients can introspect their own filter state.
+
+Transport integration: HTTP transport registers a per-session notifier inside its existing `onsessioninitialized` callback (the same hook that already wires session creation, gateway pinning, and telemetry). The notifier closure captures the per-session `McpServer` built by `serverFactory` and calls `server.sendResourceUpdated(params)` through the SDK's notification path. `transport.onclose` drops the notifier before destroying the session so it can't race with in-flight writes. Stdio transport registers a single notifier via a new `SessionRegistry.registerCreateHandler` hook because the stdio session ID is synthesized lazily on first tool call — we don't know it at startup, so we install the notifier when the session comes into existence.
+
+Zero-overhead path: `notifyWrite()` returns early when `notifierCount() === 0` — no session iteration, no filter-matching cost. Sessions without subscriptions pay nothing. A broken notifier (throw) is caught, logged to the ops channel via `logger.bestEffort`, and does NOT propagate — a dead transport cannot kill the write path.
+
+v1 simplifications (explicitly deferred): no server-side queue with drop-oldest policy (rely on SSE transport backpressure — clients that reconnect call `maad_changes_since` for historical catch-up, which has shipped since 0.5.0); no `since` parameter on subscribe (live-stream and historical-replay stay separate workflows); no `list_changed` overflow hint (vestigial without a queue). These can come back if hosted-deployment rate limits demand them.
+
+Two new engine-less tools (registered in `ENGINE_LESS_TOOLS`, reader-role gated). `SessionState.subscription` is optional — present iff the session called `maad_subscribe`. `BulkResult.succeeded[]` entries gain a `docType` field so bulk fan-out doesn't re-query the backend per record. `UpdateResult` and `DeleteResult` gain `docType` so single-write fan-out is a straight field pass-through. 11 new tests (`tests/mcp/notifications.test.ts` — unit-tests the fan-out contract across registry, filter matching, session modes, error resilience, multi-subscriber delivery, and the `registerCreateHandler` hook), 611 total passing (baseline 600 at 0.6.10, +11). `tsc --noEmit` clean. No new dependencies.
 
 ## 0.6.10 — 2026-04-21
 Commit Durability Signal (fup-2026-066 fix). `autoCommit` is refactored from `Promise<CommitSha | null>` to a three-state `CommitOutcome` discriminated union: `{status: 'committed', sha}` on the happy path, `{status: 'noop'}` when nothing was staged (benign — e.g. an idempotent update that didn't change the file), and `{status: 'failed', code, message}` when any git step throws. Before 0.6.10, every error path in `autoCommit` returned `null` and the caller treated it identically to "nothing to commit" — so a trailing bulk commit that failed (stale `.git/index.lock`, concurrent git command, mid-run crash) would leave ~100 staged-but-uncommitted records while the engine ack'd every one as durable. That's the exact symptom Codex hit on the brain-app droplet 2026-04-18 that `maad_health.gitClean:false` surfaced cosmetically but the engine never reported.
@@ -122,7 +137,6 @@ Initial engine build. Parser, registry, schema, extractor (11 primitives), SQLit
 
 ## Planned
 
-- **0.6.11** — Live Notifications: `maad_subscribe` tool + `notifications/resources/updated` SSE push on writes; per-session queue cap with drop-oldest + `list_changed` catch-up hint; reentrant-safe through existing write mutex; zero overhead when nobody subscribes. Gated on successful commit (0.6.10 durability signal) so subscribers never see events for records that didn't land in git
 - **0.7.0** — Scoped Auth & Identity: token registry at `_auth/tokens.yaml`, three-cap role model, `maad_pat_<32hex>` token format, immutable records (issue/rotate/revoke), identity-enriched audit + commit trail. Spec at `docs/specs/0.7.0-scoped-auth.md`, design lock at `dec-maadb-069`
 - **0.7.5** — Canonical `_skills/session-protocol.md` in engine (Level 3 +Agent onboarding) + followup `supersedes` schema field + `maad_status` cross-project rollup primitive
 - **0.8.0** — Import workflow: `_inbox/` convention, source tracking, duplicate detection, readonly type flag

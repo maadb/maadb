@@ -15,6 +15,7 @@ import { withIdempotency } from '../idempotency.js';
 import { getRateLimiter } from '../rate-limit.js';
 import { logWriteAudit, logValidationWarning } from '../../logging.js';
 import type { ValidationWarning } from '../../types.js';
+import { notifyWrite, type ChangeEvent } from '../notifications.js';
 
 function checkWriteRate(sessionId: string, toolName: string): ReturnType<typeof errorResponse> | null {
   const rejection = getRateLimiter().tryAcquireWrite(sessionId);
@@ -151,6 +152,15 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
       const response = resultToResponse(result, 'maad_create');
       if (!result.ok) return response;
       const value = result.value as CreateResult;
+      if (value.writeDurable) {
+        await notifyWrite(ctx, {
+          action: 'create',
+          docId: String(value.docId),
+          docType: args.docType,
+          project: projectName,
+          updatedAt: new Date().toISOString(),
+        });
+      }
       return attachDurability(attachWarnings(response, value.validation.warnings), value.writeDurable, value.commitFailure);
     }),
   ));
@@ -191,6 +201,18 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
       const response = resultToResponse(result, 'maad_update');
       if (!result.ok) return response;
       const value = result.value as UpdateResult;
+      // Only fire on real state change: durable AND the update actually
+      // touched the file. changedFields empty + no body mutation = noop,
+      // which engine reports as writeDurable:true but should NOT notify.
+      if (value.writeDurable && (value.changedFields.length > 0 || args.body !== undefined || args.appendBody !== undefined)) {
+        await notifyWrite(ctx, {
+          action: 'update',
+          docId: String(value.docId),
+          docType: String(value.docType),
+          project: projectName,
+          updatedAt: new Date().toISOString(),
+        });
+      }
       return attachDurability(attachWarnings(response, value.validation.warnings), value.writeDurable, value.commitFailure);
     }),
   ));
@@ -238,6 +260,18 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
       const response = resultToResponse(result);
       if (!result.ok) return response;
       const value = result.value as BulkResult;
+      if (value.writeDurable && value.succeeded.length > 0) {
+        const now = new Date().toISOString();
+        for (const s of value.succeeded) {
+          await notifyWrite(ctx, {
+            action: 'create',
+            docId: s.docId,
+            docType: s.docType,
+            project: projectName,
+            updatedAt: now,
+          });
+        }
+      }
       return attachDurability(attachWarnings(response, value.warnings), value.writeDurable, value.commitFailure);
     }),
   ));
@@ -272,6 +306,18 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
       const response = resultToResponse(result);
       if (!result.ok) return response;
       const value = result.value as BulkResult;
+      if (value.writeDurable && value.succeeded.length > 0) {
+        const now = new Date().toISOString();
+        for (const s of value.succeeded) {
+          await notifyWrite(ctx, {
+            action: 'update',
+            docId: s.docId,
+            docType: s.docType,
+            project: projectName,
+            updatedAt: now,
+          });
+        }
+      }
       return attachDurability(attachWarnings(response, value.warnings), value.writeDurable, value.commitFailure);
     }),
   ));

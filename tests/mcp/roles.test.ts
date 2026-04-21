@@ -2,21 +2,23 @@ import { describe, it, expect } from 'vitest';
 import { getToolsForRole, parseRole } from '../../src/mcp/roles.js';
 
 describe('MCP roles', () => {
-  it('reader gets 14 tools', () => {
+  it('reader gets 16 tools', () => {
     const tools = getToolsForRole('reader');
-    expect(tools.size).toBe(14);
+    expect(tools.size).toBe(16);
     expect(tools.has('maad_summary')).toBe(true);
     expect(tools.has('maad_get')).toBe(true);
     expect(tools.has('maad_aggregate')).toBe(true);
     expect(tools.has('maad_changes_since')).toBe(true);
     expect(tools.has('maad_verify')).toBe(true);
+    expect(tools.has('maad_subscribe')).toBe(true);
+    expect(tools.has('maad_unsubscribe')).toBe(true);
     expect(tools.has('maad_create')).toBe(false);
     expect(tools.has('maad_delete')).toBe(false);
   });
 
-  it('writer gets 19 tools (reader + create, update, validate, bulk_create, bulk_update)', () => {
+  it('writer gets 21 tools (reader + create, update, validate, bulk_create, bulk_update)', () => {
     const tools = getToolsForRole('writer');
-    expect(tools.size).toBe(19);
+    expect(tools.size).toBe(21);
     expect(tools.has('maad_create')).toBe(true);
     expect(tools.has('maad_update')).toBe(true);
     expect(tools.has('maad_validate')).toBe(true);
@@ -24,14 +26,16 @@ describe('MCP roles', () => {
     expect(tools.has('maad_reindex')).toBe(false);
   });
 
-  it('admin gets 24 tools (all)', () => {
+  it('admin gets 26 tools (all)', () => {
     const tools = getToolsForRole('admin');
-    expect(tools.size).toBe(24);
+    expect(tools.size).toBe(26);
     expect(tools.has('maad_delete')).toBe(true);
     expect(tools.has('maad_reindex')).toBe(true);
     expect(tools.has('maad_reload')).toBe(true);
     expect(tools.has('maad_health')).toBe(true);
     expect(tools.has('maad_instance_reload')).toBe(true);
+    expect(tools.has('maad_subscribe')).toBe(true);
+    expect(tools.has('maad_unsubscribe')).toBe(true);
   });
 
   it('parseRole defaults to reader for invalid input', () => {

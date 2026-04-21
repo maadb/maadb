@@ -49,7 +49,7 @@ describe('OperationKind coverage', () => {
   it('set cardinalities match the documented roster', () => {
     expect(READ_TOOLS.size).toBe(16);
     expect(WRITE_TOOLS.size).toBe(7);
-    expect(ENGINE_LESS_TOOLS.size).toBe(5);
+    expect(ENGINE_LESS_TOOLS.size).toBe(7);
   });
 
   it('every registered engine-bound tool has a kind', () => {
