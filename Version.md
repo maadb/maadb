@@ -153,10 +153,13 @@ Initial engine build. Parser, registry, schema, extractor (11 primitives), SQLit
 
 ## Planned
 
-- **0.7.0** — Scoped Auth & Identity: token registry at `_auth/tokens.yaml`, three-cap role model, `maad_pat_<32hex>` token format, immutable records (issue/rotate/revoke), identity-enriched audit + commit trail. Spec at `docs/specs/0.7.0-scoped-auth.md`, design lock at `dec-maadb-069`
-- **0.7.5** — Canonical `_skills/session-protocol.md` in engine (Level 3 +Agent onboarding) + followup `supersedes` schema field + `maad_status` cross-project rollup primitive
-- **0.8.0** — Import workflow: `_inbox/` convention, source tracking, duplicate detection, readonly type flag
-- **0.8.5** — Remote MCP hardening: per-connection role tiers, rate-limit policy, backpressure thresholds, mutex timeout, stress suite, metrics export, `git gc` automation
-- **0.9.0** — Eviction policy + query power: in-place project mutations (lifts `INSTANCE_MUTATION_UNSUPPORTED`), FTS5, fuzzy entity matching, compound filters (AND/OR), cursor-based pagination
-- **0.9.5** — Object attributes: user-defined tags on extracted objects, stored as YAML, indexed on reindex
-- **1.0.0** — Stable release: API locked, npm published, full test coverage, migration guide
+Phase plan locked in `dec-maadb-070-optimization-track` (2026-04-21). Releases through 0.8.0 form an agent-first optimization track; 0.8.5+ unchanged from prior roadmap.
+
+- **0.7.0** — Scoped Auth & Identity + Response Hygiene. Token registry at `_auth/tokens.yaml`, three-cap role model, `maad_pat_<32hex>` tokens, immutable issue/rotate/revoke, identity-enriched audit (spec at `docs/specs/0.7.0-scoped-auth.md`, design lock `dec-maadb-069`). Plus response-hygiene bundle: slim `maad_summary` (subtype inventory moves to `maad_describe`), omit null fields in `maad_schema`, opt-in `filePath` and `_meta.request_id`, trim tool descriptions to 1–2 sentences with detail moved to `_skills/*.md`, document filter shorthand as primary form.
+- **0.7.5** — Agent-First Engine. `maad_status` cross-project rollup, followup `supersedes` schema field, canonical `_skills/session-protocol.md` in engine. Plus composites that collapse common call chains: `maad_query depth: 'cold'|'full'`, `maad_bulk_update_where`, `maad_context(docId)`, `maad_get_many`, `maad_related depth: 'hydrated'`, `maad_subscribe_from(cursor)`.
+- **0.7.6** — Cleanup Wave 1. Safe mass-cleanup primitives — all destructive tools default to dry-run with `confirm: true` required: `maad_bulk_delete`, `maad_delete_where`, `maad_repair_where`, `maad_find_orphans`, `maad_purge_soft_deleted`.
+- **0.8.0** — Operational Hygiene + Imports. `maad_prune_sessions` (stale-session sweeper), `maad_compact` (`VACUUM` + `git gc`), `maad_reindex_selective`, `maad_find_duplicates` + original Import workflow: `_inbox/` convention, source tracking, duplicate detection, readonly type flag.
+- **0.8.5** — Remote MCP hardening: per-connection role tiers, rate-limit policy, backpressure thresholds, mutex timeout, stress suite, metrics export, `git gc` automation.
+- **0.9.0** — Eviction policy + query power: in-place project mutations (lifts `INSTANCE_MUTATION_UNSUPPORTED`), FTS5, fuzzy entity matching, compound filters (AND/OR), cursor-based pagination.
+- **0.9.5** — Object attributes: user-defined tags on extracted objects, stored as YAML, indexed on reindex.
+- **1.0.0** — Stable release: API locked, npm published, full test coverage, migration guide.
