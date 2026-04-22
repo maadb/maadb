@@ -61,6 +61,55 @@ export function resultToResponse<T>(result: Result<T>, toolName?: string): { con
 }
 
 /**
+ * 0.7.1 (R3) — Projected-size guard for list-returning tools. Computes the
+ * byte size of the serialized response before returning; rejects with
+ * RESPONSE_TOO_LARGE when over cap. Prevents silent truncation when the MCP
+ * client's tool-output harness caps the response (~80KB in Claude Code).
+ *
+ * Cap is read lazily from MAAD_RESPONSE_MAX_BYTES each call so tests can
+ * flip it via env without re-importing the module. Default 64KB gives
+ * headroom below the observed Claude Code ceiling.
+ *
+ * Only applies to success responses — error responses are small and
+ * stamping them risks hiding the original error. Returns the input
+ * unchanged for errors or when under cap.
+ */
+export function responseMaxBytes(): number {
+  const raw = process.env['MAAD_RESPONSE_MAX_BYTES'];
+  if (!raw) return 65536;
+  const n = Number.parseInt(raw, 10);
+  return Number.isFinite(n) && n > 0 ? n : 65536;
+}
+
+export function guardResponseSize(
+  response: { content: Array<{ type: 'text'; text: string }> },
+  context: { tool: string; hint?: string },
+): { content: Array<{ type: 'text'; text: string }> } {
+  const first = response.content[0];
+  if (!first || first.type !== 'text') return response;
+
+  const cap = responseMaxBytes();
+  const bytes = Buffer.byteLength(first.text, 'utf8');
+  if (bytes <= cap) return response;
+
+  // Only reject success responses — error responses are small and should pass through.
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(first.text) as Record<string, unknown>;
+  } catch {
+    return response;
+  }
+  if (parsed.ok === false) return response;
+
+  const hint = context.hint ?? 'Narrow field projection, add filters, or paginate with cursor';
+  return errorResponse([{
+    code: 'RESPONSE_TOO_LARGE',
+    message: `Projected response (${bytes} bytes) exceeds cap (${cap} bytes)`,
+    details: { projectedBytes: bytes, capBytes: cap, hint, tool: context.tool },
+  }]);
+}
+
+/**
  * Attach or merge fields into `_meta` on an already-serialized tool response.
  * Used by the MCP wrapper to stamp request_id onto every response so clients
  * can quote it in bug reports. Non-breaking (MCP allows extra fields).

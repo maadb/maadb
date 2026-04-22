@@ -155,6 +155,12 @@ export interface ChangesSinceParsedCursor {
 export interface FindResult {
   total: number;
   results: DocumentMatch[];
+  /**
+   * 0.7.1 — set when the engine capped the caller's requested `limit` to the
+   * configured maximum. Consumers surface this on MCP responses as
+   * `_meta.limit_clamped`. Omitted when no clamping occurred.
+   */
+  limitClamped?: { requested: number; applied: number };
 }
 
 export interface SearchResult {
@@ -181,6 +187,12 @@ export interface AggregateResult {
   }>;
   total: number;
   totalMetric?: number | null;
+  /**
+   * 0.7.1 — set when the engine capped the caller's requested `limit` to the
+   * configured maximum. Consumers surface this on MCP responses as
+   * `_meta.limit_clamped`. Omitted when no clamping occurred.
+   */
+  limitClamped?: { requested: number; applied: number };
 }
 
 export interface JoinQuery {

@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { successResponse, errorResponse, resultToResponse, setProvenanceMode, attachWarnings, attachMeta } from '../../src/mcp/response.js';
+import { successResponse, errorResponse, resultToResponse, setProvenanceMode, attachWarnings, attachMeta, guardResponseSize, responseMaxBytes } from '../../src/mcp/response.js';
 import type { Result } from '../../src/errors.js';
 import type { ValidationWarning } from '../../src/types.js';
 
@@ -102,6 +102,74 @@ describe('attachWarnings — 0.6.7 Phase 3 plumbing', () => {
     const parsed = JSON.parse(out.content[0]!.text);
     expect(parsed.data).toEqual({ docId: 'cli-acme', version: 1 });
     expect(parsed.ok).toBe(true);
+  });
+});
+
+describe('guardResponseSize — 0.7.1 R3 projected-size guard', () => {
+  const originalEnv = process.env['MAAD_RESPONSE_MAX_BYTES'];
+  afterEach(() => {
+    if (originalEnv === undefined) delete process.env['MAAD_RESPONSE_MAX_BYTES'];
+    else process.env['MAAD_RESPONSE_MAX_BYTES'] = originalEnv;
+  });
+
+  it('passes through small success responses unchanged', () => {
+    const base = successResponse({ rows: [{ a: 1 }, { b: 2 }] });
+    const out = guardResponseSize(base, { tool: 'maad_query' });
+    const parsed = JSON.parse(out.content[0]!.text);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.data.rows).toHaveLength(2);
+  });
+
+  it('returns RESPONSE_TOO_LARGE when payload exceeds cap', () => {
+    process.env['MAAD_RESPONSE_MAX_BYTES'] = '256';
+    // Build a payload reliably over 256 bytes once JSON-serialized.
+    const bigRow = { description: 'x'.repeat(200) };
+    const base = successResponse({ rows: [bigRow, bigRow, bigRow] });
+    const out = guardResponseSize(base, { tool: 'maad_query' });
+    const parsed = JSON.parse(out.content[0]!.text);
+    expect(parsed.ok).toBe(false);
+    expect(parsed.errors[0].code).toBe('RESPONSE_TOO_LARGE');
+    expect(parsed.errors[0].details.capBytes).toBe(256);
+    expect(parsed.errors[0].details.projectedBytes).toBeGreaterThan(256);
+    expect(parsed.errors[0].details.tool).toBe('maad_query');
+    expect(parsed.errors[0].details.hint).toContain('projection');
+  });
+
+  it('respects MAAD_RESPONSE_MAX_BYTES env override', () => {
+    process.env['MAAD_RESPONSE_MAX_BYTES'] = '131072';
+    expect(responseMaxBytes()).toBe(131072);
+    delete process.env['MAAD_RESPONSE_MAX_BYTES'];
+    expect(responseMaxBytes()).toBe(65536);
+  });
+
+  it('falls back to default cap on invalid env value', () => {
+    process.env['MAAD_RESPONSE_MAX_BYTES'] = 'not-a-number';
+    expect(responseMaxBytes()).toBe(65536);
+    process.env['MAAD_RESPONSE_MAX_BYTES'] = '-100';
+    expect(responseMaxBytes()).toBe(65536);
+    process.env['MAAD_RESPONSE_MAX_BYTES'] = '0';
+    expect(responseMaxBytes()).toBe(65536);
+  });
+
+  it('does not re-wrap error responses even when large', () => {
+    process.env['MAAD_RESPONSE_MAX_BYTES'] = '128';
+    const base = errorResponse([{
+      code: 'VALIDATION_FAILED',
+      message: 'x'.repeat(500),
+      details: { extraneous: 'x'.repeat(500) },
+    }] as any);
+    const out = guardResponseSize(base, { tool: 'maad_query' });
+    const parsed = JSON.parse(out.content[0]!.text);
+    expect(parsed.ok).toBe(false);
+    expect(parsed.errors[0].code).toBe('VALIDATION_FAILED');
+  });
+
+  it('uses a custom hint when provided', () => {
+    process.env['MAAD_RESPONSE_MAX_BYTES'] = '64';
+    const base = successResponse({ data: 'x'.repeat(200) });
+    const out = guardResponseSize(base, { tool: 'maad_join', hint: 'Try fewer refs' });
+    const parsed = JSON.parse(out.content[0]!.text);
+    expect(parsed.errors[0].details.hint).toBe('Try fewer refs');
   });
 });
 

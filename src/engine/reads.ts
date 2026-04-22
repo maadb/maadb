@@ -90,19 +90,35 @@ export async function getDocument(
   return ok(result);
 }
 
-export function findDocuments(ctx: EngineContext, query: DocumentQuery): Result<FindResult> {
-  const results = ctx.backend.findDocuments(query);
-  const total = ctx.backend.countDocuments(query);
+// 0.7.1 — hard caps on list-returning read tools. Prevents silent truncation
+// when the MCP client's tool-output harness caps the response payload. Callers
+// requesting above the cap get the clamped result plus `_meta.limit_clamped`
+// in the MCP response, never a hidden partial.
+export const MAX_QUERY_LIMIT = 500;
+export const MAX_AGGREGATE_LIMIT = 2000;
 
-  if (query.fields && query.fields.length > 0 && results.length > 0) {
+export function findDocuments(ctx: EngineContext, query: DocumentQuery): Result<FindResult> {
+  let effectiveQuery = query;
+  let limitClamped: { requested: number; applied: number } | undefined;
+  if (query.limit !== undefined && query.limit > MAX_QUERY_LIMIT) {
+    limitClamped = { requested: query.limit, applied: MAX_QUERY_LIMIT };
+    effectiveQuery = { ...query, limit: MAX_QUERY_LIMIT };
+  }
+
+  const results = ctx.backend.findDocuments(effectiveQuery);
+  const total = ctx.backend.countDocuments(effectiveQuery);
+
+  if (effectiveQuery.fields && effectiveQuery.fields.length > 0 && results.length > 0) {
     const docIds = results.map(r => r.docId);
-    const fieldValues = ctx.backend.getFieldValues(docIds, query.fields);
+    const fieldValues = ctx.backend.getFieldValues(docIds, effectiveQuery.fields);
     for (const match of results) {
       match.fields = fieldValues.get(match.docId as string) ?? {};
     }
   }
 
-  return ok({ total, results });
+  const result: FindResult = { total, results };
+  if (limitClamped) result.limitClamped = limitClamped;
+  return ok(result);
 }
 
 export function searchObjects(ctx: EngineContext, query: ObjectQuery): Result<SearchResult> {
@@ -268,7 +284,16 @@ export function schemaInfo(ctx: EngineContext, dt: DocType): Result<SchemaInfoRe
 }
 
 export function aggregate(ctx: EngineContext, query: AggregateQuery): Result<AggregateResult> {
-  return ok(ctx.backend.aggregate(query));
+  let effectiveQuery = query;
+  let limitClamped: { requested: number; applied: number } | undefined;
+  if (query.limit !== undefined && query.limit > MAX_AGGREGATE_LIMIT) {
+    limitClamped = { requested: query.limit, applied: MAX_AGGREGATE_LIMIT };
+    effectiveQuery = { ...query, limit: MAX_AGGREGATE_LIMIT };
+  }
+
+  const result = ctx.backend.aggregate(effectiveQuery);
+  if (limitClamped) result.limitClamped = limitClamped;
+  return ok(result);
 }
 
 export function join(ctx: EngineContext, query: JoinQuery): Result<JoinResult> {

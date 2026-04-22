@@ -6,7 +6,7 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { docId, docType, type ObjectQuery } from '../../types.js';
-import { resultToResponse } from '../response.js';
+import { resultToResponse, attachMeta, guardResponseSize } from '../response.js';
 import type { InstanceCtx } from '../ctx.js';
 import { withEngine } from '../with-session.js';
 
@@ -35,7 +35,7 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
       fields: z.array(z.string()).optional().describe('Field names to return inline (e.g. ["name", "status"]). Indexed fields only.'),
       sortBy: z.string().optional().describe('Indexed field to sort by'),
       sortOrder: z.enum(['asc', 'desc']).optional().describe('Sort direction (default desc)'),
-      limit: z.number().optional().describe('Max results (default 50)'),
+      limit: z.number().optional().describe('Max results (default 50, capped at 500). Over-requests are clamped silently with _meta.limit_clamped set.'),
       offset: z.number().optional().describe('Skip first N results'),
       includeFilePath: z.boolean().optional().describe('Include filePath in each result row (default false — omitted to trim response size)'),
       project: z.string().optional().describe('Project name (multi-project mode only)'),
@@ -52,15 +52,26 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
     // 0.7.0 — default-strip filePath to trim response size. Clients that
     // need the on-disk path opt in via includeFilePath:true. Backend still
     // produces the field; we drop it at the MCP boundary.
+    let effective = result;
     if (result.ok && args.includeFilePath !== true) {
       const stripped = result.value.results.map(r => {
         const { filePath, ...rest } = r;
         void filePath;
         return rest;
       });
-      return resultToResponse({ ok: true, value: { total: result.value.total, results: stripped } } as typeof result, 'maad_query');
+      const newValue: import('../../engine/types.js').FindResult = {
+        total: result.value.total,
+        results: stripped as typeof result.value.results,
+      };
+      if (result.value.limitClamped) newValue.limitClamped = result.value.limitClamped;
+      effective = { ok: true, value: newValue } as typeof result;
     }
-    return resultToResponse(result, 'maad_query');
+    let response = resultToResponse(effective, 'maad_query');
+    // 0.7.1 — surface engine limit-clamping in _meta, then guard response size.
+    if (effective.ok && effective.value.limitClamped) {
+      response = attachMeta(response, { limit_clamped: effective.value.limitClamped });
+    }
+    return guardResponseSize(response, { tool: 'maad_query' });
   }));
 
   server.registerTool('maad_search', {
@@ -120,7 +131,7 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
         op: z.enum(['count', 'sum', 'avg', 'min', 'max']).describe('Aggregation operation'),
       }).optional().describe('Optional metric to compute per group. Without this, returns count per group value.'),
       filters: z.any().optional().describe('Field filters (same format as maad_query filters)'),
-      limit: z.number().optional().describe('Max groups to return (default 50)'),
+      limit: z.number().optional().describe('Max groups to return (default 50, capped at 2000). Over-requests are clamped silently with _meta.limit_clamped set.'),
       project: z.string().optional().describe('Project name (multi-project mode only)'),
     }),
   }, async (args, extra) => withEngine(ctx, extra, 'maad_aggregate', args, ({ engine }) => {
@@ -131,7 +142,13 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
     if (args.metric !== undefined) query.metric = args.metric;
     if (args.filters !== undefined) query.filters = args.filters as any;
     if (args.limit !== undefined) query.limit = args.limit;
-    return resultToResponse(engine.aggregate(query), 'maad_aggregate');
+    const result = engine.aggregate(query);
+    let response = resultToResponse(result, 'maad_aggregate');
+    // 0.7.1 — surface engine limit-clamping in _meta, then guard response size.
+    if (result.ok && result.value.limitClamped) {
+      response = attachMeta(response, { limit_clamped: result.value.limitClamped });
+    }
+    return guardResponseSize(response, { tool: 'maad_aggregate' });
   }));
 
   server.registerTool('maad_verify', {

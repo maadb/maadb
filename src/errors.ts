@@ -65,7 +65,14 @@ export type ErrorCode =
   | 'TOKEN_ROLE_ABOVE_GLOBAL'
   | 'TOKEN_IDENTITY_REQUIRED'
   | 'TOKEN_NOT_FOUND'
-  | 'LEGACY_BEARER_REMOVED';
+  | 'LEGACY_BEARER_REMOVED'
+  // 0.7.1 — agent-first aggregate capabilities
+  | 'RESPONSE_TOO_LARGE'
+  | 'CURSOR_INVALID'
+  | 'SCHEMA_REF_CHAIN_INVALID'
+  | 'FILTER_BETWEEN_INVALID'
+  | 'FILTER_EMPTY_ARRAY'
+  | 'FILTER_OP_INVALID';
 
 export interface MaadError {
   code: ErrorCode;
