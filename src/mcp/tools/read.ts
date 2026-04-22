@@ -28,10 +28,10 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
   }));
 
   server.registerTool('maad_query', {
-    description: 'Finds documents by type with optional field filters and projection. Filters: { field: value } shorthand (implicit eq) or { field: { op: "eq"|"neq"|"gt"|"gte"|"lt"|"lte"|"in"|"contains", value: ... } }. Use fields to return frontmatter values inline instead of chasing IDs.',
+    description: 'Finds documents by type with optional field filters and projection. Filters support shorthand eq, single-op, between shortcut, and array-of-ops (AND semantics). Use fields to return frontmatter values inline instead of chasing IDs.',
     inputSchema: z.object({
       docType: z.string().describe('Document type to query'),
-      filters: z.any().optional().describe('Field filters. Shorthand: { status: "active" } (implicit eq). Operator form: { status: { op: "eq", value: "active" } }, { opened_at: { op: "gte", value: "2025-01-01" } }.'),
+      filters: z.any().optional().describe('Field filters. Shorthand: { status: "active" }. Single op: { opened_at: { op: "gte", value: "2026-01-01" } }. Range shortcut: { opened_at: { op: "between", value: ["2026-03-01", "2026-03-31"] } }. Array-of-ops (AND): { opened_at: [{op: "gte", value: "2026-03-01"}, {op: "lte", value: "2026-03-31"}] }. Ops: eq, neq, gt, gte, lt, lte, in, contains, between.'),
       fields: z.array(z.string()).optional().describe('Field names to return inline (e.g. ["name", "status"]). Indexed fields only.'),
       sortBy: z.string().optional().describe('Indexed field to sort by'),
       sortOrder: z.enum(['asc', 'desc']).optional().describe('Sort direction (default desc)'),
@@ -130,7 +130,7 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
         field: z.string().describe('Field to aggregate (must be indexed, numeric for sum/avg/min/max)'),
         op: z.enum(['count', 'sum', 'avg', 'min', 'max']).describe('Aggregation operation'),
       }).optional().describe('Optional metric to compute per group. Without this, returns count per group value.'),
-      filters: z.any().optional().describe('Field filters (same format as maad_query filters)'),
+      filters: z.any().optional().describe('Field filters (same format as maad_query — shorthand, single-op, between shortcut, array-of-ops with AND semantics).'),
       limit: z.number().optional().describe('Max groups to return (default 50, capped at 2000). Over-requests are clamped silently with _meta.limit_clamped set.'),
       project: z.string().optional().describe('Project name (multi-project mode only)'),
     }),

@@ -215,9 +215,7 @@ export class SqliteBackend implements MaadBackend {
 
     if (query.filters) {
       for (const [field, condition] of Object.entries(query.filters)) {
-        const { sql, values } = buildFilterSQL(field, condition);
-        conditions.push(`d.doc_id IN (SELECT doc_id FROM field_index WHERE ${sql})`);
-        params.push(...values);
+        applyFieldFilters(field, condition, conditions, params);
       }
     }
 
@@ -463,9 +461,7 @@ export class SqliteBackend implements MaadBackend {
 
     if (query.filters) {
       for (const [field, condition] of Object.entries(query.filters)) {
-        const { sql, values } = buildFilterSQL(field, condition);
-        scopeConditions.push(`d.doc_id IN (SELECT doc_id FROM field_index WHERE ${sql})`);
-        scopeParams.push(...values);
+        applyFieldFilters(field, condition, scopeConditions, scopeParams);
       }
     }
 
@@ -597,6 +593,24 @@ function normalizeFilter(condition: FilterCondition | string | unknown): FilterC
   return { op: 'eq', value: String(condition) };
 }
 
+// 0.7.1 R2 — apply per-field filters to a SQL conditions/params pair. Accepts
+// either the legacy single-filter shape (scalar, single op) or the expanded
+// array-of-ops shape produced by the engine-layer `expandFilters`. All atomic
+// conditions AND-combine at the SQL layer via separate `d.doc_id IN (...)` clauses.
+function applyFieldFilters(
+  field: string,
+  raw: unknown,
+  conditions: string[],
+  params: unknown[],
+): void {
+  const atomics: unknown[] = Array.isArray(raw) ? raw : [raw];
+  for (const c of atomics) {
+    const { sql, values } = buildFilterSQL(field, c);
+    conditions.push(`d.doc_id IN (SELECT doc_id FROM field_index WHERE ${sql})`);
+    params.push(...values);
+  }
+}
+
 function buildFilterSQL(field: string, rawCondition: FilterCondition | string | unknown): { sql: string; values: unknown[] } {
   const condition = normalizeFilter(rawCondition);
   // For range operators, use numeric_value when the value is numeric (handles number fields correctly)
@@ -635,6 +649,11 @@ function buildFilterSQL(field: string, rawCondition: FilterCondition | string | 
     }
     case 'contains':
       return { sql: 'field_name = ? AND field_value LIKE ?', values: [field, `%${condition.value}%`] };
+    case 'between':
+      // Defensive: `between` is a compound shortcut normalized to [gte, lte] by
+      // the engine layer's `expandFilters` (src/engine/reads.ts). Reaching this
+      // branch means filters bypassed engine normalization — caller layering bug.
+      throw new Error(`Unexpected 'between' filter at backend layer — engine must expand via expandFilters before passing to backend`);
   }
 }
 

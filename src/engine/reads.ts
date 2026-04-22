@@ -17,6 +17,7 @@ import {
   type SchemaDefinition,
   type DocumentQuery,
   type ObjectQuery,
+  type FilterCondition,
 } from '../types.js';
 import { extractBody } from '../writer/index.js';
 import type { EngineContext } from './context.js';
@@ -97,12 +98,99 @@ export async function getDocument(
 export const MAX_QUERY_LIMIT = 500;
 export const MAX_AGGREGATE_LIMIT = 2000;
 
+// 0.7.1 R2 — recognized single-op filter set (excludes `between`, which is a
+// compound shortcut desugared at expand time).
+const ATOMIC_FILTER_OPS = new Set(['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'in', 'contains']);
+
+// 0.7.1 R2 — validate and normalize a single field's filter input into a flat
+// list of atomic FilterConditions. Input accepts:
+//   - scalar (string/number, shorthand eq)
+//   - single FilterCondition object ({op, value})
+//   - 'between' shortcut ({op: "between", value: [lo, hi]}) → desugars to [gte, lte]
+//   - array of FilterConditions (AND semantics; betweens inside are also desugared)
+// After expansion, the backend sees only atomic ops — never between, never arrays
+// of unvalidated shapes.
+function normalizeFilterField(field: string, raw: unknown): Result<FilterCondition[]> {
+  // Scalar shorthand → eq
+  if (typeof raw === 'string' || typeof raw === 'number') {
+    return ok([{ op: 'eq', value: raw }]);
+  }
+
+  // Array-of-ops
+  if (Array.isArray(raw)) {
+    if (raw.length === 0) {
+      return singleErr('FILTER_EMPTY_ARRAY', `filter for field "${field}" is an empty array`);
+    }
+    const out: FilterCondition[] = [];
+    for (const item of raw) {
+      const inner = normalizeFilterField(field, item);
+      if (!inner.ok) return inner;
+      out.push(...inner.value);
+    }
+    return ok(out);
+  }
+
+  // Object — must have op
+  if (typeof raw !== 'object' || raw === null) {
+    // Fallback: stringify scalar-ish value → eq
+    return ok([{ op: 'eq', value: String(raw) }]);
+  }
+  const obj = raw as { op?: unknown; value?: unknown };
+  if (typeof obj.op !== 'string') {
+    return singleErr('FILTER_OP_INVALID', `filter for field "${field}" missing or non-string op`);
+  }
+
+  // Between — desugar to [gte, lte]
+  if (obj.op === 'between') {
+    if (!Array.isArray(obj.value) || obj.value.length !== 2) {
+      return singleErr('FILTER_BETWEEN_INVALID', `between for field "${field}" requires a 2-tuple value`);
+    }
+    const [lo, hi] = obj.value as [unknown, unknown];
+    if (lo === undefined || lo === null || hi === undefined || hi === null) {
+      return singleErr('FILTER_BETWEEN_INVALID', `between for field "${field}" has null/undefined bound`);
+    }
+    // Type-homogeneous lo > hi check (strings sort lexically; mixed types pass through).
+    if (typeof lo === 'number' && typeof hi === 'number' && lo > hi) {
+      return singleErr('FILTER_BETWEEN_INVALID', `between for field "${field}": lo (${lo}) > hi (${hi})`);
+    }
+    if (typeof lo === 'string' && typeof hi === 'string' && lo > hi) {
+      return singleErr('FILTER_BETWEEN_INVALID', `between for field "${field}": lo ("${lo}") > hi ("${hi}")`);
+    }
+    return ok([
+      { op: 'gte', value: lo as number | string },
+      { op: 'lte', value: hi as number | string },
+    ]);
+  }
+
+  if (!ATOMIC_FILTER_OPS.has(obj.op)) {
+    return singleErr('FILTER_OP_INVALID', `unknown filter op "${obj.op}" for field "${field}"`);
+  }
+  return ok([obj as FilterCondition]);
+}
+
+export function expandFilters(
+  raw: Record<string, unknown> | undefined,
+): Result<Record<string, FilterCondition[]>> {
+  if (!raw || typeof raw !== 'object') return ok({});
+  const out: Record<string, FilterCondition[]> = {};
+  for (const [field, value] of Object.entries(raw)) {
+    const result = normalizeFilterField(field, value);
+    if (!result.ok) return result;
+    out[field] = result.value;
+  }
+  return ok(out);
+}
+
 export function findDocuments(ctx: EngineContext, query: DocumentQuery): Result<FindResult> {
-  let effectiveQuery = query;
+  // 0.7.1 R2 — validate + expand filters into atomic per-field arrays.
+  const expanded = expandFilters(query.filters as Record<string, unknown> | undefined);
+  if (!expanded.ok) return expanded;
+
+  let effectiveQuery: DocumentQuery = { ...query, filters: expanded.value as any };
   let limitClamped: { requested: number; applied: number } | undefined;
   if (query.limit !== undefined && query.limit > MAX_QUERY_LIMIT) {
     limitClamped = { requested: query.limit, applied: MAX_QUERY_LIMIT };
-    effectiveQuery = { ...query, limit: MAX_QUERY_LIMIT };
+    effectiveQuery = { ...effectiveQuery, limit: MAX_QUERY_LIMIT };
   }
 
   const results = ctx.backend.findDocuments(effectiveQuery);
@@ -290,11 +378,15 @@ export function schemaInfo(ctx: EngineContext, dt: DocType): Result<SchemaInfoRe
 export const UNRESOLVED_GROUP_KEY = '__unresolved__';
 
 export function aggregate(ctx: EngineContext, query: AggregateQuery): Result<AggregateResult> {
-  let effectiveQuery = query;
+  // 0.7.1 R2 — validate + expand filters into atomic per-field arrays.
+  const expanded = expandFilters(query.filters as Record<string, unknown> | undefined);
+  if (!expanded.ok) return expanded;
+
+  let effectiveQuery: AggregateQuery = { ...query, filters: expanded.value as any };
   let limitClamped: { requested: number; applied: number } | undefined;
   if (query.limit !== undefined && query.limit > MAX_AGGREGATE_LIMIT) {
     limitClamped = { requested: query.limit, applied: MAX_AGGREGATE_LIMIT };
-    effectiveQuery = { ...query, limit: MAX_AGGREGATE_LIMIT };
+    effectiveQuery = { ...effectiveQuery, limit: MAX_AGGREGATE_LIMIT };
   }
 
   // R1 — ref-chain groupBy: "ref_field->ref_field->leaf_field". Arbitrary depth.

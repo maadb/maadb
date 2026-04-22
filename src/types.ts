@@ -354,11 +354,26 @@ export type FilterCondition =
   | { op: 'neq'; value: unknown }
   | { op: 'gt' | 'gte' | 'lt' | 'lte'; value: number | string }
   | { op: 'in'; value: unknown[] }
-  | { op: 'contains'; value: string };
+  | { op: 'contains'; value: string }
+  // 0.7.1 R2 — range shortcut. Desugared to [gte, lte] at engine-layer expand time;
+  // backend never sees a between-shaped FilterCondition. `value` is inclusive on
+  // both ends, type-agnostic (dates/numbers/strings sort lexically).
+  | { op: 'between'; value: [number | string, number | string] };
+
+/**
+ * 0.7.1 R2 — filter input accepts composite forms:
+ *   - scalar (shorthand eq): "value", 42
+ *   - single FilterCondition: { op: "eq", value: "x" }
+ *   - array-of-ops: [{op, value}, {op, value}, ...] — AND semantics
+ *   - between shortcut: { op: "between", value: [lo, hi] }
+ * Normalized to Record<string, FilterCondition[]> at engine layer before
+ * reaching the backend. All atomic conditions in the array combine with AND.
+ */
+export type FilterInput = FilterCondition | FilterCondition[] | string | number | unknown;
 
 export interface DocumentQuery {
   docType?: DocType;
-  filters?: Record<string, FilterCondition>;
+  filters?: Record<string, FilterInput>;
   fields?: string[];
   sortBy?: string;
   sortOrder?: 'asc' | 'desc';
