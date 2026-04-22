@@ -283,6 +283,12 @@ export function schemaInfo(ctx: EngineContext, dt: DocType): Result<SchemaInfoRe
   return ok(result);
 }
 
+// 0.7.1 R1 — sentinel group key for records whose ref chain could not be
+// fully resolved at query time (broken ref, null field, missing target).
+// Surfaced as a group so data-quality issues stay visible to the caller
+// rather than silently vanishing.
+export const UNRESOLVED_GROUP_KEY = '__unresolved__';
+
 export function aggregate(ctx: EngineContext, query: AggregateQuery): Result<AggregateResult> {
   let effectiveQuery = query;
   let limitClamped: { requested: number; applied: number } | undefined;
@@ -291,7 +297,210 @@ export function aggregate(ctx: EngineContext, query: AggregateQuery): Result<Agg
     effectiveQuery = { ...query, limit: MAX_AGGREGATE_LIMIT };
   }
 
+  // R1 — ref-chain groupBy: "ref_field->ref_field->leaf_field". Arbitrary depth.
+  // Chain detected by presence of '->' in the groupBy string. Dispatch to chain-aware
+  // path; validate schema chain; aggregate at first hop via backend; resolve remaining
+  // hops in the engine; merge groups that collapse to the same resolved key.
+  if (effectiveQuery.groupBy.includes('->')) {
+    return aggregateWithRefChain(ctx, effectiveQuery, limitClamped);
+  }
+
   const result = ctx.backend.aggregate(effectiveQuery);
+  if (limitClamped) result.limitClamped = limitClamped;
+  return ok(result);
+}
+
+// ---------------------------------------------------------------------------
+// R1 — ref-chain aggregate helpers
+// ---------------------------------------------------------------------------
+
+function splitRefChain(groupBy: string): string[] {
+  return groupBy.split('->').map(s => s.trim());
+}
+
+function validateRefChain(
+  ctx: EngineContext,
+  docTypeArg: DocType | undefined,
+  hops: string[],
+): Result<true> {
+  if (!docTypeArg) {
+    return singleErr('SCHEMA_REF_CHAIN_INVALID', 'ref-chain groupBy requires an explicit docType');
+  }
+  if (hops.length < 2) {
+    return singleErr('SCHEMA_REF_CHAIN_INVALID', 'ref-chain groupBy must have at least two segments');
+  }
+  for (const seg of hops) {
+    if (!seg) return singleErr('SCHEMA_REF_CHAIN_INVALID', 'ref-chain segment is empty');
+  }
+
+  let currentType: DocType = docTypeArg;
+  for (let i = 0; i < hops.length; i++) {
+    const seg = hops[i]!;
+    const schema = ctx.schemaStore.getSchemaForType(currentType);
+    if (!schema) {
+      return singleErr('SCHEMA_REF_CHAIN_INVALID', `no schema for type "${currentType as string}" at segment ${i} (${seg})`);
+    }
+    const field = schema.fields.get(seg);
+    if (!field) {
+      return singleErr('SCHEMA_REF_CHAIN_INVALID', `field "${seg}" not found on type "${currentType as string}"`);
+    }
+    const isLast = i === hops.length - 1;
+    if (!isLast) {
+      if (field.type !== 'ref') {
+        return singleErr('SCHEMA_REF_CHAIN_INVALID', `non-leaf segment "${seg}" must be a ref field on "${currentType as string}" (got ${field.type})`);
+      }
+      if (!field.target) {
+        return singleErr('SCHEMA_REF_CHAIN_INVALID', `ref field "${seg}" on "${currentType as string}" has no target`);
+      }
+      currentType = field.target;
+    } else {
+      // Leaf: allowed to be anything (typically string/enum/number). A leaf ref
+      // is unusual but legal — callers get the target docId as the group key.
+    }
+  }
+  return ok(true);
+}
+
+// Resolve a chain of hops starting from `startDocId`. Returns the leaf value
+// (stringified) or null if any hop fails to resolve (broken ref, missing target,
+// null field value).
+function resolveRefChain(
+  ctx: EngineContext,
+  startDocId: string,
+  hops: string[],
+): string | null {
+  let currentDocId = startDocId;
+  for (let i = 0; i < hops.length; i++) {
+    const field = hops[i]!;
+    const isLast = i === hops.length - 1;
+    const values = ctx.backend.getFieldValues([toDocId(currentDocId)], [field]);
+    const v = values.get(currentDocId)?.[field];
+    if (v === undefined || v === null || v === '') return null;
+    const str = String(v);
+    if (isLast) return str;
+    currentDocId = str;
+  }
+  return null;
+}
+
+interface ChainGroupAccum {
+  count: number;
+  sum: number;     // used for sum + avg
+  min: number;     // used for min
+  max: number;     // used for max
+  minSet: boolean;
+  maxSet: boolean;
+}
+
+function freshAccum(): ChainGroupAccum {
+  return { count: 0, sum: 0, min: 0, max: 0, minSet: false, maxSet: false };
+}
+
+function aggregateWithRefChain(
+  ctx: EngineContext,
+  query: AggregateQuery,
+  limitClamped: { requested: number; applied: number } | undefined,
+): Result<AggregateResult> {
+  const hops = splitRefChain(query.groupBy);
+
+  const validation = validateRefChain(ctx, query.docType, hops);
+  if (!validation.ok) return validation;
+
+  // Aggregate at first hop (which we've validated is a ref field on query.docType).
+  // Pull enough groups that the limit clamp still applies after merge — ask for
+  // a generous page since multiple first-hop groups can collapse to one resolved
+  // key. MAX_AGGREGATE_LIMIT caps the underlying scan at 2000 rows.
+  const firstHop = hops[0]!;
+  const remainingHops = hops.slice(1);
+  const requestedFinalLimit = query.limit ?? 50;
+
+  const firstHopQuery: AggregateQuery = {
+    groupBy: firstHop,
+    limit: MAX_AGGREGATE_LIMIT,
+  };
+  if (query.docType !== undefined) firstHopQuery.docType = query.docType;
+  if (query.metric !== undefined) firstHopQuery.metric = query.metric;
+  if (query.filters !== undefined) firstHopQuery.filters = query.filters;
+
+  const firstHopResult = ctx.backend.aggregate(firstHopQuery);
+
+  // Resolve each first-hop group (target docId) to a final leaf key; merge
+  // accumulators across groups that resolve to the same key.
+  const merged = new Map<string, ChainGroupAccum>();
+  let unresolvedCount = 0;
+
+  for (const group of firstHopResult.groups) {
+    const resolved = resolveRefChain(ctx, group.value, remainingHops);
+    const key = resolved ?? UNRESOLVED_GROUP_KEY;
+    if (resolved === null) unresolvedCount++;
+
+    const acc = merged.get(key) ?? freshAccum();
+    acc.count += group.count;
+
+    if (query.metric) {
+      const m = group.metric ?? 0;
+      if (query.metric.op === 'sum') {
+        acc.sum += m;
+      } else if (query.metric.op === 'avg') {
+        // Reconstruct per-group sum = avg * count, then re-divide at finalize.
+        acc.sum += m * group.count;
+      } else if (query.metric.op === 'min') {
+        acc.min = acc.minSet ? Math.min(acc.min, m) : m;
+        acc.minSet = true;
+      } else if (query.metric.op === 'max') {
+        acc.max = acc.maxSet ? Math.max(acc.max, m) : m;
+        acc.maxSet = true;
+      }
+      // count op: tracked in acc.count directly.
+    }
+
+    merged.set(key, acc);
+  }
+
+  if (unresolvedCount > 0) {
+    logger.bestEffort('reads', 'aggregate.refChain',
+      `${unresolvedCount} first-hop group(s) fell through to ${UNRESOLVED_GROUP_KEY} (broken ref or null target)`,
+      { docType: String(query.docType), chain: hops.join('->'), unresolvedGroups: unresolvedCount });
+  }
+
+  // Finalize: compute metric values per merged group.
+  const finalGroups: Array<{ value: string; count: number; metric?: number | null }> = [];
+  for (const [key, acc] of merged.entries()) {
+    let metric: number | null | undefined;
+    if (query.metric) {
+      switch (query.metric.op) {
+        case 'count': metric = acc.count; break;
+        case 'sum':   metric = acc.sum; break;
+        case 'avg':   metric = acc.count > 0 ? acc.sum / acc.count : null; break;
+        case 'min':   metric = acc.minSet ? acc.min : null; break;
+        case 'max':   metric = acc.maxSet ? acc.max : null; break;
+      }
+    }
+    const g: { value: string; count: number; metric?: number | null } = { value: key, count: acc.count };
+    if (metric !== undefined) g.metric = metric;
+    finalGroups.push(g);
+  }
+
+  // Sort to match backend behavior: metric desc when a metric is set, count desc otherwise.
+  finalGroups.sort((a, b) => {
+    const aVal = query.metric ? (a.metric ?? 0) : a.count;
+    const bVal = query.metric ? (b.metric ?? 0) : b.count;
+    return (bVal as number) - (aVal as number);
+  });
+
+  // Apply user's requested limit at the final (merged) stage.
+  const limited = finalGroups.slice(0, requestedFinalLimit);
+
+  const total = limited.reduce((s, g) => s + g.count, 0);
+
+  const result: AggregateResult = { groups: limited, total };
+
+  // totalMetric: only semantically meaningful for sum / count. For avg/min/max,
+  // a post-merge "total" is not defined — omit rather than emit a misleading number.
+  if (query.metric && (query.metric.op === 'sum' || query.metric.op === 'count')) {
+    result.totalMetric = limited.reduce((s, g) => s + ((g.metric as number) ?? 0), 0);
+  }
+
   if (limitClamped) result.limitClamped = limitClamped;
   return ok(result);
 }

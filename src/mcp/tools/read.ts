@@ -122,10 +122,10 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
   }));
 
   server.registerTool('maad_aggregate', {
-    description: 'Groups documents by a field and optionally computes a metric (count/sum/avg/min/max) on another field. Examples: count cases by status, sum claim_amount by attorney, avg amount by year.',
+    description: 'Groups documents by a field and optionally computes a metric (count/sum/avg/min/max) on another field. Supports multi-hop ref chains in groupBy (e.g. "client->industry") for cross-doctype aggregates — resolves refs at query time, merges groups that collapse to the same leaf value. Use instead of iterating records for totals.',
     inputSchema: z.object({
-      docType: z.string().optional().describe('Document type to scope (optional)'),
-      groupBy: z.string().describe('Field name to group by (e.g. "status", "assigned_attorney")'),
+      docType: z.string().optional().describe('Document type to scope (optional; required for ref-chain groupBy)'),
+      groupBy: z.string().describe('Field name or ref chain to group by. Single field: "status". Multi-hop chain: "client_id->industry" or "case_id->account_id->name". Each non-leaf segment must be a ref field on its parent type.'),
       metric: z.object({
         field: z.string().describe('Field to aggregate (must be indexed, numeric for sum/avg/min/max)'),
         op: z.enum(['count', 'sum', 'avg', 'min', 'max']).describe('Aggregation operation'),
