@@ -61,7 +61,7 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
   }));
 
   server.registerTool('maad_health', {
-    description: 'Returns engine health status plus transport posture, session telemetry, and instance reload stats: initialized, read-only mode, git availability, document count, last indexed timestamp, provenance mode, recovery actions, transport {kind,host?,port?,uptimeSeconds}, sessions {active,pinned,openedTotal,closedTotal,lastOpenedAt,lastClosedAt,idleSweepLastRunAt}, instance {source,configPath?,projectCount,lastReloadAt?,reloadsAttempted,reloadsSucceeded,reloadsFailed,projectsAdded,projectsRemoved}.',
+    description: 'Engine health + transport + session telemetry + instance reload stats. sessions block: {active, pinned, subscribed, byProject: {<project>:{<role>:count}}, byIdentity: {<agent_id|anonymous>:count}, ...lifecycle counters}. instance block: {source, configPath?, projectCount, reload counters}.',
     inputSchema: z.object({
       project: z.string().optional().describe('Project name (multi-project mode only)'),
     }),
@@ -81,6 +81,23 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
     // full inventory is the admin-only maad_subscriptions tool.
     const subscribedCount = ctx.sessions.snapshot().filter(s => s.subscription !== undefined).length;
 
+    // 0.7.0 — byProject + byIdentity aggregates (spec v2 fix #4: byProject
+    // replaces the ambiguous flat byRole because multi-project sessions
+    // carry different roles per project). byProject counts session×project
+    // pairs grouped by role so the inner sums can exceed `active` when
+    // multi-mode sessions exist. byIdentity counts DISTINCT sessions per
+    // agent_id; sessions with no token bucket under 'anonymous'.
+    const byProject: Record<string, Record<string, number>> = {};
+    const byIdentity: Record<string, number> = {};
+    for (const state of ctx.sessions.snapshot()) {
+      for (const [projectName, role] of state.effectiveRoles) {
+        const bucket = byProject[projectName] ?? (byProject[projectName] = {});
+        bucket[role] = (bucket[role] ?? 0) + 1;
+      }
+      const ident = state.token?.agentId ?? 'anonymous';
+      byIdentity[ident] = (byIdentity[ident] ?? 0) + 1;
+    }
+
     // 0.6.9 — instance reload stats, always included. Operators watching
     // hot-reload behavior (cohort expansion, tenant churn) filter on this
     // block to verify their last reload landed + projectCount is current.
@@ -99,8 +116,8 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
     };
 
     const sessionsBlock = telemetry
-      ? { ...telemetry.sessions, subscribed: subscribedCount }
-      : { subscribed: subscribedCount };
+      ? { ...telemetry.sessions, subscribed: subscribedCount, byProject, byIdentity }
+      : { subscribed: subscribedCount, byProject, byIdentity };
     const payload = telemetry
       ? { ...health, provenance: provMode, transport: telemetry.transport, sessions: sessionsBlock, instance: instanceBlock }
       : { ...health, provenance: provMode, sessions: sessionsBlock, instance: instanceBlock };
