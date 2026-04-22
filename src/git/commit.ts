@@ -15,6 +15,19 @@ import type { SimpleGit } from 'simple-git';
 import type { DocId, DocType, CommitSha } from '../types.js';
 import { commitSha } from '../types.js';
 
+/**
+ * 0.7.0 — Identity snapshot for commit-message enrichment. Populated from
+ * the session's token when `MAAD_COMMIT_IDENTITY` is on (default true in
+ * 0.7.0 per dec-maadb-071 since fup-066 resolved). Set to false in the
+ * deploy env to opt out for cautious deployments.
+ */
+export interface CommitIdentity {
+  role: string;
+  tokenId?: string;
+  agentId?: string;
+  userId?: string;
+}
+
 export interface CommitOptions {
   action: 'create' | 'update' | 'delete';
   docId: DocId;
@@ -22,6 +35,7 @@ export interface CommitOptions {
   detail: string;
   summary: string;
   files: string[];
+  identity?: CommitIdentity;
 }
 
 /**
@@ -35,9 +49,27 @@ export type CommitOutcome =
   | { status: 'failed'; code: string; message: string };
 
 // Format: maad:<action> <doc_id> [<doc_type>] <detail> — <summary>
+// With identity (0.7.0 MAAD_COMMIT_IDENTITY=true): title unchanged, body
+// appended with role/token/agent/user lines so `git log --grep` queries on
+// identity stay simple without polluting the summary line.
 export function formatCommitMessage(opts: CommitOptions): string {
   const detail = opts.detail ? `${opts.detail} ` : '';
-  return `maad:${opts.action} ${opts.docId as string} [${opts.docType as string}] ${detail}— ${opts.summary}`;
+  const title = `maad:${opts.action} ${opts.docId as string} [${opts.docType as string}] ${detail}— ${opts.summary}`;
+  if (!opts.identity) return title;
+  const lines = [`role: ${opts.identity.role}`];
+  if (opts.identity.tokenId !== undefined) lines.push(`token: ${opts.identity.tokenId}`);
+  if (opts.identity.agentId !== undefined) lines.push(`agent: ${opts.identity.agentId}`);
+  if (opts.identity.userId !== undefined) lines.push(`user: ${opts.identity.userId}`);
+  return `${title}\n\n${lines.join('\n')}`;
+}
+
+/**
+ * 0.7.0 — Default ON in 0.7.0 per dec-maadb-071 (fup-066 resolved in 0.6.10
+ * removed the silent-commit-failure concern that gated this). Operators opt
+ * out with MAAD_COMMIT_IDENTITY=false.
+ */
+export function isCommitIdentityEnabled(): boolean {
+  return process.env['MAAD_COMMIT_IDENTITY'] !== 'false';
 }
 
 // Parse a structured commit message back into components

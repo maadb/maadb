@@ -25,6 +25,7 @@ import { getRateLimiter } from './rate-limit.js';
 import { logToolCall, getOpsLog } from '../logging.js';
 import { isShuttingDown } from './shutdown.js';
 import { getKindForTool, isEngineLess } from './kinds.js';
+import { isCommitIdentityEnabled, type CommitIdentity } from '../git/commit.js';
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 
@@ -40,6 +41,14 @@ interface CallContext {
   projectRoot: string;
   sessionId: string;
   requestId: string;
+  /**
+   * 0.7.0 — Identity snapshot for audit + commit propagation. `role` is the
+   * effective role resolved for this (session × project). `token` is
+   * populated when the session was authenticated via the HTTP+registry path;
+   * undefined for stdio / synthetic mode.
+   */
+  role: string;
+  token?: import('../auth/types.js').TokenRecord;
 }
 
 type McpToolResponse = { content: Array<{ type: 'text'; text: string }> };
@@ -199,11 +208,33 @@ export async function withEngine(
       projectRoot: project.path,
       sessionId,
       requestId,
+      role: effectiveRole,
     };
+    if (state.token !== undefined) callCtx.token = state.token;
     const invokeHandler = (): Promise<McpToolResponse> => Promise.resolve(handler(callCtx));
+    // 0.7.0 — For writes under an authenticated session with the identity
+    // flag on, set the engine's pending commit-identity slot inside the
+    // write mutex. This survives the full handler scope; cleared in finally.
+    // AsyncLocalStorage-based reentrancy means inner engine.createDocument
+    // calls reuse the already-held mutex, so the slot is safe.
+    const runWithIdentity = async (): Promise<McpToolResponse> => {
+      const engine = poolResult.value;
+      if (state.token && isCommitIdentityEnabled()) {
+        const identity: CommitIdentity = { role: effectiveRole };
+        identity.tokenId = state.token.id as string;
+        if (state.token.agentId !== undefined) identity.agentId = state.token.agentId;
+        if (state.token.userId !== undefined) identity.userId = state.token.userId;
+        engine.setCommitIdentity(identity);
+      }
+      try {
+        return await invokeHandler();
+      } finally {
+        engine.setCommitIdentity(undefined);
+      }
+    };
     const handlerPromise: Promise<McpToolResponse> =
       kind === 'write'
-        ? poolResult.value.runExclusive(toolName, invokeHandler)
+        ? poolResult.value.runExclusive(toolName, runWithIdentity)
         : invokeHandler();
 
     let timedOut = false;

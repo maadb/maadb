@@ -131,6 +131,11 @@ export class MaadEngine {
   private gitLayer: GitLayer | null = null;
   private journal!: OperationJournal;
   private commitFailures: CommitFailureTracker = newCommitFailureTracker();
+  // 0.7.0 — pending commit identity set per-operation by the MCP `withEngine`
+  // wrapper inside the write mutex (safe because write mutex serializes all
+  // mutations on this engine instance). Cleared after each op. Engine-level
+  // direct callers (CLI, tests) don't touch this; commit messages stay bare.
+  private pendingCommitIdentity: import('../git/commit.js').CommitIdentity | undefined = undefined;
   private initialized = false;
   private _readOnly = false;
   private startupRecovery: string[] = [];
@@ -425,7 +430,18 @@ export class MaadEngine {
       journal: this.journal,
       readOnly: this._readOnly,
       commitFailures: this.commitFailures,
+      ...(this.pendingCommitIdentity !== undefined ? { commitIdentity: this.pendingCommitIdentity } : {}),
     };
+  }
+
+  /**
+   * 0.7.0 — Set the identity slot used by the next git commit under the
+   * write mutex. Caller MUST be inside `runExclusive` so no concurrent
+   * writer can stomp the slot. `withEngine` (MCP layer) brackets set/clear
+   * around each write handler; clear with setCommitIdentity(undefined).
+   */
+  setCommitIdentity(identity: import('../git/commit.js').CommitIdentity | undefined): void {
+    this.pendingCommitIdentity = identity;
   }
 
   private assertInit(): void {

@@ -130,6 +130,12 @@ export interface WriteAuditFields {
   version_after: number | null;
   changed_fields: string[];
   git_commit: string | null;
+  // 0.7.0 — identity fields populated when the session carries a token
+  // (HTTP+registry mode). Undefined in stdio / synthetic / legacy paths.
+  token_id?: string;
+  agent_id?: string;
+  user_id?: string;
+  role?: string;
 }
 
 export function logWriteAudit(fields: WriteAuditFields): void {

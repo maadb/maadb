@@ -46,6 +46,10 @@ interface AuditContext {
   projectName: string;
   tool: string;
   docType?: string;
+  // 0.7.0 — identity snapshot from the session's token (undefined in
+  // stdio/synthetic mode). Propagates to audit events.
+  token?: import('../../auth/types.js').TokenRecord;
+  role?: string;
 }
 
 function logWarnings(
@@ -80,7 +84,7 @@ function auditSingleWrite(
   result: { docId?: string | unknown; version?: number; changedFields?: string[] },
   versionBefore: number | null,
 ): void {
-  logWriteAudit({
+  const fields: Parameters<typeof logWriteAudit>[0] = {
     request_id: audit.requestId,
     session_id: audit.sessionId,
     project: audit.projectName,
@@ -91,7 +95,14 @@ function auditSingleWrite(
     version_after: result.version ?? null,
     changed_fields: result.changedFields ?? [],
     git_commit: null,
-  });
+  };
+  if (audit.token) {
+    fields.token_id = audit.token.id;
+    if (audit.token.agentId !== undefined) fields.agent_id = audit.token.agentId;
+    if (audit.token.userId !== undefined) fields.user_id = audit.token.userId;
+  }
+  if (audit.role !== undefined) fields.role = audit.role;
+  logWriteAudit(fields);
 }
 
 /** Audit a successful bulk write. */
@@ -100,7 +111,7 @@ function auditBulkWrite(
   result: { succeeded: Array<{ docId: string; version?: number }> },
 ): void {
   const docIds = result.succeeded.map((s) => s.docId);
-  logWriteAudit({
+  const fields: Parameters<typeof logWriteAudit>[0] = {
     request_id: audit.requestId,
     session_id: audit.sessionId,
     project: audit.projectName,
@@ -112,7 +123,14 @@ function auditBulkWrite(
     version_after: null,
     changed_fields: [],
     git_commit: null,
-  });
+  };
+  if (audit.token) {
+    fields.token_id = audit.token.id;
+    if (audit.token.agentId !== undefined) fields.agent_id = audit.token.agentId;
+    if (audit.token.userId !== undefined) fields.user_id = audit.token.userId;
+  }
+  if (audit.role !== undefined) fields.role = audit.role;
+  logWriteAudit(fields);
 }
 
 export function register(server: McpServer, ctx: InstanceCtx): number {
@@ -126,7 +144,7 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
       project: z.string().optional().describe('Project name (multi-project mode only)'),
       idempotencyKey: z.string().max(128).optional().describe('Opaque client-supplied key; scopes (project, tool, key) and dedupes retries within TTL'),
     }),
-  }, async (args, extra) => withEngine(ctx, extra, 'maad_create', args, async ({ engine, projectName, sessionId, requestId }) =>
+  }, async (args, extra) => withEngine(ctx, extra, 'maad_create', args, async ({ engine, projectName, sessionId, requestId, role, token }) =>
     withIdempotency(projectName, 'maad_create', args.idempotencyKey, requestId, async () => {
       const rateRejection = checkWriteRate(sessionId, 'maad_create');
       if (rateRejection) return rateRejection;
@@ -141,7 +159,8 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
         args.docId ?? undefined,
       );
       if (result.ok) {
-        const ctxAudit = { requestId, sessionId, projectName, tool: 'maad_create', docType: args.docType };
+        const ctxAudit: AuditContext = { requestId, sessionId, projectName, tool: 'maad_create', docType: args.docType, role };
+        if (token !== undefined) ctxAudit.token = token;
         auditSingleWrite(
           ctxAudit,
           result.value as { docId?: unknown; version?: number; changedFields?: string[] },
@@ -176,7 +195,7 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
       project: z.string().optional().describe('Project name (multi-project mode only)'),
       idempotencyKey: z.string().max(128).optional().describe('Opaque client-supplied key; scopes (project, tool, key) and dedupes retries within TTL'),
     }),
-  }, async (args, extra) => withEngine(ctx, extra, 'maad_update', args, async ({ engine, projectName, sessionId, requestId }) =>
+  }, async (args, extra) => withEngine(ctx, extra, 'maad_update', args, async ({ engine, projectName, sessionId, requestId, role, token }) =>
     withIdempotency(projectName, 'maad_update', args.idempotencyKey, requestId, async () => {
       const rateRejection = checkWriteRate(sessionId, 'maad_update');
       if (rateRejection) return rateRejection;
@@ -194,7 +213,8 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
       if (result.ok) {
         const value = result.value as { docId?: unknown; version?: number; changedFields?: string[] };
         const versionBefore = typeof value.version === 'number' ? value.version - 1 : null;
-        const ctxAudit = { requestId, sessionId, projectName, tool: 'maad_update' };
+        const ctxAudit: AuditContext = { requestId, sessionId, projectName, tool: 'maad_update', role };
+        if (token !== undefined) ctxAudit.token = token;
         auditSingleWrite(ctxAudit, value, versionBefore);
         logWarnings(ctxAudit, String((result.value as UpdateResult).docId ?? ''), (result.value as UpdateResult).validation.warnings);
       }
@@ -242,7 +262,7 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
       project: z.string().optional().describe('Project name (multi-project mode only)'),
       idempotencyKey: z.string().max(128).optional().describe('Opaque client-supplied key; scopes (project, tool, key) and dedupes retries within TTL'),
     }),
-  }, async (args, extra) => withEngine(ctx, extra, 'maad_bulk_create', args, async ({ engine, projectName, sessionId, requestId }) =>
+  }, async (args, extra) => withEngine(ctx, extra, 'maad_bulk_create', args, async ({ engine, projectName, sessionId, requestId, role, token }) =>
     withIdempotency(projectName, 'maad_bulk_create', args.idempotencyKey, requestId, async () => {
       const rateRejection = checkWriteRate(sessionId, 'maad_bulk_create');
       if (rateRejection) return rateRejection;
@@ -251,7 +271,8 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
       const result = await engine.bulkCreate(args.records as any);
       if (result.ok) {
         const bulk = result.value as BulkResult;
-        const ctxAudit = { requestId, sessionId, projectName, tool: 'maad_bulk_create' };
+        const ctxAudit: AuditContext = { requestId, sessionId, projectName, tool: 'maad_bulk_create', role };
+        if (token !== undefined) ctxAudit.token = token;
         if (bulk.succeeded.length > 0) {
           auditBulkWrite(ctxAudit, bulk);
         }
@@ -288,7 +309,7 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
       project: z.string().optional().describe('Project name (multi-project mode only)'),
       idempotencyKey: z.string().max(128).optional().describe('Opaque client-supplied key; scopes (project, tool, key) and dedupes retries within TTL'),
     }),
-  }, async (args, extra) => withEngine(ctx, extra, 'maad_bulk_update', args, async ({ engine, projectName, sessionId, requestId }) =>
+  }, async (args, extra) => withEngine(ctx, extra, 'maad_bulk_update', args, async ({ engine, projectName, sessionId, requestId, role, token }) =>
     withIdempotency(projectName, 'maad_bulk_update', args.idempotencyKey, requestId, async () => {
       const rateRejection = checkWriteRate(sessionId, 'maad_bulk_update');
       if (rateRejection) return rateRejection;
@@ -297,7 +318,8 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
       const result = await engine.bulkUpdate(args.updates as any);
       if (result.ok) {
         const bulk = result.value as BulkResult;
-        const ctxAudit = { requestId, sessionId, projectName, tool: 'maad_bulk_update' };
+        const ctxAudit: AuditContext = { requestId, sessionId, projectName, tool: 'maad_bulk_update', role };
+        if (token !== undefined) ctxAudit.token = token;
         if (bulk.succeeded.length > 0) {
           auditBulkWrite(ctxAudit, bulk);
         }

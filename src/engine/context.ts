@@ -5,6 +5,7 @@
 import type { Registry, SchemaStore } from '../types.js';
 import type { MaadBackend } from '../backend/index.js';
 import type { GitLayer, CommitOptions, CommitOutcome } from '../git/index.js';
+import type { CommitIdentity } from '../git/commit.js';
 import type { OperationJournal } from './journal.js';
 import { logger } from './logger.js';
 import { logCommitFailure } from '../logging.js';
@@ -44,6 +45,13 @@ export interface EngineContext {
   journal: OperationJournal;
   readOnly: boolean;
   commitFailures: CommitFailureTracker;
+  /**
+   * 0.7.0 — Identity snapshot set per-operation by the MCP layer inside the
+   * write mutex. When populated AND MAAD_COMMIT_IDENTITY is not "false",
+   * gitCommit passes it through to the commit builder so commit messages
+   * get role/token/agent/user lines appended.
+   */
+  commitIdentity?: CommitIdentity;
 }
 
 /**
@@ -56,7 +64,13 @@ export interface EngineContext {
  */
 export async function gitCommit(ctx: EngineContext, opts: CommitOptions): Promise<CommitOutcome> {
   if (!ctx.gitLayer) return { status: 'noop' };
-  const outcome = await ctx.gitLayer.commit(opts);
+  // 0.7.0 — Thread commit identity through when set by the MCP layer.
+  // Engine-level direct callers (CLI imports, tests) leave ctx.commitIdentity
+  // undefined; formatCommitMessage then emits the bare title.
+  const enriched: CommitOptions = ctx.commitIdentity !== undefined
+    ? { ...opts, identity: ctx.commitIdentity }
+    : opts;
+  const outcome = await ctx.gitLayer.commit(enriched);
   if (outcome.status === 'failed') {
     ctx.commitFailures.count++;
     ctx.commitFailures.lastAt = new Date().toISOString();
