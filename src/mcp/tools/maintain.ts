@@ -62,7 +62,7 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
   }));
 
   server.registerTool('maad_health', {
-    description: 'Engine health + transport + session telemetry + instance reload stats. sessions block: {active, pinned, subscribed, byProject: {<project>:{<role>:count}}, byIdentity: {<agent_id|anonymous>:count}, ...lifecycle counters}. instance block: {source, configPath?, projectCount, reload counters}. runtime block: {memoryPressure: {enabled, intervalMs, thresholdRatio, lastSampleAt, heapUsedMb, heapCapMb, ratio, inPressure, lastPressureAt, pressureFiresTotal}}.',
+    description: 'Engine health + transport + session telemetry + instance reload stats. sessions block: {active, pinned, subscribed, byProject: {<project>:{<role>:count}}, byIdentity: {<agent_id|anonymous>:count}, ...lifecycle counters}. instance block: {source, configPath?, projectCount, reload counters}. runtime block: {memoryPressure: {enabled, intervalMs, thresholdRatio, lastSampleAt, heapUsedMb, heapCapMb, heapRatio, rssMb, externalMb, arrayBuffersMb, cgroupCurrentMb, cgroupMaxMb, cgroupRatio, inPressure, heapInPressure, cgroupInPressure, lastPressureAt, pressureFiresTotal}}.',
     inputSchema: z.object({
       project: z.string().optional().describe('Project name (multi-project mode only)'),
     }),

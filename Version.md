@@ -1,9 +1,15 @@
 ---
 enabled: true
-current: 0.7.10-rc.4
+current: 0.7.10-rc.5
 ---
 
 # Version History
+
+## 0.7.10-rc.5 — 2026-05-18
+
+Runtime memory-pressure observability now covers the kernel/cgroup OOM class, not only V8 heap pressure. `src/mcp/memory-pressure.ts` samples `process.memoryUsage()` RSS, external, and arrayBuffer bytes alongside V8 heap usage, reads cgroup v2/v1 memory current/max when available, and fires the existing `engine.memory_pressure` ops event when either V8 heap ratio or cgroup memory ratio crosses the configured threshold. `maad_health.runtime.memoryPressure` now includes `heapRatio`, `rssMb`, `externalMb`, `arrayBuffersMb`, `cgroupCurrentMb`, `cgroupMaxMb`, `cgroupRatio`, `heapInPressure`, and `cgroupInPressure` while keeping `ratio` as the heap-ratio compatibility alias.
+
+This specifically closes the observability gap for exit-137 kernel OOM kills where V8 stays below its own heap cap but off-heap/native/RSS memory exhausts the container cgroup. It is still observability, not the storage/query memory fix.
 
 ## 0.7.10-rc.4 — 2026-05-18
 Index-driven broken_refs check — collapses the per-call working-set floor.

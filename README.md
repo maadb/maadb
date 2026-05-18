@@ -5,7 +5,7 @@
 [![TypeScript](https://img.shields.io/badge/typescript-strict-blue.svg)](tsconfig.json)
 [![Tests](https://img.shields.io/badge/tests-873%20passing-brightgreen.svg)](tests)
 [![npm](https://img.shields.io/npm/v/@maadb/core.svg)](https://www.npmjs.com/package/@maadb/core)
-[![Version](https://img.shields.io/badge/version-0.7.10--rc.4-purple.svg)](Version.md)
+[![Version](https://img.shields.io/badge/version-0.7.10--rc.5-purple.svg)](Version.md)
 
 > **Markdown is the database. The engine makes it queryable.**
 
@@ -348,7 +348,7 @@ In multi-project mode, session tools are always available pre-bind: `maad_projec
 
 ## Current state
 
-**Current:** v0.7.9 — First npm publish via Trusted Publishers (OIDC). Package now installable as `@maadb/core`. No engine code changes.
+**Current:** v0.7.10-rc.5 — Runtime memory-pressure observability now covers both V8 heap pressure and cgroup/RSS pressure. Published pre-release builds use the npm `next` dist-tag; stable users continue to receive 0.7.9 on `latest`.
 
 Recent shipped scope:
 - **0.7.8** — Repository hygiene, dependency tightening, Node 24 baseline
