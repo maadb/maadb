@@ -53,13 +53,72 @@ export function requireConfirm(args: { confirm?: unknown }): MaadError | null {
  * Log every tool call for audit trail. Optional `extras` lets destructive
  * tools stamp confirm_mode (and future fields) on the audit payload without
  * needing a separate writer.
+ *
+ * **Logging contract.** Pino is telemetry, not a content archive. Raw document
+ * bodies live in MAADB storage + git history; this helper projects body and
+ * appendBody fields into byte counts (`bodyBytes`, `appendBodyBytes`) before
+ * the log line is emitted. Frontmatter `fields` objects collapse to
+ * `fieldNames` (keys only — values stay out of pino). Bulk `records` /
+ * `updates` arrays collapse to counts and per-element body byte counts.
+ * Other small scalars (docId, docType, project, expectedVersion,
+ * idempotencyKey, confirm) pass through verbatim. The pino layer also redacts
+ * any leftover `args.body` / `args.appendBody` / `args.records[*].body` etc.
+ * paths as defense in depth (see src/logging.ts REDACT_PATHS).
  */
 export function auditToolCall(
   toolName: string,
   args: Record<string, unknown>,
   extras?: Record<string, unknown>,
 ): void {
-  logger.info('mcp', 'tool_call', `${toolName}`, extras ? { args, ...extras } : { args });
+  const projected = projectAuditArgs(args);
+  logger.info('mcp', 'tool_call', `${toolName}`, extras ? { args: projected, ...extras } : { args: projected });
+}
+
+function projectAuditArgs(args: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(args)) {
+    if (k === 'body' && typeof v === 'string') {
+      out.bodyBytes = Buffer.byteLength(v, 'utf8');
+      continue;
+    }
+    if (k === 'appendBody' && typeof v === 'string') {
+      out.appendBodyBytes = Buffer.byteLength(v, 'utf8');
+      continue;
+    }
+    if (k === 'fields' && v && typeof v === 'object' && !Array.isArray(v)) {
+      out.fieldNames = Object.keys(v as Record<string, unknown>);
+      continue;
+    }
+    if (k === 'records' && Array.isArray(v)) {
+      out.recordCount = v.length;
+      out.recordBodyBytes = v.reduce((sum: number, r: unknown) => {
+        if (r && typeof r === 'object') {
+          const body = (r as Record<string, unknown>).body;
+          if (typeof body === 'string') return sum + Buffer.byteLength(body, 'utf8');
+        }
+        return sum;
+      }, 0);
+      continue;
+    }
+    if (k === 'updates' && Array.isArray(v)) {
+      out.updateCount = v.length;
+      let body = 0;
+      let append = 0;
+      for (const u of v) {
+        if (u && typeof u === 'object') {
+          const b = (u as Record<string, unknown>).body;
+          const a = (u as Record<string, unknown>).appendBody;
+          if (typeof b === 'string') body += Buffer.byteLength(b, 'utf8');
+          if (typeof a === 'string') append += Buffer.byteLength(a, 'utf8');
+        }
+      }
+      out.updateBodyBytes = body;
+      out.updateAppendBodyBytes = append;
+      continue;
+    }
+    out[k] = v;
+  }
+  return out;
 }
 
 /**

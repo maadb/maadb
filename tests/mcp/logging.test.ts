@@ -161,6 +161,57 @@ describe('logging', () => {
     expect(args.bearer).toBe('[redacted]');
   });
 
+  // ---- L5c — document body redaction (fup-2026-05-19-maadb-pino-redact-write-bodies)
+  // Defense-in-depth. The canonical path is auditToolCall projecting body fields
+  // into byte counts before they reach pino — these tests assert that even if
+  // a caller bypasses that projection and writes a raw body into a log payload,
+  // pino strips it at the transport boundary.
+
+  it('L5c — args.body is redacted at the pino layer', () => {
+    getOpsLog().info(
+      { args: { docType: 'client', body: 'raw markdown body that should never appear in logs' } },
+      'tool_call',
+    );
+    const args = ops.lines[0]!.args as { docType: string; body: string };
+    expect(args.docType).toBe('client');
+    expect(args.body).toBe('[redacted]');
+  });
+
+  it('L5d — args.appendBody is redacted at the pino layer', () => {
+    getOpsLog().info({ args: { docId: 'cli-x', appendBody: 'appended secret' } }, 'tool_call');
+    const args = ops.lines[0]!.args as { docId: string; appendBody: string };
+    expect(args.docId).toBe('cli-x');
+    expect(args.appendBody).toBe('[redacted]');
+  });
+
+  it('L5e — args.records[*].body and args.updates[*].body/appendBody are redacted', () => {
+    getOpsLog().info(
+      {
+        args: {
+          records: [
+            { docType: 'client', body: 'r0 body' },
+            { docType: 'client', body: 'r1 body' },
+          ],
+          updates: [
+            { docId: 'a', body: 'u0 body' },
+            { docId: 'b', appendBody: 'u1 append' },
+          ],
+        },
+      },
+      'tool_call',
+    );
+    const args = ops.lines[0]!.args as {
+      records: Array<{ docType: string; body: string }>;
+      updates: Array<{ docId: string; body?: string; appendBody?: string }>;
+    };
+    expect(args.records[0]!.body).toBe('[redacted]');
+    expect(args.records[1]!.body).toBe('[redacted]');
+    expect(args.records[0]!.docType).toBe('client'); // siblings untouched
+    expect(args.updates[0]!.body).toBe('[redacted]');
+    expect(args.updates[1]!.appendBody).toBe('[redacted]');
+    expect(args.updates[0]!.docId).toBe('a');
+  });
+
   // ---- L6 — level gating ---------------------------------------------------
 
   it('L6 — MAAD_LOG_LEVEL=warn silences info-level ops lines', () => {

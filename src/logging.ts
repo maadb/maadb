@@ -19,13 +19,33 @@
 import pino, { type Logger, type DestinationStream } from 'pino';
 import { createWriteStream } from 'node:fs';
 
+// Pino redact paths. Two classes:
+//
+//   1. Auth/secret fields — never appear in logs, regardless of caller.
+//   2. Document body fields — pino is telemetry, NOT a content archive.
+//      Raw document bodies live in MAADB storage + git history; logging them
+//      duplicates durable content into Docker stdout/json logs, creates an
+//      info-disclosure surface for customer/project data, and is a plausible
+//      pino transport / object-retention contributor to load-proportional
+//      native-memory growth. Callers SHOULD project body fields into byte
+//      counts before logging (see src/mcp/guardrails.ts:auditToolCall); these
+//      paths are the belt-and-braces backstop if any path slips past.
 const REDACT_PATHS = [
+  // auth/secret
   'args.authorization',
   'args.token',
   'args.bearer',
   'args.headers.authorization',
   'authorization',
   'headers.authorization',
+  // document bodies — single record
+  'args.body',
+  'args.appendBody',
+  // document bodies — bulk_create
+  'args.records[*].body',
+  // document bodies — bulk_update
+  'args.updates[*].body',
+  'args.updates[*].appendBody',
 ];
 
 export interface LoggingOptions {

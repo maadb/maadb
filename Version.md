@@ -1,9 +1,19 @@
 ---
 enabled: true
-current: 0.7.10-rc.5
+current: 0.7.10-rc.6
 ---
 
 # Version History
+
+## 0.7.10-rc.6 — 2026-05-19
+
+Redact document bodies from pino `tool_call` logs.
+
+Engine `tool_call` ops events previously carried full `args.body` / `args.appendBody` strings for `maad_create` / `maad_update` calls via `auditToolCall` → `engine/logger.ts` → pino. Two problems: (1) duplicates user document content into Docker stdout/json logs, an info-disclosure surface separate from MAADB storage + git history; (2) plausible pino transport / object-retention contributor to load-proportional native-memory growth — engine logged 7–8 KB+ per document write on top of the durable write itself.
+
+Two-layer fix. `src/mcp/guardrails.ts:auditToolCall` now projects body fields into byte counts (`bodyBytes`, `appendBodyBytes`) and collapses `fields` to `fieldNames` (keys only — values stay out of pino); bulk shapes (`records[]`, `updates[]`) collapse to counts plus aggregate body-byte totals. Other scalars (docId, docType, project, expectedVersion, idempotencyKey, confirm) pass through verbatim. `src/logging.ts` REDACT_PATHS gains `args.body`, `args.appendBody`, `args.records[*].body`, `args.updates[*].body`, `args.updates[*].appendBody` as defense-in-depth so any future caller that bypasses the projection helper is still redacted at the pino transport boundary. The logging contract — pino is telemetry, not a content archive — is documented in both files.
+
+885 tests passing (+12 over rc.5 baseline of 873 — 7 new auditToolCall projection tests + 5 new pino-redact-paths tests). No new dependencies. No new env vars. No surface change beyond the redacted log shape. No breaking change for log consumers that filtered on tool/docId/docType (those fields are preserved).
 
 ## 0.7.10-rc.5 — 2026-05-18
 
