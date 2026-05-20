@@ -70,6 +70,15 @@ export interface MaadBackend {
   countBrokenRefs(): number;
 
   /**
+   * 0.7.10 — return soft-deleted records (`deleted = 1`) whose `updated_at`
+   * predates `olderThanIso`. Drives `maad_purge_soft_deleted`. Ordered by
+   * updated_at ASC so the oldest soft-deletes purge first. `limit` caps the
+   * result set so callers can bound blast radius without scanning the full
+   * cemetery; pass a value above the actual count to get everything.
+   */
+  findSoftDeletedBefore(olderThanIso: string, limit: number): DocumentRecord[];
+
+  /**
    * 0.7.10 P5b — return broken-ref rows for the integrity sweep.
    * One row per (source, target, field) where target is missing or
    * soft-deleted. Drives the verifyIntegrity broken_refs category without

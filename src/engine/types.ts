@@ -133,6 +133,34 @@ export interface DeleteResult {
   commitFailure?: CommitFailureDetail;
 }
 
+// ---- 0.7.10 — destructive cleanup primitives ------------------------------
+// maad_bulk_delete / maad_delete_where: confirmed-mutation paths only call
+// the engine when the caller passed confirm:true. Dry-run preview shape is
+// owned by the MCP layer (it returns the would-affect docIds without
+// invoking the engine), so the engine result here covers committed runs.
+
+export interface BulkDeleteResult {
+  succeeded: Array<{ docId: string; docType: string; filePath: string; mode: 'soft' | 'hard' }>;
+  failed: Array<{ docId: string; error: string }>;
+  totalRequested: number;
+  writeDurable: boolean;
+  commitFailure?: CommitFailureDetail;
+}
+
+// maad_purge_soft_deleted: hard-delete every soft-deleted record older than
+// the retention threshold. Records here always purge in hard mode (file +
+// row + cascade). `scanned` is the count of soft-deleted records that
+// matched the retention threshold before maxRecords clipping; gives ops a
+// signal when the cemetery is bigger than the cap.
+export interface PurgeSoftDeletedResult {
+  purged: Array<{ docId: string; docType: string; filePath: string }>;
+  failed: Array<{ docId: string; error: string }>;
+  scanned: number;
+  retentionThresholdIso: string;
+  writeDurable: boolean;
+  commitFailure?: CommitFailureDetail;
+}
+
 // ---- 0.5.0 R5 — changes-since polling delta -------------------------------
 
 export interface ChangesSinceQuery {

@@ -24,6 +24,7 @@ import * as writeTools from '../../src/mcp/tools/write.js';
 import * as auditTools from '../../src/mcp/tools/audit.js';
 import * as maintainTools from '../../src/mcp/tools/maintain.js';
 import * as backupTools from '../../src/mcp/tools/backup.js';
+import * as cleanupTools from '../../src/mcp/tools/cleanup.js';
 import * as instanceTools from '../../src/mcp/tools/instance.js';
 
 // Collect tool names that registerTool is called with on a throwaway server.
@@ -49,7 +50,7 @@ function collectRegisteredNames(register: (s: McpServer, c: InstanceCtx) => void
 describe('OperationKind coverage', () => {
   it('set cardinalities match the documented roster', () => {
     expect(READ_TOOLS.size).toBe(17);
-    expect(WRITE_TOOLS.size).toBe(8);
+    expect(WRITE_TOOLS.size).toBe(11);
     expect(ENGINE_LESS_TOOLS.size).toBe(13);
   });
 
@@ -61,6 +62,7 @@ describe('OperationKind coverage', () => {
       ...collectRegisteredNames(auditTools.register),
       ...collectRegisteredNames(maintainTools.register),
       ...collectRegisteredNames(backupTools.register),
+      ...collectRegisteredNames(cleanupTools.register),
     ];
     for (const name of registered) {
       const kind = getKindForTool(name);

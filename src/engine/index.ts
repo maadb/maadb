@@ -577,6 +577,18 @@ export class MaadEngine {
       () => writes.bulkUpdate(this.ctx(), updates),
     );
   }
+  async bulkDelete(docIds: string[], mode: 'soft' | 'hard') {
+    if (this._readOnly) return singleErr('READ_ONLY', 'Engine is in read-only mode');
+    return this.runExclusive('bulkDelete',
+      () => writes.bulkDelete(this.ctx(), docIds, mode),
+    );
+  }
+  async purgeSoftDeleted(olderThanIso: string, maxRecords: number) {
+    if (this._readOnly) return singleErr('READ_ONLY', 'Engine is in read-only mode');
+    return this.runExclusive('purgeSoftDeleted',
+      () => writes.purgeSoftDeleted(this.ctx(), olderThanIso, maxRecords),
+    );
+  }
 
   // --- Maintenance ---
   async validate(docId?: DocId, options?: maintenance.ValidateOptions) { return maintenance.validate(this.ctx(), docId, options); }

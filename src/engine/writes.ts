@@ -21,7 +21,7 @@ import { validateFrontmatter } from '../schema/index.js';
 import { generateDocument, extractBody } from '../writer/index.js';
 import type { EngineContext } from './context.js';
 import { gitCommit } from './context.js';
-import type { CreateResult, UpdateResult, DeleteResult, BulkCreateInput, BulkUpdateInput, BulkResult, BulkVerification, CommitFailureDetail } from './types.js';
+import type { CreateResult, UpdateResult, DeleteResult, BulkCreateInput, BulkUpdateInput, BulkResult, BulkVerification, BulkDeleteResult, PurgeSoftDeletedResult, CommitFailureDetail } from './types.js';
 import type { CommitOutcome } from '../git/index.js';
 import type { ValidationWarning } from '../types.js';
 import { indexFile } from './indexing.js';
@@ -283,7 +283,12 @@ export async function updateDocument(
   return ok(result);
 }
 
-export async function deleteDocument(ctx: EngineContext, id: DocId, mode: 'soft' | 'hard'): Promise<Result<DeleteResult>> {
+export async function deleteDocument(
+  ctx: EngineContext,
+  id: DocId,
+  mode: 'soft' | 'hard',
+  skipGit?: boolean | undefined,
+): Promise<Result<DeleteResult>> {
   const doc = ctx.backend.getDocument(id);
   if (!doc) return singleErr('FILE_NOT_FOUND', `Document "${id as string}" not found`);
 
@@ -317,26 +322,28 @@ export async function deleteDocument(ctx: EngineContext, id: DocId, mode: 'soft'
     ctx.backend.putDocument(updatedDoc);
   }
 
-  let commitOutcome: CommitOutcome;
-  if (mode === 'hard') {
-    commitOutcome = await gitCommit(ctx, {
-      action: 'delete',
-      docId: id,
-      docType: doc.docType,
-      detail: 'hard',
-      summary: `Hard deleted ${id as string}`,
-      files: [absPath],
-    });
-  } else {
-    const deletedPath = path.join(path.dirname(absPath), `_deleted_${path.basename(absPath)}`);
-    commitOutcome = await gitCommit(ctx, {
-      action: 'delete',
-      docId: id,
-      docType: doc.docType,
-      detail: 'soft',
-      summary: `Soft deleted ${id as string}`,
-      files: [absPath, deletedPath],
-    });
+  let commitOutcome: CommitOutcome = { status: 'noop' };
+  if (!skipGit) {
+    if (mode === 'hard') {
+      commitOutcome = await gitCommit(ctx, {
+        action: 'delete',
+        docId: id,
+        docType: doc.docType,
+        detail: 'hard',
+        summary: `Hard deleted ${id as string}`,
+        files: [absPath],
+      });
+    } else {
+      const deletedPath = path.join(path.dirname(absPath), `_deleted_${path.basename(absPath)}`);
+      commitOutcome = await gitCommit(ctx, {
+        action: 'delete',
+        docId: id,
+        docType: doc.docType,
+        detail: 'soft',
+        summary: `Soft deleted ${id as string}`,
+        files: [absPath, deletedPath],
+      });
+    }
   }
 
   ctx.journal.advance(journalId, 'committed');
@@ -347,12 +354,93 @@ export async function deleteDocument(ctx: EngineContext, id: DocId, mode: 'soft'
     docType: doc.docType,
     mode,
     filePath: doc.filePath,
+    // In skipGit mode the bulk wrapper owns the commit; the per-record file
+    // mutation is already durable. Bulk path sets its own writeDurable based
+    // on the trailing single commit.
     writeDurable: commitOutcome.status !== 'failed',
   };
   if (commitOutcome.status === 'failed') {
     result.commitFailure = { code: commitOutcome.code, message: commitOutcome.message, action: 'delete' };
   }
   return ok(result);
+}
+
+/**
+ * 0.7.10 — bulk delete with single-commit atomicity. Mirrors the bulkUpdate
+ * pattern: each record runs through deleteDocument with skipGit:true, then
+ * one trailing commit stages every affected path (the renamed `_deleted_*`
+ * for soft, or the unlinked original for hard). Per-record failures collect
+ * and do NOT abort the batch.
+ */
+export async function bulkDelete(
+  ctx: EngineContext,
+  docIds: string[],
+  mode: 'soft' | 'hard',
+): Promise<Result<BulkDeleteResult>> {
+  const succeeded: BulkDeleteResult['succeeded'] = [];
+  const failed: BulkDeleteResult['failed'] = [];
+  const allFiles: string[] = [];
+
+  for (const rawId of docIds) {
+    const id = toDocId(rawId);
+    // Capture the doc BEFORE the delete so we know the original on-disk
+    // path even after a soft-delete rename has moved the row's file_path.
+    const docBefore = ctx.backend.getDocument(id);
+    const originalAbsPath = docBefore
+      ? path.join(ctx.projectRoot, docBefore.filePath as string)
+      : null;
+
+    const result = await deleteDocument(ctx, id, mode, true);
+    if (!result.ok) {
+      failed.push({ docId: rawId, error: result.errors.map(e => e.message).join('; ') });
+      continue;
+    }
+
+    succeeded.push({
+      docId: rawId,
+      docType: result.value.docType as string,
+      filePath: result.value.filePath as string,
+      mode,
+    });
+
+    if (originalAbsPath) {
+      if (mode === 'hard') {
+        allFiles.push(originalAbsPath);
+      } else {
+        const dir = path.dirname(originalAbsPath);
+        const base = path.basename(originalAbsPath);
+        allFiles.push(originalAbsPath);
+        allFiles.push(path.join(dir, `_deleted_${base}`));
+      }
+    }
+  }
+
+  let commitFailure: CommitFailureDetail | undefined;
+  let writeDurable = true;
+  const first = succeeded[0];
+  if (first) {
+    const outcome = await gitCommit(ctx, {
+      action: 'delete',
+      docId: toDocId(first.docId),
+      docType: first.docType as DocType,
+      detail: `bulk:${mode}:${succeeded.length}`,
+      summary: `Bulk ${mode}-deleted ${succeeded.length} records`,
+      files: allFiles,
+    });
+    if (outcome.status === 'failed') {
+      writeDurable = false;
+      commitFailure = { code: outcome.code, message: outcome.message, action: 'delete' };
+    }
+  }
+
+  const out: BulkDeleteResult = {
+    succeeded,
+    failed,
+    totalRequested: docIds.length,
+    writeDurable,
+  };
+  if (commitFailure) out.commitFailure = commitFailure;
+  return ok(out);
 }
 
 // ---- Bulk operations ------------------------------------------------------
@@ -718,4 +806,89 @@ function valuesMatch(expected: unknown, actual: unknown): boolean {
 
   // String fallback
   return String(expected) === String(actual);
+}
+
+/**
+ * 0.7.10 — Hard-delete soft-deleted records older than the retention
+ * threshold. Walks `findSoftDeletedBefore(olderThanIso, maxRecords)`, unlinks
+ * each `_deleted_<file>.md` from disk, removes the row via the backend's
+ * CASCADE-aware `removeDocument` (clears objects / relationships / blocks /
+ * field_index in the same statement), and stages every removed path into a
+ * single trailing commit. `scanned` reports the total matched before
+ * maxRecords clipping — when scanned > purged.length the operator can see
+ * the cemetery is bigger than the cap and chunk subsequent calls.
+ */
+export async function purgeSoftDeleted(
+  ctx: EngineContext,
+  olderThanIso: string,
+  maxRecords: number,
+): Promise<Result<PurgeSoftDeletedResult>> {
+  // Probe scanned-count with a wider window so the result surfaces the true
+  // cemetery size, not the clipped page. Cheap — same indexed query, larger
+  // LIMIT. We materialize the clipped page separately for the purge itself.
+  const allMatching = ctx.backend.findSoftDeletedBefore(olderThanIso, Number.MAX_SAFE_INTEGER);
+  const scanned = allMatching.length;
+  const targets = allMatching.slice(0, maxRecords);
+
+  const purged: PurgeSoftDeletedResult['purged'] = [];
+  const failed: PurgeSoftDeletedResult['failed'] = [];
+  const allFiles: string[] = [];
+
+  for (const doc of targets) {
+    const absPath = path.join(ctx.projectRoot, doc.filePath as string);
+    try {
+      await unlink(absPath);
+    } catch (e) {
+      // File already gone — the row should still be cleared so the index
+      // doesn't keep pointing at a missing file. Continue but record the
+      // failure so the caller can audit.
+      failed.push({
+        docId: doc.docId as string,
+        error: `Failed to unlink ${absPath}: ${e instanceof Error ? e.message : String(e)}`,
+      });
+    }
+    try {
+      ctx.backend.removeDocument(doc.docId);
+    } catch (e) {
+      failed.push({
+        docId: doc.docId as string,
+        error: `Failed to remove document row: ${e instanceof Error ? e.message : String(e)}`,
+      });
+      continue;
+    }
+    purged.push({
+      docId: doc.docId as string,
+      docType: doc.docType as string,
+      filePath: doc.filePath as string,
+    });
+    allFiles.push(absPath);
+  }
+
+  let commitFailure: CommitFailureDetail | undefined;
+  let writeDurable = true;
+  const first = purged[0];
+  if (first) {
+    const outcome = await gitCommit(ctx, {
+      action: 'delete',
+      docId: toDocId(first.docId),
+      docType: first.docType as DocType,
+      detail: `purge:${purged.length}`,
+      summary: `Purged ${purged.length} soft-deleted records older than ${olderThanIso}`,
+      files: allFiles,
+    });
+    if (outcome.status === 'failed') {
+      writeDurable = false;
+      commitFailure = { code: outcome.code, message: outcome.message, action: 'delete' };
+    }
+  }
+
+  const result: PurgeSoftDeletedResult = {
+    purged,
+    failed,
+    scanned,
+    retentionThresholdIso: olderThanIso,
+    writeDurable,
+  };
+  if (commitFailure) result.commitFailure = commitFailure;
+  return ok(result);
 }

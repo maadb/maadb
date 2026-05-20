@@ -1,9 +1,33 @@
 ---
 enabled: true
-current: 0.7.10-rc.6
+current: 0.7.10-rc.7
 ---
 
 # Version History
+
+## 0.7.10-rc.7 — 2026-05-20
+
+Destructive cleanup primitives + soft-delete autoCommit fix.
+
+Lands the three deferred destructive tools from the 0.7.10 Integrity & Cleanup spec, all governed by the confirm-contract foundation that shipped in rc.1.
+
+**`maad_bulk_delete`** (admin, write) — Delete an explicit list of records in a single commit. `mode: 'soft'` (default, rename to `_deleted_*`) or `'hard'` (unlink file + remove index row via CASCADE). Per-record failures collect into `result.failed` without aborting the batch. `confirm: true` required to mutate; absent/false returns dry-run preview with the resolved affected set. `maxRecords` defaults to 100 (ceiling 1000); env override `MAAD_CLEANUP_MAX_RECORDS_BULK_DELETE`. Idempotency replay via `idempotencyKey`.
+
+**`maad_delete_where`** (admin, write) — Filter-driven bulk delete. Same filter shape as `maad_query`. Composes the underlying engine surfaces: `findDocuments({docType, filters})` → `bulkDelete(matched, mode)`. Probes with `limit: maxRecords + 1` to detect overflow without scanning the full matching set; oversize matches return `BULK_LIMIT_EXCEEDED` with chunking hint. Dry-run preview returns the would-affect docId list. Same maxRecords + confirm + idempotency surface as `bulk_delete`. Env override `MAAD_CLEANUP_MAX_RECORDS_DELETE_WHERE`.
+
+**`maad_purge_soft_deleted`** (admin, write) — Hard-delete the cemetery older than a retention threshold. Removes `_deleted_*` files from disk, removes documents rows (cascade clears objects/relationships/blocks/field_index in the same statement), single trailing commit. `olderThan` defaults to now minus 30 days (`MAAD_PURGE_DEFAULT_RETENTION_DAYS` env override). Result reports `scanned` (total matching the threshold) vs `purged.length` (clipped to `maxRecords`) so operators can see when the cemetery exceeds the cap and chunk accordingly. Env override `MAAD_CLEANUP_MAX_RECORDS_PURGE_SOFT_DELETED`.
+
+**Cleanup-cap helper.** New `resolveCleanupMaxRecords(toolSuffix, argValue, env)` + `checkCleanupSize(tool, count, max)` in `src/mcp/bulk-cap.ts`. Tool-call arg primary, env secondary, default tertiary. Hard ceiling 1000 regardless of source.
+
+**Latent bug fix: soft-delete autoCommit returned noop.** `src/git/commit.ts:autoCommit` checked `status.staged.length === 0` to detect "nothing to commit", but `simple-git`'s `StatusSummary.staged` array misses renames — when git's rename detection kicks in (soft-delete writes a `cli-x.md → _deleted_cli-x.md` pair, which `git status --porcelain=v2` collapses to an `R` index entry), the `staged` array stays empty and the commit silently noop'd. Behavior was masked because `commitOutcome.status !== 'failed'` still satisfied `writeDurable: true` — the engine acked durable while the soft-delete sat uncommitted in the working tree. Fix inspects `files[]` index column as a fallback (anything other than `' '` or `'?'`), keeping the existing `staged.length > 0` fast path. Single-record `maad_delete` soft mode now commits correctly too. Bulk-delete soft mode would have inherited the same silent-noop without this fix.
+
+**Tier registration.** `maad_bulk_delete` / `maad_delete_where` / `maad_purge_soft_deleted` added to `ADMIN_TOOLS` in `roles.ts` and `WRITE_TOOLS` in `kinds.ts` (write-kind under the per-engine mutex). Admin tier now 37 tools (was 34).
+
+**New module.** `src/mcp/tools/cleanup.ts` holds the three tool registrations; pattern matches `tools/backup.ts` (admin + write + dispatch).
+
+911 tests passing (+26 over rc.6 baseline of 885 — 7 engine.bulkDelete tests, 5 engine.purgeSoftDeleted tests, 3 delete-where composition tests, 11 cleanup-cap helper tests). No new dependencies. No new error codes (reuses `CONFIRM_REQUIRED` from rc.1 and `BULK_LIMIT_EXCEEDED` from 0.7.3). No breaking change.
+
+Remaining for final 0.7.10: `maad_repair_where` (repair-strategy registry — `prune_orphan_refs` + `fix_schema_drift`) and `maad_health` additions (`lastIntegritySweepAt`, `lastIntegrityFindings`, `lastBackupTag` backed by `engine_meta`). Spec at `docs/specs/0.7.10-integrity-cleanup.md` §Implementation sequencing steps 8–9.
 
 ## 0.7.10-rc.6 — 2026-05-19
 

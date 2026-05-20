@@ -27,9 +27,9 @@ describe('MCP roles', () => {
     expect(tools.has('maad_reindex')).toBe(false);
   });
 
-  it('admin gets 34 tools (all)', () => {
+  it('admin gets 37 tools (all)', () => {
     const tools = getToolsForRole('admin');
-    expect(tools.size).toBe(34);
+    expect(tools.size).toBe(37);
     expect(tools.has('maad_delete')).toBe(true);
     expect(tools.has('maad_reindex')).toBe(true);
     expect(tools.has('maad_reload')).toBe(true);
@@ -43,6 +43,10 @@ describe('MCP roles', () => {
     expect(tools.has('maad_rotate_token')).toBe(true);
     expect(tools.has('maad_list_tokens')).toBe(true);
     expect(tools.has('maad_show_token')).toBe(true);
+    // 0.7.10 — destructive cleanup primitives
+    expect(tools.has('maad_bulk_delete')).toBe(true);
+    expect(tools.has('maad_delete_where')).toBe(true);
+    expect(tools.has('maad_purge_soft_deleted')).toBe(true);
   });
 
   it('parseRole defaults to reader for invalid input', () => {

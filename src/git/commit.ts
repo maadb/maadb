@@ -162,7 +162,19 @@ export async function autoCommit(
         message: `git status failed: ${e instanceof Error ? e.message : String(e)}`,
       };
     }
-    if (status.staged.length === 0) {
+    // simple-git's StatusSummary.staged misses renames — `R` entries land in
+    // `renamed[]` (with a parallel FileStatusSummary in `files[]` carrying
+    // `index: 'R'`) and never appear in `staged[]`. Pre-0.7.10 this caused
+    // soft-delete autoCommit to silently noop because soft-delete writes a
+    // rename pair (cli-x.md → _deleted_cli-x.md) which git's rename detection
+    // collapses. Fall back to the full files[] index column: anything other
+    // than ' ' (clean) or '?' (untracked) is a real index entry the next
+    // commit will pick up. The staged.length check stays as the fast path
+    // (and to keep stubs that only populate `staged` working).
+    const hasStagedChange =
+      status.staged.length > 0
+      || status.files.some(f => f.index !== ' ' && f.index !== '?');
+    if (!hasStagedChange) {
       return { status: 'noop' };
     }
 

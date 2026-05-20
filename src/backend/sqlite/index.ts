@@ -548,6 +548,13 @@ export class SqliteBackend implements MaadBackend {
     return map;
   }
 
+  findSoftDeletedBefore(olderThanIso: string, limit: number): DocumentRecord[] {
+    const rows = this.db.prepare(
+      'SELECT * FROM documents WHERE deleted = 1 AND updated_at < ? ORDER BY updated_at ASC, doc_id ASC LIMIT ?',
+    ).all(olderThanIso, limit) as RawDocRow[];
+    return rows.map(rowToDocument);
+  }
+
   // 0.7.4 (fup-2026-093) — engine_meta key/value access. Used by indexAll for
   // per-type schema-index fingerprints; namespace keys with `<topic>:<id>`.
   getMeta(key: string): string | null {
