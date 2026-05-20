@@ -44,6 +44,7 @@ import * as composites from './composites.js';
 import * as writes from './writes.js';
 import * as backup from './backup.js';
 import * as maintenance from './maintenance.js';
+import * as repairs from './repairs.js';
 import * as auditOps from './audit.js';
 
 // Re-export all result types
@@ -587,6 +588,17 @@ export class MaadEngine {
     if (this._readOnly) return singleErr('READ_ONLY', 'Engine is in read-only mode');
     return this.runExclusive('purgeSoftDeleted',
       () => writes.purgeSoftDeleted(this.ctx(), olderThanIso, maxRecords),
+    );
+  }
+  async repairWhere(
+    filter: Record<string, import('../types.js').FilterCondition> | undefined,
+    docType: DocType | undefined,
+    repairTypes: import('./types.js').RepairStrategyName[],
+    maxRecords: number,
+  ) {
+    if (this._readOnly) return singleErr('READ_ONLY', 'Engine is in read-only mode');
+    return this.runExclusive('repairWhere',
+      () => repairs.repairWhere(this.ctx(), filter, docType, repairTypes, maxRecords),
     );
   }
 

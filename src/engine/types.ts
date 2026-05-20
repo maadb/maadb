@@ -161,6 +161,34 @@ export interface PurgeSoftDeletedResult {
   commitFailure?: CommitFailureDetail;
 }
 
+// maad_repair_where: tolerant-only repair surface. Each match runs through
+// the requested repair strategies in order; per-strategy outcomes collect
+// independently so a `REPAIR_REQUIRES_MIGRATION` on one strategy doesn't
+// preclude a successful prune on another. Records with at least one
+// successful repair land in `succeeded` with the applied-strategy detail;
+// per-strategy failures (typically REPAIR_REQUIRES_MIGRATION or
+// VALIDATION_FAILED when the proposed change leaves a required field
+// empty) land in `failed`.
+
+export type RepairStrategyName = 'prune_orphan_refs' | 'fix_schema_drift';
+
+export interface RepairWhereResult {
+  succeeded: Array<{
+    docId: string;
+    docType: string;
+    appliedRepairs: Array<{ strategy: RepairStrategyName; changedFields: string[] }>;
+  }>;
+  failed: Array<{
+    docId: string;
+    strategy: RepairStrategyName;
+    code: string;
+    message: string;
+  }>;
+  totalRequested: number;
+  writeDurable: boolean;
+  commitFailure?: CommitFailureDetail;
+}
+
 // ---- 0.5.0 R5 — changes-since polling delta -------------------------------
 
 export interface ChangesSinceQuery {

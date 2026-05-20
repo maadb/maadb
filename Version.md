@@ -1,9 +1,31 @@
 ---
 enabled: true
-current: 0.7.10-rc.7
+current: 0.7.10-rc.8
 ---
 
 # Version History
+
+## 0.7.10-rc.8 — 2026-05-20
+
+`maad_repair_where` — tolerant-only repair via strategy registry.
+
+Lands the second-to-last deferred 0.7.10 spec item (step 8 of the implementation sequencing). Admin/write tool that runs a tolerant-only repair pass over records matching a `(docType, filter)` scope. Each match runs through the requested strategies in order; per-record per-strategy outcomes accumulate independently; per-record successes write once with a single trailing commit for the batch.
+
+**Strategy registry.** New `src/engine/repairs.ts` holds an internal `REPAIR_STRATEGIES` map with two strategies shipped in v1, plus the `repairWhere` orchestrator. The pattern leaves the extension point clean for future tolerant repairs (`normalize_whitespace`, `resort_yaml_keys`, etc.) without changing the tool surface.
+
+**`prune_orphan_refs`** — for each ref-typed field in the record's frontmatter, if the target docId is unresolved (missing OR soft-deleted — aligned with `verifyIntegrity`'s `broken_refs` semantics, since soft-deleted records are not visible to ref-resolving callers), drop the broken ref. Single-valued ref → set to `null`; `list of ref` → filter out missing targets. Pure compute; the orchestrator owns the disk write.
+
+**`fix_schema_drift`** — bump the record's `schema` frontmatter value to the registry's current schemaRef for its docType. Tolerant migration: drops fields no longer declared, adds missing optional fields with their schema `defaultValue`, NEVER coerces types. Required-field gaps and any type change that would need coercion surface as **`REPAIR_REQUIRES_MIGRATION`** (new error code added to `ErrorCode` union) for a future migration tool to handle. `amount` accepts both number and string (legitimate hybrid type throughout the engine); every other declared type is strict.
+
+**Orchestrator.** `repairWhere(ctx, filter, docType, repairTypes, maxRecords)` queries matches with `findDocuments`, chains strategies per record, writes via `atomicWrite` + `indexFile` per successful record, emits one trailing `gitCommit` for the batch. Per-record per-strategy failures collect without aborting other records. Mirrors the `bulkUpdate` pattern.
+
+**MCP tool.** New `maad_repair_where` registration in `src/mcp/tools/cleanup.ts`. Admin tier, write kind, confirm-contract governed (dry-run preview by default; `confirm: true` mutates), idempotency replay via `idempotencyKey`, maxRecords cap default 100 / ceiling 1000 with `MAAD_CLEANUP_MAX_RECORDS_REPAIR_WHERE` env override. Probe-with-limit pattern (`limit: maxRecords + 1`) detects overflow without scanning the full matching set; oversize matches return `BULK_LIMIT_EXCEEDED` with chunking hint. Dry-run preview reports the matched docId list and the strategies that would be applied.
+
+**Tier registration.** `maad_repair_where` added to `ADMIN_TOOLS` (now 38) in `roles.ts` and `WRITE_TOOLS` (now 12) in `kinds.ts`.
+
+921 tests passing (+10 over rc.7 baseline of 911 — 10 new `engine.repairWhere` cases covering both strategies, scoped filters, combined-strategy chaining, single-commit batching, per-record failure isolation, empty-match no-op). No new dependencies. New error code `REPAIR_REQUIRES_MIGRATION`. No breaking change.
+
+Remaining for final 0.7.10: `maad_health` additions (`lastIntegritySweepAt`, `lastIntegrityFindings`, `lastBackupTag` backed by `engine_meta`) and docs/spec rotation. Spec at `docs/specs/0.7.10-integrity-cleanup.md` §Implementation sequencing step 9–10.
 
 ## 0.7.10-rc.7 — 2026-05-20
 

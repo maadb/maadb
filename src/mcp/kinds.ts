@@ -53,6 +53,7 @@ export const WRITE_TOOLS: ReadonlySet<string> = new Set([
   'maad_bulk_delete',
   'maad_delete_where',
   'maad_purge_soft_deleted',
+  'maad_repair_where',
 ]);
 
 // Tools that do not flow through withEngine — they operate on session /

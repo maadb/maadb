@@ -1,10 +1,11 @@
 // ============================================================================
-// 0.7.10 — Destructive cleanup primitives. Three admin-tier tools governed by
+// 0.7.10 — Destructive cleanup primitives. Four admin-tier tools governed by
 // the confirm-contract foundation (P1) that landed in rc.1:
 //
 //   maad_bulk_delete         — explicit docId list, soft or hard.
 //   maad_delete_where        — filter-driven, composes query + bulk_delete.
 //   maad_purge_soft_deleted  — hard-delete the cemetery older than a threshold.
+//   maad_repair_where        — filter-driven tolerant repair via strategy registry.
 //
 // Contract (per docs/specs/0.7.10-integrity-cleanup.md §confirm-contract):
 //   - confirm:true required to mutate; otherwise dry-run returns the would-
@@ -23,16 +24,18 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { InstanceCtx } from '../ctx.js';
 import { withEngine } from '../with-session.js';
 import { withIdempotency } from '../idempotency.js';
-import { auditToolCall, requireConfirm } from '../guardrails.js';
+import { auditToolCall } from '../guardrails.js';
 import { resultToResponse, errorResponse, successResponse, attachDurability } from '../response.js';
 import { maadError } from '../../errors.js';
-import { docId as toDocId, docType as toDocType, type DocumentQuery } from '../../types.js';
+import { docId as toDocId, docType as toDocType, type DocumentQuery, type FilterCondition } from '../../types.js';
 import {
   resolveCleanupMaxRecords,
   checkCleanupSize,
 } from '../bulk-cap.js';
 import { notifyWrite } from '../notifications.js';
-import type { BulkDeleteResult, PurgeSoftDeletedResult } from '../../engine/types.js';
+import type { BulkDeleteResult, PurgeSoftDeletedResult, RepairStrategyName, RepairWhereResult } from '../../engine/types.js';
+
+const REPAIR_STRATEGY_NAMES = ['prune_orphan_refs', 'fix_schema_drift'] as const;
 
 const DEFAULT_PURGE_RETENTION_DAYS = 30;
 
@@ -271,5 +274,79 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
     }),
   ));
 
-  return 3;
+  // --------------------------------------------------------------------------
+  // maad_repair_where — filter-driven tolerant repair via strategy registry.
+  // --------------------------------------------------------------------------
+  server.registerTool('maad_repair_where', {
+    description: 'Tolerantly repair records matching a filter. Runs the requested strategies in order per record: prune_orphan_refs removes ref-field targets that no longer exist; fix_schema_drift bumps the record\'s schemaRef to the current pack version, adds missing optional fields with schema defaults, drops fields no longer declared. NEVER coerces types — records needing migration fail with REPAIR_REQUIRES_MIGRATION. Dry-run by default; pass confirm:true to mutate. Single trailing commit per call. Caps at maxRecords (default 100, ceiling 1000); MAAD_CLEANUP_MAX_RECORDS_REPAIR_WHERE env override.',
+    inputSchema: z.object({
+      docType: z.string().describe('Document type to repair within'),
+      filters: z.any().optional().describe('Field filters — same shape as maad_query'),
+      repairTypes: z.array(z.enum(REPAIR_STRATEGY_NAMES)).min(1).describe('Repair strategies to apply per matched record, in order. v1: prune_orphan_refs, fix_schema_drift.'),
+      maxRecords: z.number().optional().describe('Per-call cap (default 100, ceiling 1000)'),
+      confirm: z.boolean().optional().describe('Set true to actually repair. Absent/false returns dry-run preview.'),
+      idempotencyKey: z.string().max(128).optional().describe('Opaque client-supplied key; scopes (project, tool, key) and dedupes retries within TTL'),
+      project: z.string().optional().describe('Project name (multi-project mode only)'),
+    }),
+  }, async (args, extra) => withEngine(ctx, extra, 'maad_repair_where', args, async ({ engine, projectName, requestId }) =>
+    withIdempotency(projectName, 'maad_repair_where', args.idempotencyKey, requestId, async () => {
+      const confirmed = args.confirm === true;
+      const maxRecords = resolveCleanupMaxRecords('REPAIR_WHERE', args.maxRecords);
+      const repairTypes = args.repairTypes as RepairStrategyName[];
+      const docTypeValue = toDocType(args.docType);
+      const filters = args.filters as Record<string, FilterCondition> | undefined;
+
+      // Probe with maxRecords+1 to detect overflow without scanning the full
+      // matching set. Mirrors delete_where.
+      const probeQuery: DocumentQuery = { docType: docTypeValue, limit: maxRecords + 1 };
+      if (filters !== undefined) (probeQuery as { filters?: unknown }).filters = filters;
+      const probe = engine.findDocuments(probeQuery);
+      if (!probe.ok) return resultToResponse(probe, 'maad_repair_where');
+
+      if (probe.value.results.length > maxRecords) {
+        const cap = checkCleanupSize('maad_repair_where', probe.value.results.length, maxRecords);
+        return errorResponse([
+          maadError('BULK_LIMIT_EXCEEDED', cap!.message, undefined, {
+            tool: cap!.tool,
+            received: cap!.received,
+            limit: cap!.limit,
+            suggestedChunkSize: cap!.suggestedChunkSize,
+          }),
+        ]);
+      }
+
+      auditToolCall('maad_repair_where', args, { confirm_mode: confirmed ? 'confirmed' : 'dry_run' });
+
+      if (!confirmed) {
+        const affected = probe.value.results.map(m => ({
+          docId: m.docId as string,
+          docType: args.docType,
+        }));
+        return dryRunResponseAffected('maad_repair_where', affected as unknown as Array<Record<string, unknown>>, {
+          docType: args.docType,
+          repairTypes,
+          maxRecords,
+        });
+      }
+
+      const result = await engine.repairWhere(filters, docTypeValue, repairTypes, maxRecords);
+      const response = resultToResponse(result, 'maad_repair_where');
+      if (!result.ok) return response;
+      const value = result.value as RepairWhereResult;
+      if (value.writeDurable) {
+        for (const s of value.succeeded) {
+          await notifyWrite(ctx, {
+            action: 'update',
+            docId: s.docId,
+            docType: s.docType,
+            project: projectName,
+            updatedAt: new Date().toISOString(),
+          });
+        }
+      }
+      return attachDurability(response, value.writeDurable, value.commitFailure);
+    }),
+  ));
+
+  return 4;
 }

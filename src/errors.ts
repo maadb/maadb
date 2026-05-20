@@ -80,7 +80,11 @@ export type ErrorCode =
   // 0.7.10 — maad_backup: git-tag snapshot lifecycle
   | 'TAG_EXISTS'
   | 'TAG_NOT_FOUND'
-  | 'NO_HEAD_COMMIT';
+  | 'NO_HEAD_COMMIT'
+  // 0.7.10 — maad_repair_where: tolerant-only repair contract. Records whose
+  // schema drift would require type coercion (which is migration, not
+  // repair) surface as this code so a future migration tool can handle them.
+  | 'REPAIR_REQUIRES_MIGRATION';
 
 export interface MaadError {
   code: ErrorCode;
