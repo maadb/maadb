@@ -299,7 +299,7 @@ MCP roles control what tools an agent can use. Ceiling set per project in `insta
 |------|-------|----------|
 | `reader` (default) | scan, summary, describe, get, query, search, related, schema, aggregate, join, verify, changes_since, history, audit | Read-only agents, reporting, analysis |
 | `writer` | reader + create, update, validate, bulk_create, bulk_update | Standard agents that read and write records |
-| `admin` | writer + delete, reindex, reload, health | Project setup, schema changes, maintenance |
+| `admin` | writer + delete, reindex, reload, health, backup, bulk_delete, delete_where, purge_soft_deleted, repair_where | Project setup, schema changes, maintenance, cleanup |
 
 ## Project layout
 
@@ -330,9 +330,11 @@ my-project/
 All tools return `{ ok: true, data: {...} }` or `{ ok: false, errors: [...] }`. Call `maad_schema <type>` for full field definitions before writing.
 
 **Discover:** `maad_scan`, `maad_summary`, `maad_describe`, `maad_schema`
-**Read:** `maad_get`, `maad_query`, `maad_search`, `maad_related`, `maad_aggregate`, `maad_join`, `maad_verify`, `maad_changes_since`
+**Read:** `maad_get`, `maad_query`, `maad_search`, `maad_related`, `maad_aggregate`, `maad_join`, `maad_verify`, `maad_find_orphans`, `maad_changes_since`
 **Write:** `maad_create`, `maad_update`, `maad_bulk_create`, `maad_bulk_update`, `maad_validate`
 **Maintain:** `maad_delete`, `maad_reindex`, `maad_reload`, `maad_health`, `maad_history`, `maad_audit`
+**Recovery anchors (0.7.10+):** `maad_backup` — annotated git tags as snapshot points.
+**Cleanup (0.7.10+ admin, confirm-contract governed):** `maad_bulk_delete`, `maad_delete_where`, `maad_repair_where`, `maad_purge_soft_deleted` — destructive ops are dry-run by default; pass `confirm: true` to mutate. `maxRecords` cap default 100 / ceiling 1000.
 **Live updates (0.6.11+):** `maad_subscribe`, `maad_unsubscribe` — push notifications on durable writes.
 **Instance admin:** `maad_instance_reload`, `maad_subscriptions`.
 **Auth admin (0.7.0+):** `maad_issue_token`, `maad_revoke_token`, `maad_rotate_token`, `maad_list_tokens`, `maad_show_token`.

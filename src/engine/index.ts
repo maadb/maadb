@@ -97,6 +97,28 @@ export interface HealthReport {
   lastCommitFailureCode: string | null;
   lastCommitFailureAction: 'create' | 'update' | 'delete' | null;
   lastCommitFailureDocId: string | null;
+  // 0.7.10 — Integrity & Cleanup observability. Populated from engine_meta
+  // by the verifyIntegrity (P2) and backupCreate (P4) write hooks. Null
+  // when the corresponding op has never been run against this backend, or
+  // when the stored JSON failed to parse (in which case the stale value
+  // is dropped rather than surfaced corrupt).
+  lastIntegritySweepAt: string | null;
+  lastIntegrityFindings: Record<import('./types.js').IntegrityCategory, number> | null;
+  lastBackupTag: { tag: string; sha: string; createdAt: string } | null;
+}
+
+/**
+ * Parse an engine_meta-stored JSON value. Returns null when the value is
+ * absent OR malformed — the 0.7.10 maad_health surface stays advisory, so a
+ * corrupt stored value drops to null rather than surfacing as a parse error.
+ */
+function parseStoredJson(raw: string | null): unknown {
+  if (raw === null) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
 }
 
 /** Recursive dir size in bytes. Best-effort — unreadable entries are skipped. */
@@ -391,6 +413,13 @@ export class MaadEngine {
       lastCommitFailureCode: this.commitFailures.lastCode,
       lastCommitFailureAction: this.commitFailures.lastAction,
       lastCommitFailureDocId: this.commitFailures.lastDocId,
+      lastIntegritySweepAt: this.backend.getMeta('last_integrity_sweep_at'),
+      lastIntegrityFindings: parseStoredJson(
+        this.backend.getMeta('last_integrity_findings'),
+      ) as HealthReport['lastIntegrityFindings'],
+      lastBackupTag: parseStoredJson(
+        this.backend.getMeta('last_backup_tag'),
+      ) as HealthReport['lastBackupTag'],
     };
   }
 

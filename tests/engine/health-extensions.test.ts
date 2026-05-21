@@ -143,6 +143,100 @@ describe('HealthReport extensions', () => {
   });
 });
 
+// ============================================================================
+// 0.7.10 — Integrity & Cleanup health additions
+// ============================================================================
+
+describe('HealthReport — 0.7.10 integrity + backup observability', () => {
+  let engine: MaadEngine;
+  let root: string;
+  beforeEach(async () => ({ engine, root } = await makeEngine('integrity')));
+  afterEach(async () => cleanup(engine, root));
+
+  it('all three fields are null on a fresh engine that has never run integrity or backup', () => {
+    const h = engine.health();
+    expect(h.lastIntegritySweepAt).toBeNull();
+    expect(h.lastIntegrityFindings).toBeNull();
+    expect(h.lastBackupTag).toBeNull();
+  });
+
+  it('verifyIntegrity stamps lastIntegritySweepAt + lastIntegrityFindings', async () => {
+    const sweep = await engine.verifyIntegrity();
+    expect(sweep.ok).toBe(true);
+    if (!sweep.ok) return;
+
+    const h = engine.health();
+    expect(h.lastIntegritySweepAt).toBe(sweep.value.completedAt);
+    expect(h.lastIntegrityFindings).toEqual(sweep.value.findings);
+    // findings shape: every category has a numeric count
+    expect(h.lastIntegrityFindings).toMatchObject({
+      missing_in_index: expect.any(Number),
+      missing_on_disk: expect.any(Number),
+      hash_drift: expect.any(Number),
+      schema_drift: expect.any(Number),
+      broken_refs: expect.any(Number),
+    });
+  });
+
+  it('repeated verifyIntegrity calls overwrite — most recent sweep wins', async () => {
+    const first = await engine.verifyIntegrity();
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    const firstStamp = engine.health().lastIntegritySweepAt;
+    expect(firstStamp).toBe(first.value.completedAt);
+
+    await new Promise(r => setTimeout(r, 5));
+
+    const second = await engine.verifyIntegrity();
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    const secondStamp = engine.health().lastIntegritySweepAt;
+    expect(secondStamp).toBe(second.value.completedAt);
+    expect(new Date(secondStamp!).getTime()).toBeGreaterThan(new Date(firstStamp!).getTime());
+  });
+
+  it('backupCreate stamps lastBackupTag with tag, sha, createdAt', async () => {
+    const backup = await engine.backupCreate({ label: 'health-check' });
+    expect(backup.ok).toBe(true);
+    if (!backup.ok) return;
+
+    const h = engine.health();
+    expect(h.lastBackupTag).not.toBeNull();
+    expect(h.lastBackupTag!.tag).toBe(backup.value.tag);
+    expect(h.lastBackupTag!.sha).toBe(backup.value.sha);
+    expect(h.lastBackupTag!.createdAt).toBe(backup.value.createdAt);
+    // The MaadHealth surface omits the human-readable message — that lives
+    // on the create-result for the immediate caller, not the rolling state.
+    expect(h.lastBackupTag).not.toHaveProperty('message');
+  });
+
+  it('a second backupCreate replaces lastBackupTag with the newer snapshot', async () => {
+    const first = await engine.backupCreate({ label: 'one' });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+
+    await new Promise(r => setTimeout(r, 5));
+
+    const second = await engine.backupCreate({ label: 'two' });
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+
+    const h = engine.health();
+    expect(h.lastBackupTag!.tag).toBe(second.value.tag);
+    expect(h.lastBackupTag!.tag).not.toBe(first.value.tag);
+  });
+
+  it('a corrupt stored value drops to null rather than surfacing a parse error', () => {
+    // Direct backend write of intentionally broken JSON. The health surface
+    // should treat it as "value absent" rather than throw.
+    engine.getBackend().setMeta('last_backup_tag', '{not-json');
+    engine.getBackend().setMeta('last_integrity_findings', '!!malformed');
+    const h = engine.health();
+    expect(h.lastBackupTag).toBeNull();
+    expect(h.lastIntegrityFindings).toBeNull();
+  });
+});
+
 describe('HealthReport extensions — no-git project', () => {
   it('repoSizeBytes and gitClean are null when git is unavailable', async () => {
     // Create a temp project WITHOUT git init

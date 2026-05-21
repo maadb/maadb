@@ -949,6 +949,17 @@ export async function verifyIntegrity(
   };
   if (verbose) result.details = details;
 
+  // 0.7.10 — stamp the result into engine_meta so maad_health.lastIntegrity*
+  // can surface the most recent sweep without the operator re-running it.
+  // Defensive: a backend write failure here must not poison the read result —
+  // the observability fields are advisory, not load-bearing.
+  try {
+    ctx.backend.setMeta('last_integrity_sweep_at', result.completedAt);
+    ctx.backend.setMeta('last_integrity_findings', JSON.stringify(result.findings));
+  } catch {
+    // best-effort — health surface tolerates a stale or absent value
+  }
+
   return ok(result);
 }
 

@@ -1,9 +1,46 @@
 ---
 enabled: true
-current: 0.7.10-rc.8
+current: 0.7.10
 ---
 
 # Version History
+
+## 0.7.10 — 2026-05-20
+
+**Integrity & Cleanup.** Consolidated release closing the eight-step `0.7.10` line locked in spec `docs/archive/0.7.10-integrity-cleanup.md`. Eight tool additions, two new error codes, two new health-observability surfaces, one latent autoCommit bugfix, one info-disclosure surface closed in pino logs. Granular delivery history in the rc.1 through rc.8 entries below.
+
+**Confirm contract (foundation, rc.1).** Every destructive tool added in this release defaults to dry-run; `confirm: true` is required to mutate. `requireConfirm()` helper + `CONFIRM_REQUIRED` error code; audit-log payload carries `confirm_mode: 'dry_run' | 'confirmed'`. Pattern reusable for any future destructive tool.
+
+**Integrity sweep + orphan-finder (rc.1).** `maad_verify mode: 'integrity'` walks markdown on disk, compares to the SQLite index, surfaces five drift categories: `missing_in_index` / `missing_on_disk` / `hash_drift` / `schema_drift` / `broken_refs`. `maad_find_orphans` is a thin wrapper over the broken_refs sub-mode — one implementation, two surfaces. broken_refs detection is index-driven (joins `relationships` to `documents`) and never re-parses frontmatter from disk — collapses the per-call working-set floor on busy projects (rc.4 measurement: 7.7× cycle-2/cycle-1 working-set growth eliminated). Filter / docType / docId scope filters cap the sweep; `verbose: true` returns per-record `details[]`. Performance budget under 5s for a 10k-record project.
+
+**Snapshot backups (rc.1).** `maad_backup` admin tool creates annotated git tags on HEAD with structured names (`maad-snapshot-YYYY-MM-DD-HHMM[-<label>]` UTC). Three modes in one tool: `create` / `list` (with optional `since` filter) / `delete`. Underlying commits are never touched — deleting a snapshot just drops the ref. New error codes `TAG_EXISTS`, `TAG_NOT_FOUND`, `NO_HEAD_COMMIT`.
+
+**V8 + cgroup memory-pressure watcher (rc.1, rc.5).** Periodic sampler emits a degraded-severity `engine.memory_pressure` ops event when V8 heap ratio OR cgroup memory ratio crosses a configurable threshold. Edge-triggered with cooldown — fires once on threshold crossing, suppresses while sustained, re-fires after cooldown. `maad_health.runtime.memoryPressure` block surfaces sampler state including heap (`heapUsedMb`/`heapCapMb`/`heapRatio`) and process (`rssMb`/`externalMb`/`arrayBuffersMb`) + cgroup v1/v2 (`cgroupCurrentMb`/`cgroupMaxMb`/`cgroupRatio`) telemetry. rc.5 added the cgroup half to close the observability gap for kernel-level OOM kills where V8 stays below its own heap cap but off-heap/native/RSS exhausts the container. New env vars `MAAD_MEMORY_PRESSURE_INTERVAL_MS` (default 60000), `MAAD_MEMORY_PRESSURE_RATIO` (default 0.8), `MAAD_MEMORY_PRESSURE_COOLDOWN_MS` (default 300000).
+
+**Pino write-body redaction (rc.6).** `src/mcp/guardrails.ts:auditToolCall` now projects `args.body` / `args.appendBody` into byte counts (`bodyBytes`, `appendBodyBytes`) and collapses `fields` to `fieldNames` (keys only) before the log line is emitted. Bulk shapes (`records[]`, `updates[]`) collapse to counts plus aggregate byte totals. `src/logging.ts` REDACT_PATHS adds `args.body`, `args.appendBody`, `args.records[*].body`, `args.updates[*].body`, `args.updates[*].appendBody` as belt-and-braces at the pino transport boundary. Closes the info-disclosure surface where write tool_call events logged full document bodies into Docker stdout/json logs. Logging contract — pino is telemetry, not a content archive — documented in both files.
+
+**Destructive cleanup primitives (rc.7).** Four admin-tier tools governed by the confirm contract, single-commit atomic per call.
+- `maad_bulk_delete` — explicit docId list, soft (default) or hard mode. Per-record failures collect into `result.failed` without aborting the batch.
+- `maad_delete_where` — filter-driven, composes `findDocuments` + `bulkDelete`. Probe-with-limit overflow detection (`limit: maxRecords+1`) catches oversize scopes without paginating the full match set.
+- `maad_purge_soft_deleted` — hard-delete the cemetery older than a retention threshold (default 30 days; `MAAD_PURGE_DEFAULT_RETENTION_DAYS` env). `result.scanned` reports the unclipped count so operators can see when the cemetery exceeds `maxRecords` and chunk.
+- `maad_repair_where` (rc.8) — tolerant repair via strategy registry (`prune_orphan_refs` drops broken ref-field targets; `fix_schema_drift` bumps schemaRef + adds defaulted optional fields + drops removed fields, never coerces). Type-coercion cases surface as `REPAIR_REQUIRES_MIGRATION` for a future migration tool.
+
+Per-tool `maxRecords` cap default 100, hard ceiling 1000, with `MAAD_CLEANUP_MAX_RECORDS_<TOOL>` env override (tool-arg primary, env secondary, default tertiary). All four tools support `idempotencyKey` for retry deduplication.
+
+**autoCommit fix (rc.7).** Latent bug: `simple-git`'s `StatusSummary.staged` array misses renames — git's rename detection collapses soft-delete's `cli-x.md → _deleted_cli-x.md` pair to a single `R` index entry that never appears in `staged[]`. Pre-rc.7, autoCommit returned noop for any soft-delete commit while reporting `writeDurable: true` (because `noop !== failed`). Engine acked durable while the soft-delete sat uncommitted in the working tree. Fix inspects the `files[]` index column as a fallback after the existing `staged.length > 0` fast path. Affects single-record `maad_delete` soft mode too. Verified end-to-end against rc.6 binaries before patching.
+
+**Integrity + backup observability on maad_health (this release).** `maad_health` surface gains three optional fields backed by `engine_meta`:
+- `lastIntegritySweepAt: ISO8601 | null` — timestamp of the most recent `maad_verify mode: 'integrity'` call (any scope).
+- `lastIntegrityFindings: { missing_in_index, missing_on_disk, hash_drift, schema_drift, broken_refs } | null` — counts from that sweep.
+- `lastBackupTag: { tag, sha, createdAt } | null` — most recent `maad_backup mode: 'create'`.
+
+Write hooks: `verifyIntegrity` stamps the two integrity keys post-sweep; `createBackup` stamps `last_backup_tag` post-tag. Both defensive — a backend write failure here cannot poison the read result. Operators read `lastIntegrityFindings.broken_refs > 0` or `lastBackupTag` age without re-running the underlying tool. Stored values that fail JSON parse drop to null rather than surfacing corrupt.
+
+**Tier table.** Admin tier now 38 tools (was 34 in 0.7.9): `maad_backup` + `maad_bulk_delete` + `maad_delete_where` + `maad_purge_soft_deleted` + `maad_repair_where`. Reader tier gains `maad_find_orphans`. WRITE_TOOLS in `src/mcp/kinds.ts` now 12.
+
+927 tests passing (+110 over 0.7.9 baseline of 817). 6 skipped (existing Windows-only skips). New error codes: `CONFIRM_REQUIRED`, `TAG_EXISTS`, `TAG_NOT_FOUND`, `NO_HEAD_COMMIT`, `REPAIR_REQUIRES_MIGRATION`. New env vars: `MAAD_MEMORY_PRESSURE_INTERVAL_MS`, `MAAD_MEMORY_PRESSURE_RATIO`, `MAAD_MEMORY_PRESSURE_COOLDOWN_MS`, `MAAD_PURGE_DEFAULT_RETENTION_DAYS`, `MAAD_CLEANUP_MAX_RECORDS_BULK_DELETE`, `MAAD_CLEANUP_MAX_RECORDS_DELETE_WHERE`, `MAAD_CLEANUP_MAX_RECORDS_PURGE_SOFT_DELETED`, `MAAD_CLEANUP_MAX_RECORDS_REPAIR_WHERE`. No new dependencies. No breaking changes — every addition is opt-in or additive.
+
+Spec rotated from `docs/specs/` to `docs/archive/` per the convention.
 
 ## 0.7.10-rc.8 — 2026-05-20
 
@@ -353,7 +390,6 @@ Initial engine build. Parser, registry, schema, extractor (11 primitives), SQLit
 Phase plan locked in `dec-maadb-070-optimization-track` (2026-04-21). Releases through 0.8.0 form an agent-first optimization track; 0.8.5+ unchanged from prior roadmap.
 
 - **0.7.11** — Agent-First Engine (renumbered after 0.7.9 was used for first npm publish). `maad_status` cross-project rollup, followup `supersedes` schema field, canonical `_skills/session-protocol.md` in engine. Plus remaining composites that collapse common call chains: `maad_bulk_update_where`, `maad_context(docId)`, `maad_get_many`, `maad_related depth: 'hydrated'`, `maad_subscribe_from(cursor)`. (`maad_query depth: 'cold'|'full'` shipped early in 0.7.3.)
-- **0.7.10** — Integrity & Cleanup. Cross-cutting `confirm: true` contract — all destructive tools dry-run by default. Bundle: (a) Cleanup Wave 1 destructive primitives — `maad_bulk_delete`, `maad_delete_where`, `maad_repair_where`, `maad_purge_soft_deleted`; (b) `maad_verify mode: 'integrity'` walks markdown + recomputes sha256 + compares to index, with `maad_find_orphans` as thin wrapper; (c) `maad_backup` git-tag snapshots; (d) `maad_health` adds `lastIntegritySweepAt`, `lastIntegrityFindings`, `lastBackupTag`. New error code: `CONFIRM_REQUIRED`.
 - **0.8.0** — Operational Hygiene + Imports. `maad_prune_sessions` (stale-session sweeper), `maad_compact` (`VACUUM` + `git gc`), `maad_reindex_selective`, `maad_find_duplicates` + original Import workflow: `_inbox/` convention, source tracking, duplicate detection, readonly type flag.
 - **0.8.5** — Remote MCP hardening: per-connection role tiers, rate-limit policy, backpressure thresholds, mutex timeout, stress suite, metrics export, `git gc` automation.
 - **0.9.0** — Eviction Stage 2 + query power: LRU + hard pool cap (Stage 1 idle-timeout shipped in 0.7.3), in-place project mutations (lifts `INSTANCE_MUTATION_UNSUPPORTED`), FTS5, fuzzy entity matching, compound filters (AND/OR), cursor-based pagination.

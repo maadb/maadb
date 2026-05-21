@@ -2,12 +2,13 @@
 // 0.7.10 — maad_backup: named recovery anchors via annotated git tags.
 //
 // Three operations:
-//   createBackup — annotated tag on HEAD with structured name
-//   listBackups  — every maad-snapshot-* tag with sha + message + createdAt
-//   deleteBackup — drop a maad-snapshot-* tag (refuses other tags)
-//
-// Pure git operations on the project repo. No SQLite reads, no schema lookups,
-// no engine_meta writes (that stamp comes with Step 9 / maad_health).
+//   createBackup — annotated tag on HEAD with structured name. Stamps
+//                  `last_backup_tag` into engine_meta so maad_health can
+//                  surface the most-recent snapshot without re-scanning.
+//   listBackups  — every maad-snapshot-* tag with sha + message + createdAt.
+//   deleteBackup — drop a maad-snapshot-* tag (refuses other tags). Does
+//                  NOT update last_backup_tag — the surface tracks the most
+//                  recent create, not the most recent op.
 // ============================================================================
 
 import { ok, singleErr, type Result } from '../errors.js';
@@ -80,11 +81,25 @@ export async function createBackup(
 
   await ctx.gitLayer.addAnnotatedTag(tagName, message);
 
+  const createdAt = new Date().toISOString();
+  // 0.7.10 — stamp into engine_meta so maad_health.lastBackupTag surfaces
+  // without re-scanning git tags. Best-effort — observability fields stay
+  // advisory.
+  try {
+    ctx.backend.setMeta('last_backup_tag', JSON.stringify({
+      tag: tagName,
+      sha: head,
+      createdAt,
+    }));
+  } catch {
+    // best-effort
+  }
+
   return ok({
     tag: tagName,
     sha: head,
     message,
-    createdAt: new Date().toISOString(),
+    createdAt,
   });
 }
 
