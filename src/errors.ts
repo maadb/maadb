@@ -84,7 +84,10 @@ export type ErrorCode =
   // 0.7.10 — maad_repair_where: tolerant-only repair contract. Records whose
   // schema drift would require type coercion (which is migration, not
   // repair) surface as this code so a future migration tool can handle them.
-  | 'REPAIR_REQUIRES_MIGRATION';
+  | 'REPAIR_REQUIRES_MIGRATION'
+  // 0.7.11 — maad_search boundary rejects unknown primitive values up front
+  // instead of silently returning zero rows from a SQL miss on the column.
+  | 'INVALID_PRIMITIVE';
 
 export interface MaadError {
   code: ErrorCode;

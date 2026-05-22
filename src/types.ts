@@ -56,6 +56,10 @@ export const PRIMITIVES = [
 
 export type Primitive = typeof PRIMITIVES[number];
 
+export function isValidPrimitive(value: string): value is Primitive {
+  return (PRIMITIVES as readonly string[]).includes(value);
+}
+
 export const DEFAULT_SUBTYPE_MAP: Record<string, Primitive> = {
   // primitives self-map (so [[date:...]] resolves to 'date', not 'entity')
   entity: 'entity',

@@ -5,8 +5,8 @@
 
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { docId, docType, type ObjectQuery } from '../../types.js';
-import { resultToResponse, attachMeta, guardResponseSize } from '../response.js';
+import { docId, docType, isValidPrimitive, PRIMITIVES, type ObjectQuery } from '../../types.js';
+import { resultToResponse, errorResponse, attachMeta, guardResponseSize } from '../response.js';
 import type { InstanceCtx } from '../ctx.js';
 import { withEngine } from '../with-session.js';
 import { hydrateQueryRows } from '../query-depth.js';
@@ -98,9 +98,9 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
   }));
 
   server.registerTool('maad_search', {
-    description: 'Searches extracted objects across all documents. Filter by primitive + optional subtype, then narrow with query (substring) or value (exact). Without query or value, returns ALL objects matching primitive/subtype.',
+    description: 'Searches indexed extracted objects (frontmatter fields + body [[type:value]] annotations — NOT raw body prose). Valid primitives: entity, date, duration, amount, measure, quantity, percentage, location, identifier, contact, media. Frontmatter string fields index as primitive=entity, subtype=<field-name> (e.g. a `client: cli-...` field is searchable as primitive=entity, subtype=client). Filter by primitive + optional subtype, then narrow with query (substring) or value (exact). Without query or value, returns ALL objects matching primitive/subtype.',
     inputSchema: z.object({
-      primitive: z.string().describe('Extraction primitive (entity, date, amount, etc.)'),
+      primitive: z.string().describe('Extraction primitive. One of: entity, date, duration, amount, measure, quantity, percentage, location, identifier, contact, media.'),
       subtype: z.string().optional().describe('Subtype filter (person, org, attorney, etc.)'),
       query: z.string().optional().describe('Substring match on values (e.g. "Attorney" matches "Lead Attorney")'),
       value: z.string().optional().describe('Exact value match (must match the full extracted value)'),
@@ -111,7 +111,14 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
       project: z.string().optional().describe('Project name (multi-project mode only)'),
     }),
   }, async (args, extra) => withEngine(ctx, extra, 'maad_search', args, ({ engine }) => {
-    const query: ObjectQuery = { primitive: args.primitive as any };
+    if (!isValidPrimitive(args.primitive)) {
+      return errorResponse([{
+        code: 'INVALID_PRIMITIVE',
+        message: `Unknown primitive '${args.primitive}'. Valid primitives: ${PRIMITIVES.join(', ')}. Frontmatter string fields index as primitive=entity, subtype=<field-name>.`,
+        details: { provided: args.primitive, valid: PRIMITIVES as readonly string[] },
+      }]);
+    }
+    const query: ObjectQuery = { primitive: args.primitive };
     if (args.subtype !== undefined) query.subtype = args.subtype;
     if (args.value !== undefined) query.value = args.value;
     const containsValue = args.query ?? args.contains;

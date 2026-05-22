@@ -1,9 +1,13 @@
 ---
 enabled: true
-current: 0.7.10
+current: 0.7.11
 ---
 
 # Version History
+
+## 0.7.11 — 2026-05-22
+
+`maad_search` rejects unknown `primitive` values up front with the new `INVALID_PRIMITIVE` error. Before, invalid primitive strings passed through to `WHERE primitive = ?` and returned a clean `total: 0` indistinguishable from a legitimate no-match. New `isValidPrimitive()` type-guard in `src/types.ts` gates the MCP tool boundary (`src/mcp/tools/read.ts`) and the CLI command (`src/cli/commands/read.ts`); engine signature unchanged. Tool description rewritten to enumerate all 11 primitives and note that frontmatter string fields index as `primitive=entity, subtype=<field-name>`. 932 tests passing.
 
 ## 0.7.10 — 2026-05-20
 
@@ -389,7 +393,7 @@ Initial engine build. Parser, registry, schema, extractor (11 primitives), SQLit
 
 Phase plan locked in `dec-maadb-070-optimization-track` (2026-04-21). Releases through 0.8.0 form an agent-first optimization track; 0.8.5+ unchanged from prior roadmap.
 
-- **0.7.11** — Agent-First Engine (renumbered after 0.7.9 was used for first npm publish). `maad_status` cross-project rollup, followup `supersedes` schema field, canonical `_skills/session-protocol.md` in engine. Plus remaining composites that collapse common call chains: `maad_bulk_update_where`, `maad_context(docId)`, `maad_get_many`, `maad_related depth: 'hydrated'`, `maad_subscribe_from(cursor)`. (`maad_query depth: 'cold'|'full'` shipped early in 0.7.3.)
+- **0.7.12** — Agent-First Engine (renumbered after 0.7.11 shipped the search-primitive-validation fix). `maad_status` cross-project rollup, followup `supersedes` schema field, canonical `_skills/session-protocol.md` in engine. Plus remaining composites that collapse common call chains: `maad_bulk_update_where`, `maad_context(docId)`, `maad_get_many`, `maad_related depth: 'hydrated'`, `maad_subscribe_from(cursor)`. (`maad_query depth: 'cold'|'full'` shipped early in 0.7.3.)
 - **0.8.0** — Operational Hygiene + Imports. `maad_prune_sessions` (stale-session sweeper), `maad_compact` (`VACUUM` + `git gc`), `maad_reindex_selective`, `maad_find_duplicates` + original Import workflow: `_inbox/` convention, source tracking, duplicate detection, readonly type flag.
 - **0.8.5** — Remote MCP hardening: per-connection role tiers, rate-limit policy, backpressure thresholds, mutex timeout, stress suite, metrics export, `git gc` automation.
 - **0.9.0** — Eviction Stage 2 + query power: LRU + hard pool cap (Stage 1 idle-timeout shipped in 0.7.3), in-place project mutations (lifts `INSTANCE_MUTATION_UNSUPPORTED`), FTS5, fuzzy entity matching, compound filters (AND/OR), cursor-based pagination.

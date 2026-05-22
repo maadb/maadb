@@ -2,7 +2,7 @@
 // Read commands — get, query, search, related, schema
 // ============================================================================
 
-import { docId, docType } from '../../types.js';
+import { docId, docType, isValidPrimitive, PRIMITIVES } from '../../types.js';
 import type { CliContext } from '../helpers.js';
 import { initEngine } from '../helpers.js';
 
@@ -82,7 +82,11 @@ export async function cmdQuery(ctx: CliContext): Promise<void> {
 export async function cmdSearch(ctx: CliContext): Promise<void> {
   const primitive = ctx.args[1];
   if (!primitive) {
-    console.error('Usage: maad search <primitive> [--subtype type] [--query text] [--value val] [--contains text] [--doc doc_id]');
+    console.error(`Usage: maad search <primitive> [--subtype type] [--query text] [--value val] [--contains text] [--doc doc_id]\n  Valid primitives: ${PRIMITIVES.join(', ')}`);
+    process.exit(1);
+  }
+  if (!isValidPrimitive(primitive)) {
+    console.error(`Search failed:\n  INVALID_PRIMITIVE: Unknown primitive '${primitive}'. Valid primitives: ${PRIMITIVES.join(', ')}.\n  Frontmatter string fields index as primitive=entity, subtype=<field-name>.`);
     process.exit(1);
   }
 
