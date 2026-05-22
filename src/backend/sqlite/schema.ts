@@ -14,7 +14,11 @@ CREATE TABLE IF NOT EXISTS documents (
   version      INTEGER NOT NULL DEFAULT 1,
   deleted      INTEGER NOT NULL DEFAULT 0,
   indexed_at   TEXT NOT NULL,
-  updated_at   TEXT NOT NULL DEFAULT ''
+  updated_at   TEXT NOT NULL DEFAULT '',
+  -- 0.7.12 — engine-stamped creation time. Existing dbs pick it up via
+  -- ALTER TABLE in the migration block below; pre-existing rows backfill
+  -- to updated_at as the best-available approximation.
+  created_at   TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_documents_type ON documents(doc_type);
 CREATE INDEX IF NOT EXISTS idx_documents_path ON documents(file_path);

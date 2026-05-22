@@ -13,6 +13,7 @@ import {
   schemaRef as toSchemaRef,
   filePath as toFilePath,
   blockId as toBlockId,
+  resolveSystemSortKey,
   type DocId,
   type DocType,
   type FilePath,
@@ -48,6 +49,15 @@ export class SqliteBackend implements MaadBackend {
     if (!cols.some(c => c.name === 'updated_at')) {
       this.db.exec("ALTER TABLE documents ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''");
     }
+
+    // 0.7.12 — add created_at column. Existing rows backfill to updated_at
+    // as the best-available approximation (real creation time wasn't captured
+    // pre-0.7.12). Net-new databases skip the ALTER and start with the column
+    // already present from SCHEMA_SQL.
+    if (!cols.some(c => c.name === 'created_at')) {
+      this.db.exec("ALTER TABLE documents ADD COLUMN created_at TEXT NOT NULL DEFAULT ''");
+      this.db.exec("UPDATE documents SET created_at = updated_at WHERE created_at = ''");
+    }
   }
 
   close(): void {
@@ -59,8 +69,8 @@ export class SqliteBackend implements MaadBackend {
   putDocument(doc: DocumentRecord): void {
     this.db.prepare(`
       INSERT OR REPLACE INTO documents
-        (doc_id, doc_type, schema_ref, file_path, file_hash, version, deleted, indexed_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (doc_id, doc_type, schema_ref, file_path, file_hash, version, deleted, indexed_at, updated_at, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       doc.docId as string,
       doc.docType as string,
@@ -71,6 +81,7 @@ export class SqliteBackend implements MaadBackend {
       doc.deleted ? 1 : 0,
       doc.indexedAt,
       doc.updatedAt,
+      doc.createdAt,
     );
   }
 
@@ -197,9 +208,27 @@ export class SqliteBackend implements MaadBackend {
   }
 
   getDocumentByPath(path: FilePath): DocumentRecord | null {
-    const row = this.db.prepare(
+    const original = path as string;
+    const stmt = this.db.prepare(
       'SELECT * FROM documents WHERE file_path = ? AND deleted = 0',
-    ).get(path as string) as RawDocRow | undefined;
+    );
+    let row = stmt.get(original) as RawDocRow | undefined;
+    // 0.7.12 — separator-tolerant lookup for the file_path canonicalization
+    // transition. Write-path emits forward-slash going forward, but legacy
+    // rows on Windows-written databases may still have backslash form until
+    // their next reindex touch (lazy migration). If the input form misses,
+    // try the alternate-separator form once before declaring missing. Cost:
+    // one extra query per miss during transition, zero in steady state.
+    if (!row) {
+      const alt = original.includes('\\')
+        ? original.replaceAll('\\', '/')
+        : original.includes('/')
+          ? original.replaceAll('/', '\\')
+          : null;
+      if (alt !== null) {
+        row = stmt.get(alt) as RawDocRow | undefined;
+      }
+    }
 
     return row ? rowToDocument(row) : null;
   }
@@ -224,14 +253,29 @@ export class SqliteBackend implements MaadBackend {
 
   findDocuments(query: DocumentQuery): DocumentMatch[] {
     const { where, params } = this.buildDocQuery(query);
+    // 0.7.12 — sort resolution. Engine layer validates sortBy as either a
+    // system sort key or an indexed schema field before we get here. Backend
+    // emits direct-column ORDER BY for system keys and the field_index
+    // subquery for schema fields. Deterministic tie-breaker on doc_id in the
+    // same direction so identical primary-sort values don't shuffle.
     let orderClause: string;
+    const dir = query.sortOrder === 'asc' ? 'ASC' : 'DESC';
     if (query.sortBy) {
-      const dir = query.sortOrder === 'asc' ? 'ASC' : 'DESC';
-      // Sort via field_index subquery — parameterized to prevent injection
-      orderClause = `ORDER BY (SELECT fi.field_value FROM field_index fi WHERE fi.doc_id = d.doc_id AND fi.field_name = ? LIMIT 1) ${dir}`;
-      params.push(query.sortBy);
+      const systemColumn = resolveSystemSortKey(query.sortBy);
+      if (systemColumn) {
+        if (systemColumn === 'doc_id') {
+          orderClause = `ORDER BY d.doc_id ${dir}`;
+        } else {
+          orderClause = `ORDER BY d.${systemColumn} ${dir}, d.doc_id ${dir}`;
+        }
+      } else {
+        // Schema field — parameterized to prevent injection. Tie-breaker on doc_id.
+        orderClause = `ORDER BY (SELECT fi.field_value FROM field_index fi WHERE fi.doc_id = d.doc_id AND fi.field_name = ? LIMIT 1) ${dir}, d.doc_id ${dir}`;
+        params.push(query.sortBy);
+      }
     } else {
-      orderClause = 'ORDER BY d.indexed_at DESC';
+      // Default sort: most-recently-indexed first with doc_id tie-breaker.
+      orderClause = 'ORDER BY d.indexed_at DESC, d.doc_id DESC';
     }
     const sql = `SELECT d.* FROM documents d WHERE ${where} ${orderClause} LIMIT ? OFFSET ?`;
     params.push(query.limit ?? 50, query.offset ?? 0);
@@ -705,6 +749,7 @@ function rowToDocument(row: RawDocRow): DocumentRecord {
     deleted: row.deleted === 1,
     indexedAt: row.indexed_at,
     updatedAt: row.updated_at,
+    createdAt: row.created_at,
   };
 }
 
@@ -720,6 +765,7 @@ interface RawDocRow {
   deleted: number;
   indexed_at: string;
   updated_at: string;
+  created_at: string;
 }
 
 interface RawObjectRow {

@@ -108,6 +108,9 @@ export interface GetResult {
   docType: DocType;
   version: number;
   updatedAt: string;
+  // 0.7.12 — engine-stamped creation time. Pre-0.7.12 docs backfilled
+  // from updatedAt on database migration.
+  createdAt: string;
   depth: 'hot' | 'warm' | 'cold';
   frontmatter: Record<string, unknown>;
   block?: { id: string | null; heading: string; content: string } | undefined;

@@ -27,7 +27,7 @@ import { validateFrontmatter } from '../schema/index.js';
 import { extract } from '../extractor/index.js';
 import type { EngineContext } from './context.js';
 import type { IndexResult } from './types.js';
-import { collectMarkdownFiles, computeNumericValue } from './helpers.js';
+import { collectMarkdownFiles, computeNumericValue, toCanonicalRelPath } from './helpers.js';
 
 // 0.7.4 (fup-2026-093) — Per-type schema fingerprint covering the indexed
 // field set. When a schema edit flips a field's `index: false → true` (or
@@ -84,7 +84,10 @@ export async function indexAll(ctx: EngineContext, opts?: { force?: boolean }): 
 
     for (const file of files) {
       result.scanned++;
-      const fp = toFilePath(path.relative(ctx.projectRoot, file));
+      // 0.7.12 — canonical (forward-slash) form for both the skip-by-hash
+      // lookup against getAllFileHashes (which now stores '/' post-0.7.12)
+      // and the filesOnDisk set used by the stale-row sweep.
+      const fp = toFilePath(toCanonicalRelPath(ctx.projectRoot, file));
       const absPath = toFilePath(file);
       filesOnDisk.add(fp as string);
 
@@ -193,7 +196,11 @@ export function processDocument(ctx: EngineContext, parsed: ParsedDocument): Res
 
   const extraction = extract(bound, schema, ctx.registry);
 
-  const relativePath = path.relative(ctx.projectRoot, parsed.filePath as string);
+  // 0.7.12 — canonicalize file_path to forward slashes at the write boundary
+  // so the SQLite index is portable across Windows/POSIX. Helper in
+  // engine/helpers.ts is the single source of truth for relative-path
+  // canonicalization; reuse it across all write-path sites.
+  const relativePath = toCanonicalRelPath(ctx.projectRoot, parsed.filePath as string);
   const existing = ctx.backend.getDocument(bound.docId);
   // Only bump version when file content actually changed — reindex of unchanged files preserves version
   const contentChanged = !existing || existing.fileHash !== parsed.fileHash;
@@ -201,6 +208,12 @@ export function processDocument(ctx: EngineContext, parsed: ParsedDocument): Res
     ? (contentChanged ? existing.version + 1 : existing.version)
     : 1;
   const now = new Date().toISOString();
+  // 0.7.12 — engine-stamped createdAt. Preserve on existing docs (immutable
+  // once set), backfill from updatedAt for pre-0.7.12 rows that migrated in
+  // with an empty createdAt, and stamp `now` for net-new docs.
+  const createdAt = existing
+    ? (existing.createdAt || existing.updatedAt || now)
+    : now;
   const docRecord: DocumentRecord = {
     docId: bound.docId,
     docType: bound.docType,
@@ -211,6 +224,7 @@ export function processDocument(ctx: EngineContext, parsed: ParsedDocument): Res
     deleted: false,
     indexedAt: now,
     updatedAt: contentChanged ? now : (existing?.updatedAt ?? now),
+    createdAt,
   };
 
   const fieldIndex: Array<{ name: string; value: string; numericValue: number | null; type: string }> = [];

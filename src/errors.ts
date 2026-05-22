@@ -87,7 +87,12 @@ export type ErrorCode =
   | 'REPAIR_REQUIRES_MIGRATION'
   // 0.7.11 — maad_search boundary rejects unknown primitive values up front
   // instead of silently returning zero rows from a SQL miss on the column.
-  | 'INVALID_PRIMITIVE';
+  | 'INVALID_PRIMITIVE'
+  // 0.7.12 — maad_query.sortBy must be a system sort key (updated_at,
+  // indexed_at, doc_id, doc_type, created_at and camelCase aliases) or an
+  // indexed schema field of the requested docType. Unknown/unindexed sort
+  // keys reject up front instead of silently degrading to all-NULL ordering.
+  | 'UNSUPPORTED_SORT_FIELD';
 
 export interface MaadError {
   code: ErrorCode;

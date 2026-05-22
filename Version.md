@@ -1,9 +1,19 @@
 ---
 enabled: true
-current: 0.7.11
+current: 0.7.12
 ---
 
 # Version History
+
+## 0.7.12 — 2026-05-22
+
+`maad_query` sort contract. `sortBy` now accepts system sort keys (`updated_at`, `indexed_at`, `doc_id`, `doc_type`, `created_at` plus camelCase aliases) on the `documents.*` columns, or any indexed schema field of the requested `docType`. Unknown or unindexed keys reject up front with new `UNSUPPORTED_SORT_FIELD` error instead of silently degrading to all-NULL ordering. Every sorted query (including the default `indexed_at DESC`) emits a deterministic `doc_id` tie-breaker in the requested direction.
+
+Engine-stamped `createdAt`. New `documents.created_at` column populated on create, preserved across updates. Pre-0.7.12 databases pick up the column via idempotent `ALTER TABLE` on first boot; existing rows backfill `created_at = updated_at` as the best-available approximation. `GetResult.createdAt` is part of the read surface.
+
+File-path canonicalization. `documents.file_path` is stored in forward-slash form regardless of host platform. New `toCanonicalRelPath()` helper in `src/engine/helpers.ts` routes through `indexFile`, `createDocument`, and `softDelete`. `getDocumentByPath` gains a separator-tolerant fallback so legacy backslash rows from pre-0.7.12 Windows writes are still resolvable; they migrate on next reindex (lazy migration). The "two forms of relPath" workaround in `verifyIntegrity` is gone.
+
+952 tests passing (+20 over 0.7.11). New error code: `UNSUPPORTED_SORT_FIELD`. No new dependencies. Behavior change: callers that previously relied on unknown-sort-key silent degradation now receive an error.
 
 ## 0.7.11 — 2026-05-22
 
@@ -393,7 +403,7 @@ Initial engine build. Parser, registry, schema, extractor (11 primitives), SQLit
 
 Phase plan locked in `dec-maadb-070-optimization-track` (2026-04-21). Releases through 0.8.0 form an agent-first optimization track; 0.8.5+ unchanged from prior roadmap.
 
-- **0.7.12** — Agent-First Engine (renumbered after 0.7.11 shipped the search-primitive-validation fix). `maad_status` cross-project rollup, followup `supersedes` schema field, canonical `_skills/session-protocol.md` in engine. Plus remaining composites that collapse common call chains: `maad_bulk_update_where`, `maad_context(docId)`, `maad_get_many`, `maad_related depth: 'hydrated'`, `maad_subscribe_from(cursor)`. (`maad_query depth: 'cold'|'full'` shipped early in 0.7.3.)
+- **0.7.13** — Agent-First Engine (renumbered after 0.7.12 shipped the sort contract + file-path canonicalization). `maad_status` cross-project rollup, followup `supersedes` schema field, canonical `_skills/session-protocol.md` in engine. Plus remaining composites that collapse common call chains: `maad_bulk_update_where`, `maad_context(docId)`, `maad_get_many`, `maad_related depth: 'hydrated'`, `maad_subscribe_from(cursor)`. (`maad_query depth: 'cold'|'full'` shipped early in 0.7.3.)
 - **0.8.0** — Operational Hygiene + Imports. `maad_prune_sessions` (stale-session sweeper), `maad_compact` (`VACUUM` + `git gc`), `maad_reindex_selective`, `maad_find_duplicates` + original Import workflow: `_inbox/` convention, source tracking, duplicate detection, readonly type flag.
 - **0.8.5** — Remote MCP hardening: per-connection role tiers, rate-limit policy, backpressure thresholds, mutex timeout, stress suite, metrics export, `git gc` automation.
 - **0.9.0** — Eviction Stage 2 + query power: LRU + hard pool cap (Stage 1 idle-timeout shipped in 0.7.3), in-place project mutations (lifts `INSTANCE_MUTATION_UNSUPPORTED`), FTS5, fuzzy entity matching, compound filters (AND/OR), cursor-based pagination.

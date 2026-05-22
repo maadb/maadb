@@ -15,6 +15,8 @@ import {
   docId as toDocId,
   docType as toDocType,
   filePath as toFilePath,
+  resolveSystemSortKey,
+  SYSTEM_SORT_KEY_ALIASES,
   type DocId,
   type DocType,
   type SchemaDefinition,
@@ -64,6 +66,7 @@ export async function getDocument(
     docType: doc.docType,
     version: doc.version,
     updatedAt: doc.updatedAt,
+    createdAt: doc.createdAt,
     depth,
     frontmatter,
   };
@@ -188,10 +191,77 @@ export function expandFilters(
   return ok(out);
 }
 
+// 0.7.12 — sort contract validator. Accepts a system sort key (any alias in
+// SYSTEM_SORT_KEY_ALIASES) regardless of docType, or an indexed schema field
+// for the requested docType. Without docType, only system keys are accepted.
+function validateSortBy(
+  ctx: EngineContext,
+  sortBy: string,
+  docType: DocType | undefined,
+): Result<true> {
+  if (resolveSystemSortKey(sortBy) !== null) return ok(true);
+
+  if (!docType) {
+    return singleErr('UNSUPPORTED_SORT_FIELD',
+      `sortBy '${sortBy}' is not a system sort key (${SYSTEM_SORT_KEY_ALIASES.join(', ')}). ` +
+      `Provide docType to sort by an indexed schema field.`,
+      undefined,
+      { provided: sortBy, systemKeys: SYSTEM_SORT_KEY_ALIASES },
+    );
+  }
+
+  const schema = ctx.schemaStore.getSchemaForType(docType);
+  if (!schema) {
+    return singleErr('UNSUPPORTED_SORT_FIELD',
+      `sortBy '${sortBy}' cannot be validated: no schema loaded for docType '${docType}'.`,
+      undefined,
+      { provided: sortBy, docType },
+    );
+  }
+
+  const field = schema.fields.get(sortBy);
+  if (!field) {
+    const indexedFields = [...schema.fields.values()]
+      .filter(f => f.index)
+      .map(f => f.name);
+    return singleErr('UNSUPPORTED_SORT_FIELD',
+      `sortBy '${sortBy}' is not a field on docType '${docType}'. ` +
+      `Use a system sort key (${SYSTEM_SORT_KEY_ALIASES.join(', ')}) or an indexed field: ` +
+      `[${indexedFields.join(', ')}].`,
+      undefined,
+      { provided: sortBy, docType, indexedFields, systemKeys: SYSTEM_SORT_KEY_ALIASES },
+    );
+  }
+
+  if (!field.index) {
+    const indexedFields = [...schema.fields.values()]
+      .filter(f => f.index)
+      .map(f => f.name);
+    return singleErr('UNSUPPORTED_SORT_FIELD',
+      `sortBy '${sortBy}' is a field on docType '${docType}' but not indexed. ` +
+      `Indexed fields available: [${indexedFields.join(', ')}]. ` +
+      `Or use a system sort key (${SYSTEM_SORT_KEY_ALIASES.join(', ')}).`,
+      undefined,
+      { provided: sortBy, docType, indexedFields, systemKeys: SYSTEM_SORT_KEY_ALIASES },
+    );
+  }
+
+  return ok(true);
+}
+
 export function findDocuments(ctx: EngineContext, query: DocumentQuery): Result<FindResult> {
   // 0.7.1 R2 — validate + expand filters into atomic per-field arrays.
   const expanded = expandFilters(query.filters as Record<string, unknown> | undefined);
   if (!expanded.ok) return expanded;
+
+  // 0.7.12 — sort contract. sortBy must be a system sort key (updated_at,
+  // indexed_at, doc_id, doc_type, created_at + camelCase aliases) or an
+  // indexed schema field of the requested docType. Unknown or unindexed keys
+  // reject up front so callers don't silently get all-NULL ordering.
+  if (query.sortBy !== undefined) {
+    const sortValidation = validateSortBy(ctx, query.sortBy, query.docType);
+    if (!sortValidation.ok) return sortValidation;
+  }
 
   let effectiveQuery: DocumentQuery = { ...query, filters: expanded.value as any };
   let limitClamped: { requested: number; applied: number } | undefined;
@@ -799,18 +869,16 @@ export async function verifyIntegrity(
 
     const files = await collectMarkdownFiles(dirPath);
     for (const file of files) {
-      // Two forms of the relative path: native (matches what indexing stored
-      // in documents.file_path — backslash on Windows) for the DB lookup, and
-      // forward-slash-normalized for the filesOnDisk set later compared
-      // against getAllFileHashes values that are normalized the same way.
-      // Without this split the lookup always misses on Windows and every
-      // record gets miscounted as missing_in_index.
-      const relPathNative = path.relative(ctx.projectRoot, file);
-      const relPath = relPathNative.replace(/\\/g, '/');
+      // 0.7.12 — write-path canonicalizes file_path to forward slashes and
+      // getDocumentByPath is now separator-tolerant, so the prior two-forms
+      // dance is unnecessary. Look up by the canonical (forward-slash) form;
+      // the backend's fallback handles any legacy backslash rows still in the
+      // index from pre-0.7.12 Windows writes.
+      const relPath = path.relative(ctx.projectRoot, file).split(path.sep).join('/');
       filesOnDisk.add(relPath);
       scanned++;
 
-      const row = ctx.backend.getDocumentByPath(toFilePath(relPathNative));
+      const row = ctx.backend.getDocumentByPath(toFilePath(relPath));
       if (!row) {
         // filter scope is index-only — skip missing_in_index when filter active
         if (enabled.has('missing_in_index') && allowedDocIds === null) {

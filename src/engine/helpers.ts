@@ -9,6 +9,17 @@ import { glob } from 'node:fs/promises';
 import { parseMatter } from '../parser/matter.js';
 import type { DocumentRecord } from '../types.js';
 
+/**
+ * 0.7.12 — canonical relative-path helper. path.relative emits native
+ * separators (backslash on Windows); we store and look up file_path in
+ * forward-slash form so the SQLite index stays portable across platforms.
+ * Every write-path site that builds a documents.file_path value should
+ * route through this helper.
+ */
+export function toCanonicalRelPath(projectRoot: string, absPath: string): string {
+  return path.relative(projectRoot, absPath).split(path.sep).join('/');
+}
+
 export async function readFrontmatter(projectRoot: string, doc: DocumentRecord): Promise<Record<string, unknown>> {
   const absPath = path.join(projectRoot, doc.filePath as string);
   const raw = await readFile(absPath, 'utf-8');

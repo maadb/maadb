@@ -60,6 +60,32 @@ export function isValidPrimitive(value: string): value is Primitive {
   return (PRIMITIVES as readonly string[]).includes(value);
 }
 
+// --- System Sort Keys (0.7.12) ---------------------------------------------
+// maad_query.sortBy accepts these aliases as direct-column sorts on the
+// documents table, in addition to any indexed schema field for the requested
+// docType. Both snake_case and camelCase forms map to the same column.
+
+export const SYSTEM_SORT_KEYS: Readonly<Record<string, 'doc_id' | 'doc_type' | 'updated_at' | 'indexed_at' | 'created_at'>> = {
+  doc_id: 'doc_id',
+  docId: 'doc_id',
+  doc_type: 'doc_type',
+  docType: 'doc_type',
+  updated_at: 'updated_at',
+  updatedAt: 'updated_at',
+  indexed_at: 'indexed_at',
+  indexedAt: 'indexed_at',
+  created_at: 'created_at',
+  createdAt: 'created_at',
+} as const;
+
+export type SystemSortColumn = 'doc_id' | 'doc_type' | 'updated_at' | 'indexed_at' | 'created_at';
+
+export function resolveSystemSortKey(key: string): SystemSortColumn | null {
+  return SYSTEM_SORT_KEYS[key] ?? null;
+}
+
+export const SYSTEM_SORT_KEY_ALIASES: readonly string[] = Object.keys(SYSTEM_SORT_KEYS);
+
 export const DEFAULT_SUBTYPE_MAP: Record<string, Primitive> = {
   // primitives self-map (so [[date:...]] resolves to 'date', not 'entity')
   entity: 'entity',
@@ -359,6 +385,10 @@ export interface DocumentRecord {
   docId: DocId;
   docType: DocType;
   schemaRef: SchemaRef;
+  // 0.7.12 — engine-stamped creation time. Pre-0.7.12 docs backfilled from
+  // updated_at on first read after migration (best-available approximation;
+  // real creation time wasn't captured).
+  createdAt: string;
   filePath: FilePath;
   fileHash: string;
   version: number;

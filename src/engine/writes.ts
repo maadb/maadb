@@ -25,7 +25,7 @@ import type { CreateResult, UpdateResult, DeleteResult, BulkCreateInput, BulkUpd
 import type { CommitOutcome } from '../git/index.js';
 import type { ValidationWarning } from '../types.js';
 import { indexFile } from './indexing.js';
-import { generateDocId, readFrontmatter } from './helpers.js';
+import { generateDocId, readFrontmatter, toCanonicalRelPath } from './helpers.js';
 import { atomicWrite } from './journal.js';
 import { checkDocIdSafe } from './docid-safe.js';
 import { isContainedIn } from './pathguard.js';
@@ -130,7 +130,7 @@ export async function createDocument(
 
   const result: CreateResult = {
     docId: toDocId(id),
-    filePath: toFilePath(path.relative(ctx.projectRoot, fp)),
+    filePath: toFilePath(toCanonicalRelPath(ctx.projectRoot, fp)),
     version: 1,
     validation,
     writeDurable: commitOutcome.status !== 'failed',
@@ -314,7 +314,7 @@ export async function deleteDocument(
 
     const updatedDoc: DocumentRecord = {
       ...doc,
-      filePath: toFilePath(path.relative(ctx.projectRoot, deletedPath)),
+      filePath: toFilePath(toCanonicalRelPath(ctx.projectRoot, deletedPath)),
       deleted: true,
       indexedAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),

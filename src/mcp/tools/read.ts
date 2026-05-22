@@ -34,7 +34,7 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
       docType: z.string().describe('Document type to query'),
       filters: z.any().optional().describe('Field filters. Shorthand: { status: "active" }. Single op: { opened_at: { op: "gte", value: "2026-01-01" } }. Range shortcut: { opened_at: { op: "between", value: ["2026-03-01", "2026-03-31"] } }. Array-of-ops (AND): { opened_at: [{op: "gte", value: "2026-03-01"}, {op: "lte", value: "2026-03-31"}] }. Ops: eq, neq, gt, gte, lt, lte, in, contains, between.'),
       fields: z.array(z.string()).optional().describe('Field names to return inline (e.g. ["name", "status"]). Indexed fields only.'),
-      sortBy: z.string().optional().describe('Indexed field to sort by'),
+      sortBy: z.string().optional().describe('System sort key (updated_at, indexed_at, doc_id, doc_type, created_at — camelCase aliases also accepted) OR an indexed schema field for the requested docType. Unknown / unindexed keys reject with UNSUPPORTED_SORT_FIELD instead of silently returning all-NULL ordering. Always emits a deterministic doc_id tie-breaker.'),
       sortOrder: z.enum(['asc', 'desc']).optional().describe('Sort direction (default desc)'),
       limit: z.number().optional().describe('Max results (default 50, capped at 500). Over-requests are clamped silently with _meta.limit_clamped set.'),
       offset: z.number().optional().describe('Skip first N results'),
