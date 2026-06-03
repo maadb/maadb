@@ -6,6 +6,10 @@ MAAD.md
 .env
 .env.*
 
+# Operator/agent overlays — never tracked (Patchnet Master Dev charter)
+*.local.md
+AGENTS.md
+
 # MAAD engine artifacts — created if the engine is ever pointed at this repo root.
 # The source repo is not itself a MAAD project; these should never be tracked.
 _backend/
