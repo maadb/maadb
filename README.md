@@ -3,9 +3,9 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/node-%E2%89%A524-brightgreen.svg)](package.json)
 [![TypeScript](https://img.shields.io/badge/typescript-strict-blue.svg)](tsconfig.json)
-[![Tests](https://img.shields.io/badge/tests-873%20passing-brightgreen.svg)](tests)
+[![Tests](https://img.shields.io/badge/tests-982%20passing-brightgreen.svg)](tests)
 [![npm](https://img.shields.io/npm/v/@maadb/core.svg)](https://www.npmjs.com/package/@maadb/core)
-[![Version](https://img.shields.io/badge/version-0.7.10--rc.5-purple.svg)](Version.md)
+[![Version](https://img.shields.io/badge/version-0.7.15-purple.svg)](Version.md)
 
 > **Markdown is the database. The engine makes it queryable.**
 
@@ -283,7 +283,7 @@ node dist/cli.js --instance /path/to/instance.yaml serve \
   --transport http --http-host 127.0.0.1 --http-port 7733
 ```
 
-Hot-reload tokens + instance config on edits: `sudo systemctl reload maad` (or `docker compose kill -s SIGHUP maad`). Rotate tokens via `maad auth rotate-token --id=tok-<id>`; revoke via `maad auth revoke-token --id=tok-<id>`. Full auth primitives: [`docs/specs/0.7.0-scoped-auth.md`](docs/specs/0.7.0-scoped-auth.md).
+Hot-reload tokens + instance config on edits: `sudo systemctl reload maad` (or `docker compose kill -s SIGHUP maad`). Rotate tokens via `maad auth rotate-token --id=tok-<id>`; revoke via `maad auth revoke-token --id=tok-<id>`. Full auth primitives: [`docs/archive/0.7.0-scoped-auth.md`](docs/archive/0.7.0-scoped-auth.md).
 
 Deployment guides:
 
@@ -350,16 +350,16 @@ In multi-project mode, session tools are always available pre-bind: `maad_projec
 
 ## Current state
 
-**Current:** v0.7.10-rc.5 — Runtime memory-pressure observability now covers both V8 heap pressure and cgroup/RSS pressure. Published pre-release builds use the npm `next` dist-tag; stable users continue to receive 0.7.9 on `latest`.
+**Current:** v0.7.15 — `maad version` command, CI on every push/PR (Ubuntu + Windows), LF line-ending enforcement, MAADb brand sweep, packaging hardening.
 
 Recent shipped scope:
-- **0.7.8** — Repository hygiene, dependency tightening, Node 24 baseline
-- **0.7.7** — Schema-cache coherence across concurrent writers (silent index-corruption fix)
-- **0.7.6** — Parser / write-path security hardening (`INVALID_DOC_ID` validator + path-containment guards)
-- **0.7.5** — Unix domain socket transport (`MAAD_TRANSPORT=unix`)
-- **0.7.4** — Reindex auto-detects schema-index changes (no more `--force` after schema flips)
-- **0.7.3** — Engine hardening + agent-first composites (YAML coercion guard, bulk caps, commit identity)
-- **0.7.0–0.7.1** — Scoped auth & identity, agent-first aggregate capabilities
+- **0.7.14** — Correctness patch from a full engine audit: CRLF/BOM-tolerant writes, merged git child environment, numeric sort ordering, composite filters on join/verify, pagination guards, pathspec-scoped audit commits
+- **0.7.13** — Per-document index-time memory guards (annotation cap + byte backstop) so one pathological document can't exhaust the engine process
+- **0.7.12** — `maad_query` sort contract (`UNSUPPORTED_SORT_FIELD` instead of silent NULL ordering), engine-stamped `createdAt`, file-path canonicalization
+- **0.7.11** — `maad_search` rejects unknown primitives up front (`INVALID_PRIMITIVE`)
+- **0.7.10** — Integrity & cleanup: `maad_verify mode: 'integrity'`, `maad_backup` snapshots, destructive cleanup primitives under the confirm contract, memory-pressure observability, pino write-body redaction
+- **0.7.5–0.7.8** — Unix socket transport, schema-cache coherence, write-path security hardening, Node 24 baseline
+- **0.7.0–0.7.4** — Scoped auth & identity, agent-first aggregates, reindex schema-change detection
 
 See [Version.md](Version.md) for the full release history and forward plan.
 
@@ -367,7 +367,7 @@ See [Version.md](Version.md) for the full release history and forward plan.
 
 - TypeScript strict, Node.js 24+ (current Active LTS)
 - 6 production dependencies: `better-sqlite3`, `gray-matter`, `js-yaml`, `simple-git`, `@modelcontextprotocol/sdk`, `pino`
-- 817 tests, Vitest
+- 982 tests, Vitest — run on every push/PR across Ubuntu and Windows
 - MIT license, pre-1.0, actively developed
 
 ## License

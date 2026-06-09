@@ -1,9 +1,19 @@
 ---
 enabled: true
-current: 0.7.14
+current: 0.7.15
 ---
 
 # Version History
+
+## 0.7.15 — 2026-06-09
+
+Public-CLI housekeeping + CI. New `maad version` command (also `--version` / `-v`) — previously fell through to the help screen as an unknown command. A CI workflow now runs build, typecheck, and the full test suite on every push and pull request, on Node 24 across Ubuntu **and Windows** — the Windows leg guards the CRLF/path-separator class fixed in 0.7.14; until now tests only ran at release-tag time, so dependency PRs merged unverified. `.gitattributes` locks LF line endings repo-wide; `.nvmrc` pins Node 24.
+
+Brand sweep: user-facing `MAAD` display strings become `MAADb` in the CLI help header, generated MAAD.md content, Architect skill text, and generated CLAUDE.md. The `MAAD.md` filename, `MAAD_*` env var prefix, error codes, and all code identifiers are unchanged — those are public contracts.
+
+Packaging: the unused `MAAD.md` / `_skills/` entries are dropped from package.json `files` (both are generated per-project at runtime and never shipped; the entries only created a risk of publishing stale local artifacts from a dev checkout). The publish workflow gains a concurrency group and a packed-tarball sanity check; the same tarball check runs in CI. README refreshed: badges, current-state section, and a broken spec-doc link.
+
+982 tests passing (unchanged). No engine behavior changes. No new dependencies.
 
 ## 0.7.14 — 2026-06-09
 
@@ -427,10 +437,10 @@ Initial engine build. Parser, registry, schema, extractor (11 primitives), SQLit
 
 ## Planned
 
-Releases through 0.8.0 form an agent-first optimization track; 0.8.5+ unchanged from prior roadmap. Cascade renumbered again after 0.7.13 shipped as the index-memory guards and 0.7.14 as the audit correctness patch.
+Releases through 0.8.0 form an agent-first optimization track; 0.8.5+ unchanged from prior roadmap. Cascade renumbered after 0.7.13 (index-memory guards), 0.7.14 (audit correctness patch), and 0.7.15 (housekeeping + CI) consumed the planned slots.
 
-- **0.7.15** — Durability & hot-path (from the 2026-06-09 engine audit). fsync'd atomic writes (unique temp suffix, failure cleanup), `maad_summary` rework (index-time validation state instead of full-corpus sync scan), journal reconcile that repairs `file_written` divergence and survives failed commits, prepared-statement caching, `documents(updated_at, doc_id)` index, pathspec-limited per-write `git status`, engine-owned `git gc --auto` hook, `indexAll` mtime+size precheck.
-- **0.7.16** — Agent-First Engine (renumbered from 0.7.13). `maad_status` cross-project rollup, followup `supersedes` schema field, canonical `_skills/session-protocol.md` in engine. Plus remaining composites that collapse common call chains: `maad_bulk_update_where`, `maad_context(docId)`, `maad_get_many`, `maad_related depth: 'hydrated'`, `maad_subscribe_from(cursor)`. (`maad_query depth: 'cold'|'full'` shipped early in 0.7.3.)
+- **0.7.16** — Durability & hot-path (from the 2026-06-09 engine audit). fsync'd atomic writes (unique temp suffix, failure cleanup), `maad_summary` rework (index-time validation state instead of full-corpus sync scan), journal reconcile that repairs `file_written` divergence and survives failed commits, prepared-statement caching, `documents(updated_at, doc_id)` index, pathspec-limited per-write `git status`, engine-owned `git gc --auto` hook, `indexAll` mtime+size precheck.
+- **0.7.17** — Agent-First Engine (renumbered from 0.7.13). `maad_status` cross-project rollup, followup `supersedes` schema field, canonical `_skills/session-protocol.md` in engine. Plus remaining composites that collapse common call chains: `maad_bulk_update_where`, `maad_context(docId)`, `maad_get_many`, `maad_related depth: 'hydrated'`, `maad_subscribe_from(cursor)`. (`maad_query depth: 'cold'|'full'` shipped early in 0.7.3.)
 - **0.8.0** — Operational Hygiene + Imports. `maad_prune_sessions` (stale-session sweeper), `maad_compact` (`VACUUM` + `git gc`), `maad_reindex_selective`, `maad_find_duplicates` + original Import workflow: `_inbox/` convention, source tracking, duplicate detection, readonly type flag.
 - **0.8.5** — Remote MCP hardening: per-connection role tiers, rate-limit policy (per-token aggregation + live-session caps), backpressure thresholds, mutex timeout, stress suite, metrics export.
 - **0.9.0** — Eviction Stage 2 + query power: LRU + hard pool cap (Stage 1 idle-timeout shipped in 0.7.3), in-place project mutations (lifts `INSTANCE_MUTATION_UNSUPPORTED`), FTS5, fuzzy entity matching, compound filters (AND/OR), cursor-based pagination.

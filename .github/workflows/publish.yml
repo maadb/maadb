@@ -9,6 +9,11 @@ permissions:
   contents: read
   id-token: write   # Required for npm Trusted Publishers (OIDC)
 
+# Two tags pushed close together must publish sequentially, not race.
+concurrency:
+  group: npm-publish
+  cancel-in-progress: false
+
 jobs:
   publish:
     runs-on: ubuntu-latest
@@ -44,6 +49,9 @@ jobs:
             exit 1
           fi
           echo "Tag $GITHUB_REF_NAME matches package.json version $PKG_VERSION"
+
+      - name: Verify packed tarball contains the CLI entry
+        run: node -e "const o=JSON.parse(require('child_process').execSync('npm pack --dry-run --json').toString()); const f=o[0].files.map(x=>x.path); if(!f.includes('dist/cli.js')||!f.includes('dist/engine.js')){console.error('tarball missing dist entries');process.exit(1)} console.log(f.length+' files, dist entries present')"
 
       - name: Determine npm dist-tag
         id: dist-tag

@@ -1,0 +1,6 @@
+# Normalize line endings: LF in the repo and working tree regardless of host
+# platform (the engine's write path emits LF; mixed checkouts caused the CRLF
+# class of bugs fixed in 0.7.14). Windows-native script types stay CRLF.
+* text=auto eol=lf
+*.bat text eol=crlf
+*.ps1 text eol=crlf

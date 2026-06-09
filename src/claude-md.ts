@@ -1,16 +1,16 @@
 // ============================================================================
-// CLAUDE.md Generator — Agent instructions for MCP-first MAAD workflow
+// CLAUDE.md Generator — Agent instructions for MCP-first MAADb workflow
 // Generated on init. Tells the LLM how to work with this project.
 // ============================================================================
 
 export function generateClaudeMd(): string {
-  return `# MAAD Project — Agent Instructions
+  return `# MAADb Project — Agent Instructions
 
 ## How to work with this project
 
-This is a MAAD project. You have MCP tools for all data operations.
+This is a MAADb project. You have MCP tools for all data operations.
 
-**Use MAAD MCP tools for everything.** Do not use bash, shell commands, or direct file reads for data access. If a tool fails, report the error — do not fall back to shell.
+**Use MAADb MCP tools for everything.** Do not use bash, shell commands, or direct file reads for data access. If a tool fails, report the error — do not fall back to shell.
 
 ## Boot sequence
 

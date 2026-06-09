@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 // ============================================================================
-// MAAD CLI — Command dispatch
+// MAADb CLI — Command dispatch
 // ============================================================================
 
 import path from 'node:path';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type { CliContext } from './helpers.js';
 import { cmdScan, cmdSummary, cmdDescribe } from './commands/discover.js';
@@ -76,6 +77,11 @@ async function main(): Promise<void> {
     // MCP
     case 'serve':
       await cmdServe();
+      break;
+    case 'version':
+    case '--version':
+    case '-v':
+      printVersion();
       break;
     case 'help':
     case '--help':
@@ -186,14 +192,26 @@ async function cmdServe(): Promise<void> {
   }
 }
 
+function printVersion(): void {
+  // dist/cli/index.js → two levels up to the package root. package.json
+  // always ships in the npm tarball, so this never misses on an install.
+  try {
+    const pkgPath = path.resolve(__dirname, '..', '..', 'package.json');
+    const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as { version?: string };
+    console.log(pkg.version ?? 'unknown');
+  } catch {
+    console.log('unknown');
+  }
+}
+
 function printHelp(): void {
   console.log(`
-MAAD — Markdown As A Database
+MAADb — Markdown As A Database
 
 Usage: maad <command> [options]
 
 Commands:
-  init [dir]                        Initialize a new MAAD project
+  init [dir]                        Initialize a new MAADb project
   scan <file.md|dir>                 Analyze raw markdown (no registry needed)
   summary                           Project snapshot (types, counts, sample IDs, object inventory)
   describe                          Show project overview
@@ -209,6 +227,7 @@ Commands:
   parse <file.md>                   Parse a file and print the result
   history <doc_id>                  Show git history for a document
   audit [--since date]              Show project-wide activity
+  version                           Print the installed version (also --version, -v)
   serve [--transport stdio|http] [--role ...] [--prov ...]  Start MCP server
 
 Options:
