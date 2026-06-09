@@ -10,8 +10,7 @@ import type { SchemaDefinition } from '../types.js';
 // back as a non-string under our CORE_SCHEMA loader must be quoted, or string
 // fields silently corrupt on read. The static keyword/numeric checks below
 // catch the common cases; this guard is the catch-all that future-proofs us
-// against any implicit-tag scalar we forgot to enumerate (leading-zero ints,
-// sci-notation lookalikes like `1e38892`, hex/octal literals, etc.).
+// against any implicit-tag scalar we forgot to enumerate.
 function wouldCoerceFromString(candidate: string): boolean {
   try {
     const parsed = yaml.load(candidate, { schema: yaml.CORE_SCHEMA });
@@ -20,6 +19,16 @@ function wouldCoerceFromString(candidate: string): boolean {
     return true;
   }
 }
+
+// Version-independent numeric-lookalike check: YAML 1.2 core int/float/hex/
+// octal/binary forms plus 1.1-style underscore digits. The parse-back guard
+// above reflects whatever the *installed* js-yaml resolves — 4.2.0 stopped
+// resolving some forms (bare sci-notation like `1e38892`, underscore numbers)
+// that other downstream YAML parsers still coerce to numbers. A string field
+// must survive as a string under ANY parser, so anything number-shaped is
+// quoted statically rather than trusting one resolver's current behavior.
+const NUMERIC_LOOKALIKE =
+  /^[-+]?(0[box][0-9a-fA-F_]+|(\.[0-9_]+|[0-9][0-9_]*(\.[0-9_]*)?)([eE][-+]?[0-9_]+)?|\.(inf|Inf|INF)|\.?(nan|NaN|NAN))$/;
 
 export function serializeFrontmatter(
   frontmatter: Record<string, unknown>,
@@ -107,6 +116,7 @@ export function serializeField(key: string, value: unknown): string {
     str === 'true' || str === 'false' ||
     str === 'null' || str === 'yes' || str === 'no' ||
     /^\d/.test(str) && /[^\d.eE+-]/.test(str) || // looks numeric but isn't
+    NUMERIC_LOOKALIKE.test(str) || // number-shaped under any YAML parser
     wouldCoerceFromString(str) // catch-all: any implicit-tag coercion forces quotes
   ) {
     return `${key}: "${str.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
