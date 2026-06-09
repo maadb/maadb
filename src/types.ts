@@ -434,6 +434,12 @@ export interface DocumentQuery {
   fields?: string[];
   sortBy?: string;
   sortOrder?: 'asc' | 'desc';
+  /**
+   * Set by the engine when sortBy is a numeric schema field (number/amount):
+   * the backend then orders on field_index.numeric_value instead of the TEXT
+   * field_value column, so 9 < 100 sorts numerically rather than "100" < "9".
+   */
+  sortNumeric?: boolean;
   limit?: number;
   offset?: number;
 }

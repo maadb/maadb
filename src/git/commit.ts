@@ -152,9 +152,13 @@ export async function autoCommit(
     // Check if there's anything to commit. Update paths where the file
     // actually equals its on-disk form produce an empty staged list — this
     // is benign (record is durable; git history matches state).
+    // Pathspec-scoped to the operation's files: unrelated staged content
+    // (operator activity, a prior failed commit) must neither trip this
+    // check nor be swept into the commit below under this op's message —
+    // the maad:<action> subject line is the audit trail.
     let status;
     try {
-      status = await git.status();
+      status = await git.status(['--', ...opts.files]);
     } catch (e) {
       return {
         status: 'failed',
@@ -181,16 +185,14 @@ export async function autoCommit(
     const message = formatCommitMessage(opts);
     let result;
     try {
-      // 0.7.3 (fup-2026-095) — set identity env per-call so we never depend
-      // on the host's `git config user.name/user.email`. simple-git's .env()
-      // is chainable and applies to the next spawned git process.
-      const identity = resolveCommitAuthor();
+      // 0.7.3 (fup-2026-095) — inject identity env so we never depend on the
+      // host's `git config user.name/user.email`. Must merge over process.env:
+      // simple-git's .env() REPLACES the child environment (and persists on
+      // the shared executor), so the key-by-key form stripped PATH/HOME/
+      // safe.directory from every subsequent git spawn on this instance.
       result = await git
-        .env('GIT_AUTHOR_NAME', identity.GIT_AUTHOR_NAME)
-        .env('GIT_AUTHOR_EMAIL', identity.GIT_AUTHOR_EMAIL)
-        .env('GIT_COMMITTER_NAME', identity.GIT_COMMITTER_NAME)
-        .env('GIT_COMMITTER_EMAIL', identity.GIT_COMMITTER_EMAIL)
-        .commit(message);
+        .env({ ...process.env, ...resolveCommitAuthor() })
+        .commit(message, opts.files);
     } catch (e) {
       // The add succeeded but the commit itself failed — worst case, since
       // the working tree is now dirty with staged but uncommitted changes.

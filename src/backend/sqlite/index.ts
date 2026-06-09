@@ -270,7 +270,14 @@ export class SqliteBackend implements MaadBackend {
         }
       } else {
         // Schema field — parameterized to prevent injection. Tie-breaker on doc_id.
-        orderClause = `ORDER BY (SELECT fi.field_value FROM field_index fi WHERE fi.doc_id = d.doc_id AND fi.field_name = ? LIMIT 1) ${dir}, d.doc_id ${dir}`;
+        // Numeric fields (number/amount, flagged by the engine via sortNumeric)
+        // order on numeric_value so 9 < 100; everything else on the TEXT column.
+        // MIN/MAX aggregate makes the sort key deterministic for list fields
+        // (one field_index row per item): ASC keys on the smallest item, DESC
+        // on the largest, instead of an arbitrary row.
+        const sortCol = query.sortNumeric ? 'fi.numeric_value' : 'fi.field_value';
+        const agg = dir === 'ASC' ? 'MIN' : 'MAX';
+        orderClause = `ORDER BY (SELECT ${agg}(${sortCol}) FROM field_index fi WHERE fi.doc_id = d.doc_id AND fi.field_name = ?) ${dir}, d.doc_id ${dir}`;
         params.push(query.sortBy);
       }
     } else {
@@ -278,7 +285,7 @@ export class SqliteBackend implements MaadBackend {
       orderClause = 'ORDER BY d.indexed_at DESC, d.doc_id DESC';
     }
     const sql = `SELECT d.* FROM documents d WHERE ${where} ${orderClause} LIMIT ? OFFSET ?`;
-    params.push(query.limit ?? 50, query.offset ?? 0);
+    params.push(sanitizePageParam(query.limit, 50), sanitizePageParam(query.offset, 0));
 
     const rows = this.db.prepare(sql).all(...params) as RawDocRow[];
 
@@ -340,7 +347,7 @@ export class SqliteBackend implements MaadBackend {
   findObjects(query: ObjectQuery): ObjectMatch[] {
     const { where, params } = this.buildObjQuery(query);
     const sql = `SELECT * FROM objects WHERE ${where} ORDER BY doc_id, source_line LIMIT ? OFFSET ?`;
-    params.push(query.limit ?? 50, query.offset ?? 0);
+    params.push(sanitizePageParam(query.limit, 50), sanitizePageParam(query.offset, 0));
 
     const rows = this.db.prepare(sql).all(...params) as RawObjectRow[];
 
@@ -664,6 +671,14 @@ export class SqliteBackend implements MaadBackend {
 }
 
 // --- Helpers ---------------------------------------------------------------
+
+// SQLite treats LIMIT -1 (any negative) as "no limit", and a fractional bind
+// errors the statement. The MCP boundary validates limit/offset as non-negative
+// integers; this is the last line of defense for direct engine callers.
+function sanitizePageParam(value: number | undefined, fallback: number): number {
+  if (value === undefined || !Number.isFinite(value)) return fallback;
+  return Math.max(0, Math.trunc(value));
+}
 
 function normalizeFilter(condition: FilterCondition | string | unknown): FilterCondition {
   // Shorthand: "value" → { op: 'eq', value: "value" }

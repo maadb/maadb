@@ -108,3 +108,36 @@ describe('aggregate — 0.7.1 limit clamp', () => {
     expect(result.value.limitClamped).toEqual({ requested: 50000, applied: MAX_AGGREGATE_LIMIT });
   });
 });
+
+// 0.7.14 — negative/fractional page params never reach SQLite raw. SQLite
+// treats LIMIT -1 as "no limit", so a negative limit previously returned the
+// entire table, defeating the cap this file exists to test.
+describe('negative and fractional limit/offset sanitization', () => {
+  it('limit -1 returns nothing instead of the whole table', () => {
+    const result = engine.findDocuments({ docType: docType('client'), limit: -1 });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.results.length).toBe(0);
+  });
+
+  it('negative offset is treated as 0', () => {
+    const result = engine.findDocuments({ docType: docType('client'), limit: 10, offset: -5 });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.results.length).toBeGreaterThan(0);
+  });
+
+  it('fractional limit does not error the statement', () => {
+    const result = engine.findDocuments({ docType: docType('client'), limit: 2.5 });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.results.length).toBeLessThanOrEqual(2);
+  });
+
+  it('searchObjects with limit -1 returns nothing instead of every object', () => {
+    const result = engine.searchObjects({ primitive: 'entity' as any, limit: -1 });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.results.length).toBe(0);
+  });
+});

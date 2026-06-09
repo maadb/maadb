@@ -29,14 +29,23 @@ export function generateDocument(
   return parts.join('\n');
 }
 
+// Delimiter matching must tolerate CRLF line endings and a UTF-8 BOM: markdown is
+// the canonical store and stays editable outside the engine, so files arrive with
+// whatever line endings the host editor or checkout produced. An LF-only match here
+// silently treats the whole file (frontmatter included) as body, and the update
+// path then wraps new frontmatter around it — committed corruption.
+
 export function extractBody(rawContent: string): string {
-  const match = /^---\n[\s\S]*?\n---\n?([\s\S]*)$/.exec(rawContent);
-  return match ? match[1]!.trim() : rawContent.trim();
+  const content = rawContent.replace(/^\uFEFF/, '');
+  const match = /^---\r?\n[\s\S]*?\r?\n---\r?\n?([\s\S]*)$/.exec(content);
+  const body = match ? match[1]! : content;
+  return body.replace(/\r\n/g, '\n').trim();
 }
 
 export function appendToBody(existingContent: string, additional: string): string {
-  const fmMatch = /^(---\n[\s\S]*?\n---\n?)([\s\S]*)$/.exec(existingContent);
-  if (!fmMatch) return existingContent + '\n\n' + additional;
+  const content = existingContent.replace(/^\uFEFF/, '');
+  const fmMatch = /^(---\r?\n[\s\S]*?\r?\n---\r?\n?)([\s\S]*)$/.exec(content);
+  if (!fmMatch) return content + '\n\n' + additional;
 
   const fmPart = fmMatch[1]!;
   const bodyPart = fmMatch[2]!.trimEnd();

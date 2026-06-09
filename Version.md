@@ -1,9 +1,22 @@
 ---
 enabled: true
-current: 0.7.13
+current: 0.7.14
 ---
 
 # Version History
+
+## 0.7.14 — 2026-06-09
+
+Correctness patch — six fixes from a full engine audit, each independently surfaced and test-covered.
+
+- **CRLF/BOM write tolerance.** `extractBody`/`appendToBody` matched frontmatter delimiters with LF-only regexes. Updating a document whose file carried CRLF line endings (Windows editors, `core.autocrlf=true` checkouts) treated the entire file — frontmatter included — as body and wrapped new frontmatter around it: silent, committed corruption. The parser side was already CRLF-tolerant, which masked the writer-side gap. Delimiters now tolerate `\r\n` and a UTF-8 BOM; extracted bodies normalize to LF.
+- **Git child environment.** simple-git's `.env()` *replaces* the child environment and persists on the shared instance — after the first auto-commit, every subsequent git spawn ran with only the four `GIT_AUTHOR_*`/`GIT_COMMITTER_*` vars (no `PATH`, no `HOME`, so no global git config or `safe.directory`). Worked by accident on most hosts. Identity is now merged over `process.env` at all three injection sites (autoCommit, initRepo, addAnnotatedTag).
+- **Numeric sort.** `maad_query` sortBy on a `number`/`amount` field ordered on the TEXT `field_value` column — `"100" < "2" < "9"` — despite `numeric_value` existing for exactly this. Numeric fields now order on `field_index.numeric_value`. List-field sort keys are deterministic (smallest item ascending, largest descending) instead of an arbitrary row.
+- **Filter expansion on join/verify.** `maad_join`, `maad_verify mode: 'count'`, and `maad_verify mode: 'integrity'` scope filters passed raw filters to the backend, which throws on documented composite shapes — a `between` filter on `maad_join` crashed instead of filtering. All three now expand filters identically to `maad_query`.
+- **Pagination guards.** `limit`/`offset` now validate as integers (`limit >= 1`, `offset >= 0`) at the MCP boundary, with a backend sanitization backstop. SQLite treats `LIMIT -1` as *unlimited*, so a negative limit previously returned the entire table straight past the 500-row cap.
+- **Pathspec-scoped commits.** Per-write auto-commits now stage-check and commit only the operation's own files. Unrelated staged content in a project repo (operator activity, leftovers from a prior failed commit) can no longer be swept into a `maad:<action>` commit under the wrong audit-trail message — and no longer trips the staged-change detection.
+
+982 tests passing (+27 over 0.7.13). No new dependencies, no new env vars, no schema changes. Behavior changes: invalid `limit`/`offset` values now reject at the tool boundary instead of passing through; numeric-field sorts return corrected order; join/verify composite filters that previously errored now work.
 
 ## 0.7.13 — 2026-06-08
 
@@ -414,11 +427,12 @@ Initial engine build. Parser, registry, schema, extractor (11 primitives), SQLit
 
 ## Planned
 
-Phase plan locked in `dec-maadb-070-optimization-track` (2026-04-21). Releases through 0.8.0 form an agent-first optimization track; 0.8.5+ unchanged from prior roadmap.
+Releases through 0.8.0 form an agent-first optimization track; 0.8.5+ unchanged from prior roadmap. Cascade renumbered again after 0.7.13 shipped as the index-memory guards and 0.7.14 as the audit correctness patch.
 
-- **0.7.13** — Agent-First Engine (renumbered after 0.7.12 shipped the sort contract + file-path canonicalization). `maad_status` cross-project rollup, followup `supersedes` schema field, canonical `_skills/session-protocol.md` in engine. Plus remaining composites that collapse common call chains: `maad_bulk_update_where`, `maad_context(docId)`, `maad_get_many`, `maad_related depth: 'hydrated'`, `maad_subscribe_from(cursor)`. (`maad_query depth: 'cold'|'full'` shipped early in 0.7.3.)
+- **0.7.15** — Durability & hot-path (from the 2026-06-09 engine audit). fsync'd atomic writes (unique temp suffix, failure cleanup), `maad_summary` rework (index-time validation state instead of full-corpus sync scan), journal reconcile that repairs `file_written` divergence and survives failed commits, prepared-statement caching, `documents(updated_at, doc_id)` index, pathspec-limited per-write `git status`, engine-owned `git gc --auto` hook, `indexAll` mtime+size precheck.
+- **0.7.16** — Agent-First Engine (renumbered from 0.7.13). `maad_status` cross-project rollup, followup `supersedes` schema field, canonical `_skills/session-protocol.md` in engine. Plus remaining composites that collapse common call chains: `maad_bulk_update_where`, `maad_context(docId)`, `maad_get_many`, `maad_related depth: 'hydrated'`, `maad_subscribe_from(cursor)`. (`maad_query depth: 'cold'|'full'` shipped early in 0.7.3.)
 - **0.8.0** — Operational Hygiene + Imports. `maad_prune_sessions` (stale-session sweeper), `maad_compact` (`VACUUM` + `git gc`), `maad_reindex_selective`, `maad_find_duplicates` + original Import workflow: `_inbox/` convention, source tracking, duplicate detection, readonly type flag.
-- **0.8.5** — Remote MCP hardening: per-connection role tiers, rate-limit policy, backpressure thresholds, mutex timeout, stress suite, metrics export, `git gc` automation.
+- **0.8.5** — Remote MCP hardening: per-connection role tiers, rate-limit policy (per-token aggregation + live-session caps), backpressure thresholds, mutex timeout, stress suite, metrics export.
 - **0.9.0** — Eviction Stage 2 + query power: LRU + hard pool cap (Stage 1 idle-timeout shipped in 0.7.3), in-place project mutations (lifts `INSTANCE_MUTATION_UNSUPPORTED`), FTS5, fuzzy entity matching, compound filters (AND/OR), cursor-based pagination.
 - **0.9.5** — Object attributes: user-defined tags on extracted objects, stored as YAML, indexed on reindex.
 - **1.0.0** — Stable release: API locked, npm published, full test coverage, migration guide.

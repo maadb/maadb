@@ -14,7 +14,7 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
     description: 'Returns git commit history for a specific document.',
     inputSchema: z.object({
       docId: z.string().describe('Document ID'),
-      limit: z.number().optional().describe('Max commits to return'),
+      limit: z.number().int().min(1).optional().describe('Max commits to return'),
       since: z.string().optional().describe('Only commits since this date (ISO or git date format)'),
       project: z.string().optional().describe('Project name (multi-project mode only)'),
     }),

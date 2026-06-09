@@ -227,3 +227,49 @@ describe('composite filters — aggregate', () => {
     expect(active?.count).toBe(3);
   });
 });
+
+// 0.7.14 — join / verifyCount / verifyIntegrity accept the same filter shapes
+// as maad_query. Pre-0.7.14 these three paths passed raw filters straight to
+// the backend, which throws on un-expanded shapes like between — a documented
+// filter on maad_join crashed instead of filtering.
+describe('filter expansion on join / verify paths', () => {
+  it('join accepts a between filter', () => {
+    const result = engine.join({
+      docType: docType('case'),
+      refs: ['client'],
+      filters: { opened_at: { op: 'between', value: ['2026-03-01', '2026-03-31'] } } as any,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.total).toBe(3);
+  });
+
+  it('verifyCount accepts a between filter', () => {
+    const result = engine.verifyCount(docType('case'), 3, {
+      opened_at: { op: 'between', value: ['2026-03-01', '2026-03-31'] },
+    } as any);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.grounded).toBe(true);
+    expect(result.value.actual).toBe(3);
+  });
+
+  it('verifyIntegrity accepts a between scope filter', async () => {
+    const result = await engine.verifyIntegrity({
+      docType: docType('case'),
+      filter: { opened_at: { op: 'between', value: ['2026-03-01', '2026-03-31'] } } as any,
+    });
+    expect(result.ok).toBe(true);
+  });
+
+  it('join rejects a malformed filter op with a structured error', () => {
+    const result = engine.join({
+      docType: docType('case'),
+      refs: ['client'],
+      filters: { opened_at: { op: 'nonsense', value: 'x' } } as any,
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors[0]!.code).toBe('FILTER_OP_INVALID');
+  });
+});

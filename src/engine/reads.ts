@@ -194,12 +194,14 @@ export function expandFilters(
 // 0.7.12 — sort contract validator. Accepts a system sort key (any alias in
 // SYSTEM_SORT_KEY_ALIASES) regardless of docType, or an indexed schema field
 // for the requested docType. Without docType, only system keys are accepted.
+// Returns whether the resolved field sorts numerically (number/amount fields
+// populate field_index.numeric_value) so the backend orders on the right column.
 function validateSortBy(
   ctx: EngineContext,
   sortBy: string,
   docType: DocType | undefined,
-): Result<true> {
-  if (resolveSystemSortKey(sortBy) !== null) return ok(true);
+): Result<{ numeric: boolean }> {
+  if (resolveSystemSortKey(sortBy) !== null) return ok({ numeric: false });
 
   if (!docType) {
     return singleErr('UNSUPPORTED_SORT_FIELD',
@@ -246,7 +248,7 @@ function validateSortBy(
     );
   }
 
-  return ok(true);
+  return ok({ numeric: field.type === 'number' || field.type === 'amount' });
 }
 
 export function findDocuments(ctx: EngineContext, query: DocumentQuery): Result<FindResult> {
@@ -258,12 +260,14 @@ export function findDocuments(ctx: EngineContext, query: DocumentQuery): Result<
   // indexed_at, doc_id, doc_type, created_at + camelCase aliases) or an
   // indexed schema field of the requested docType. Unknown or unindexed keys
   // reject up front so callers don't silently get all-NULL ordering.
+  let sortNumeric = false;
   if (query.sortBy !== undefined) {
     const sortValidation = validateSortBy(ctx, query.sortBy, query.docType);
     if (!sortValidation.ok) return sortValidation;
+    sortNumeric = sortValidation.value.numeric;
   }
 
-  let effectiveQuery: DocumentQuery = { ...query, filters: expanded.value as any };
+  let effectiveQuery: DocumentQuery = { ...query, filters: expanded.value as any, sortNumeric };
   let limitClamped: { requested: number; applied: number } | undefined;
   if (query.limit !== undefined && query.limit > MAX_QUERY_LIMIT) {
     limitClamped = { requested: query.limit, applied: MAX_QUERY_LIMIT };
@@ -675,9 +679,15 @@ function aggregateWithRefChain(
 }
 
 export function join(ctx: EngineContext, query: JoinQuery): Result<JoinResult> {
-  // Step 1: Find source documents
+  // Step 1: Find source documents. Filters take the same shapes as maad_query
+  // (between, in, shorthand), so they must expand to atomic conditions before
+  // the backend — which throws on un-expanded shapes — sees them.
   const docQuery: DocumentQuery = { docType: query.docType };
-  if (query.filters) docQuery.filters = query.filters;
+  if (query.filters) {
+    const expanded = expandFilters(query.filters as Record<string, unknown>);
+    if (!expanded.ok) return expanded;
+    docQuery.filters = expanded.value as NonNullable<DocumentQuery['filters']>;
+  }
   if (query.limit) docQuery.limit = query.limit;
   if (query.offset) docQuery.offset = query.offset;
 
@@ -800,7 +810,12 @@ export function verifyCount(
   filters?: Record<string, import('../types.js').FilterCondition>,
 ): Result<VerifyResult> {
   const query: DocumentQuery = { docType: dt, limit: 0 };
-  if (filters) query.filters = filters;
+  if (filters) {
+    // Same contract as maad_query filters — expand before the backend sees them.
+    const expanded = expandFilters(filters as Record<string, unknown>);
+    if (!expanded.ok) return expanded;
+    query.filters = expanded.value as NonNullable<DocumentQuery['filters']>;
+  }
   const actual = ctx.backend.countDocuments(query);
 
   return ok({
@@ -839,7 +854,10 @@ export async function verifyIntegrity(
   // scopes is undefined and not reported when filter is in play).
   let allowedDocIds: Set<string> | null = null;
   if (query.filter) {
-    const findQuery: DocumentQuery = { filters: query.filter };
+    // Same contract as maad_query filters — expand before the backend sees them.
+    const expanded = expandFilters(query.filter as Record<string, unknown>);
+    if (!expanded.ok) return expanded;
+    const findQuery: DocumentQuery = { filters: expanded.value as NonNullable<DocumentQuery['filters']> };
     if (query.docType) findQuery.docType = query.docType;
     const found = ctx.backend.findDocuments(findQuery);
     allowedDocIds = new Set(found.map(r => r.docId as string));
