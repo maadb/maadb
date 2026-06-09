@@ -1,9 +1,22 @@
 ---
 enabled: true
-current: 0.7.12
+current: 0.7.13
 ---
 
 # Version History
+
+## 0.7.13 — 2026-06-08
+
+Per-document index-time memory guards. A single document can allocate many times its byte size in V8 heap while indexing — each body annotation becomes a parsed annotation, an extracted object, and often a relationship, all live at once with the SQLite bind params (measured ~15–20× the file's bytes). Unbounded, one pathological document (e.g. a paste carrying hundreds of thousands of `[[…]]` annotations) can exhaust the heap and FATAL the whole engine process, taking every project on that engine down and crash-looping on restart as reindex re-touches the same document.
+
+Two layered guards, both designed to keep the document **findable** rather than silently dropping it:
+
+- **Annotation cap** (`MAAD_MAX_DOC_ANNOTATIONS`, default 50,000; `0` disables). Body annotation extraction stops at the cap, bounding the object/relationship set. The document record and frontmatter index are still written in full, so the doc stays queryable by id and by frontmatter field — only its body objects are partial. Counted in the new `IndexResult.partial` and logged as a degraded `engine.doc_body_truncated` event.
+- **Byte backstop** (`MAAD_MAX_DOC_BYTES`, default 16 MiB; `0` disables). A file too large to even read and line-split safely is skipped entirely with the new `DOC_TOO_LARGE` finding (in the reindex result's `errors[]`), logged as `engine.doc_too_large`. 16 MiB is far past any legitimate single record.
+
+For scale: a normal record is single-digit KB; the default byte cap is ~28 average novels of text in one file. The annotation cap is the primary guard (annotation count, not bytes, is the allocation driver); the byte cap is the read-safety backstop.
+
+955 tests passing (+3 over 0.7.12). New error code: `DOC_TOO_LARGE`. New env vars: `MAAD_MAX_DOC_ANNOTATIONS`, `MAAD_MAX_DOC_BYTES`. New `IndexResult.partial` field. No new dependencies. No breaking changes for documents under the caps.
 
 ## 0.7.12 — 2026-05-22
 

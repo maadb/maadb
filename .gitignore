@@ -32,6 +32,9 @@ CHANGELOG.md
 # Local scratch (instance configs, throwaway data)
 scratch/
 
+# Local profiling / repro harnesses — never tracked (public repo)
+scripts/
+
 # Spec docs — in-flight (docs/specs/) and shipped-for-reference (docs/archive/) — stay local.
 # Version.md history and brain decision records carry the durable rationale.
 docs/specs/

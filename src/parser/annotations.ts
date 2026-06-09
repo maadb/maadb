@@ -17,8 +17,16 @@ export function extractAnnotations(
   filePath: FilePath,
   subtypeMap: Record<string, Primitive>,
   verbatimZones: VerbatimZone[],
+  // 0.7.13 — optional early-stop cap. When set (> 0), extraction stops once
+  // this many annotations have been collected, so a pathological doc with
+  // hundreds of thousands of [[...]] can't build an unbounded array (the
+  // demonstrated index-time OOM driver). Callers detect truncation by
+  // comparing the returned length against the cap. Undefined / 0 = no cap.
+  maxAnnotations?: number,
 ): InlineAnnotation[] {
   const annotations: InlineAnnotation[] = [];
+  const cap = maxAnnotations !== undefined && maxAnnotations > 0 ? maxAnnotations : Infinity;
+  if (cap === 0) return annotations;
   const lines = body.split('\n');
 
   for (let i = 0; i < lines.length; i++) {
@@ -49,6 +57,8 @@ export function extractAnnotations(
           col,
         },
       });
+
+      if (annotations.length >= cap) return annotations;
     }
   }
 

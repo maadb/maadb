@@ -22,9 +22,17 @@ export { extractValueCalls } from './tags.js';
 export { extractAnnotations } from './annotations.js';
 export { validateYamlProfile } from './yaml-profile.js';
 
+// 0.7.13 — parse options. `maxAnnotations` caps body annotation extraction so
+// a pathological doc can't build an unbounded object/relationship set; the
+// document still parses and indexes (record + frontmatter + capped body).
+export interface ParseOptions {
+  maxAnnotations?: number;
+}
+
 export async function parseDocument(
   path: FilePath,
   subtypeMap: Record<string, Primitive>,
+  opts?: ParseOptions,
 ): Promise<Result<ParsedDocument>> {
   let raw: string;
   try {
@@ -34,13 +42,14 @@ export async function parseDocument(
     return singleErr('FILE_READ_ERROR', `Failed to read file: ${message}`, { file: path, line: 0, col: 0 });
   }
 
-  return parseDocumentFromContent(raw, path, subtypeMap);
+  return parseDocumentFromContent(raw, path, subtypeMap, opts);
 }
 
 export function parseDocumentFromContent(
   raw: string,
   path: FilePath,
   subtypeMap: Record<string, Primitive>,
+  opts?: ParseOptions,
 ): Result<ParsedDocument> {
   const hash = createHash('sha256').update(raw).digest('hex');
 
@@ -52,10 +61,15 @@ export function parseDocumentFromContent(
 
   const { frontmatter, body, bodyStartLine } = fm.value;
 
+  const cap = opts?.maxAnnotations;
   const verbatimZones = findVerbatimZones(body, bodyStartLine);
   const blocks = parseBlocks(body, bodyStartLine);
   const valueCalls = extractValueCalls(body, bodyStartLine, path, verbatimZones);
-  const annotations = extractAnnotations(body, bodyStartLine, path, subtypeMap, verbatimZones);
+  const annotations = extractAnnotations(body, bodyStartLine, path, subtypeMap, verbatimZones, cap);
+  // length >= cap means extraction stopped at the limit — body objects are
+  // partial. A doc with exactly `cap` legitimate annotations is also flagged;
+  // at the cap's scale (tens of thousands) that doc is already pathological.
+  const annotationsTruncated = cap !== undefined && cap > 0 && annotations.length >= cap;
 
   return ok({
     filePath: path,
@@ -64,5 +78,6 @@ export function parseDocumentFromContent(
     blocks,
     valueCalls,
     annotations,
+    ...(annotationsTruncated ? { annotationsTruncated: true } : {}),
   });
 }

@@ -2,12 +2,13 @@
 // Indexing — indexAll, indexFile, processDocument, reindex
 // ============================================================================
 
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 
 import { ok, err, singleErr, type Result } from '../errors.js';
+import { logger } from './logger.js';
 import {
   docId as toDocId,
   docType as toDocType,
@@ -106,6 +107,9 @@ export async function indexAll(ctx: EngineContext, opts?: { force?: boolean }): 
       const indexResult = await indexFile(ctx, absPath);
       if (indexResult.ok) {
         result.indexed++;
+        if (indexResult.value.annotationsTruncated) {
+          result.partial = (result.partial ?? 0) + 1;
+        }
       } else {
         result.errors.push(...indexResult.errors);
       }
@@ -137,9 +141,84 @@ export async function indexAll(ctx: EngineContext, opts?: { force?: boolean }): 
   return result;
 }
 
+// 0.7.13 — per-doc index-time memory guards. A single document can allocate
+// far beyond its own byte size in V8 heap while indexing: the dominant driver
+// is body annotation count (each [[type:value|label]] becomes a parsed
+// annotation, an extracted object, and often a relationship — all live at once
+// alongside the SQLite bind params). A doc with hundreds of thousands of
+// annotations can exhaust the heap and FATAL the whole engine process, taking
+// every project on it down and crash-looping on restart as reindex re-touches
+// the same doc.
+//
+// Two layered guards, both designed to keep the document FINDABLE rather than
+// silently dropping it:
+//
+//  1. Annotation cap (MAAD_MAX_DOC_ANNOTATIONS, default 50k). Body annotation
+//     extraction stops at the cap, so objects/relationships stay bounded. The
+//     document record + frontmatter index are still written in full — the doc
+//     remains queryable by id and by frontmatter field; only its body objects
+//     are partial. Surfaced as IndexResult.partial + a degraded ops event.
+//
+//  2. Byte backstop (MAAD_MAX_DOC_BYTES, default 16 MiB). For a file so large
+//     that even reading + line-splitting it is unsafe, skip entirely with
+//     DOC_TOO_LARGE rather than risk the read. 16 MiB is ~28 average novels of
+//     text in one file — far past any legitimate record. Set 0 to disable.
+const DEFAULT_MAX_DOC_BYTES = 16 * 1024 * 1024;
+const DEFAULT_MAX_DOC_ANNOTATIONS = 50_000;
+
+function maxDocBytes(): number {
+  const raw = process.env['MAAD_MAX_DOC_BYTES'];
+  if (raw === undefined) return DEFAULT_MAX_DOC_BYTES;
+  const n = Number.parseInt(raw, 10);
+  if (!Number.isFinite(n) || n < 0) return DEFAULT_MAX_DOC_BYTES;
+  return n; // 0 = disabled
+}
+
+function maxDocAnnotations(): number {
+  const raw = process.env['MAAD_MAX_DOC_ANNOTATIONS'];
+  if (raw === undefined) return DEFAULT_MAX_DOC_ANNOTATIONS;
+  const n = Number.parseInt(raw, 10);
+  if (!Number.isFinite(n) || n < 0) return DEFAULT_MAX_DOC_ANNOTATIONS;
+  return n; // 0 = disabled
+}
+
 export async function indexFile(ctx: EngineContext, absolutePath: FilePath): Promise<Result<ExtractionResult>> {
-  const parsed = await parseDocument(absolutePath, ctx.registry.subtypeMap);
+  // Backstop: a stat is cheap, and reading + line-splitting a multi-hundred-MB
+  // file is itself a heap risk before any extraction cap can apply. Skip those.
+  const byteCap = maxDocBytes();
+  if (byteCap > 0) {
+    let sizeBytes = 0;
+    try {
+      sizeBytes = statSync(absolutePath as string).size;
+    } catch {
+      // stat failure falls through to parseDocument, which surfaces the real
+      // FILE_READ_ERROR with proper location info.
+      sizeBytes = 0;
+    }
+    if (sizeBytes > byteCap) {
+      logger.degraded('engine', 'doc_too_large',
+        `skipped oversized document (${sizeBytes} bytes > cap ${byteCap}); too large to read safely`,
+        { file: absolutePath as string, sizeBytes, capBytes: byteCap });
+      return singleErr('DOC_TOO_LARGE',
+        `Document ${absolutePath as string} is ${sizeBytes} bytes, over the ${byteCap}-byte read cap (MAAD_MAX_DOC_BYTES). Skipped to protect the engine; split the document or raise the cap with matching heap headroom.`,
+        { file: absolutePath, line: 0, col: 0 },
+        { sizeBytes, capBytes: byteCap });
+    }
+  }
+
+  // Bound body annotation extraction so a pathological annotation count can't
+  // build an unbounded object/relationship set. The doc still indexes (record
+  // + frontmatter + capped body) and stays findable.
+  const annoCap = maxDocAnnotations();
+  const parsed = await parseDocument(absolutePath, ctx.registry.subtypeMap,
+    annoCap > 0 ? { maxAnnotations: annoCap } : undefined);
   if (!parsed.ok) return parsed;
+
+  if (parsed.value.annotationsTruncated) {
+    logger.degraded('engine', 'doc_body_truncated',
+      `indexed with body annotations capped at ${annoCap}; document record + frontmatter are complete, body objects are partial`,
+      { file: absolutePath as string, capAnnotations: annoCap });
+  }
 
   return processDocument(ctx, parsed.value);
 }
@@ -265,6 +344,9 @@ export function processDocument(ctx: EngineContext, parsed: ParsedDocument): Res
     fieldIndex,
   );
 
+  // Carry the partial-index signal up so indexAll can tally it. The record +
+  // frontmatter above are always written in full; only body objects are capped.
+  if (parsed.annotationsTruncated) extraction.annotationsTruncated = true;
   return ok(extraction);
 }
 

@@ -26,6 +26,14 @@ export interface IndexResult {
    * "no change on disk" reindex still did work. Empty when nothing changed.
    */
   rebuiltTypes?: string[];
+  /**
+   * 0.7.13 — count of documents indexed with their body annotation extraction
+   * capped at MAAD_MAX_DOC_ANNOTATIONS. These docs ARE indexed (record +
+   * frontmatter + capped body objects) and remain fully queryable by id and
+   * frontmatter; only their body objects/relationships are partial. Distinct
+   * from a DOC_TOO_LARGE skip (which lands in `errors[]` and indexes nothing).
+   */
+  partial?: number;
 }
 
 /**

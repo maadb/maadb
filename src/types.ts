@@ -197,6 +197,13 @@ export interface ParsedDocument {
   blocks: ParsedBlock[];
   valueCalls: ValueCall[];
   annotations: InlineAnnotation[];
+  /**
+   * 0.7.13 — true when body annotation extraction stopped at the configured
+   * cap (MAAD_MAX_DOC_ANNOTATIONS). The document is still parsed and indexed,
+   * but its body objects/relationships are partial. Lets the index layer flag
+   * the doc as partially indexed rather than silently dropping body data.
+   */
+  annotationsTruncated?: boolean;
 }
 
 export interface ParsedBlock {
@@ -358,6 +365,8 @@ export interface ExtractionResult {
   document: BoundDocument;
   objects: ExtractedObject[];
   relationships: Relationship[];
+  /** 0.7.13 — body annotation extraction hit the per-doc cap (partial index). */
+  annotationsTruncated?: boolean;
 }
 
 export interface ExtractedObject {

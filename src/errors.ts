@@ -92,7 +92,14 @@ export type ErrorCode =
   // indexed_at, doc_id, doc_type, created_at and camelCase aliases) or an
   // indexed schema field of the requested docType. Unknown/unindexed sort
   // keys reject up front instead of silently degrading to all-NULL ordering.
-  | 'UNSUPPORTED_SORT_FIELD';
+  | 'UNSUPPORTED_SORT_FIELD'
+  // 0.7.13 — per-doc index-time size guard. A single oversized document can
+  // allocate many times its byte size in V8 heap during extract/materialize
+  // (parsed annotations + objects + relationships + field index + SQLite
+  // params all live at once), enough to FATAL the whole engine process on a
+  // memory-capped deployment. indexFile skips such a doc with this code
+  // instead, leaving every other project on the engine alive.
+  | 'DOC_TOO_LARGE';
 
 export interface MaadError {
   code: ErrorCode;
