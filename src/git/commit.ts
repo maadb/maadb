@@ -54,6 +54,38 @@ export function resolveCommitAuthor(env: NodeJS.ProcessEnv = process.env): GitCo
 }
 
 /**
+ * Env vars simple-git >= 3.36.0 (CVE-2026-6951 hardening) refuses to pass to
+ * a spawned git process unless an allowUnsafe* flag is set. Mirrors the map
+ * in @simple-git/argv-parser's parseEnv (keys are matched case-insensitively).
+ * The engine never needs any of them — it runs local plumbing commands that
+ * must never open an editor, pager, ssh connection, or credential prompt —
+ * but several (EDITOR, PAGER, GIT_ASKPASS) are present in every interactive
+ * shell and on GitHub Actions runners, so they must be stripped rather than
+ * passed through.
+ */
+const UNSAFE_GIT_ENV_KEYS = new Set([
+  'editor', 'pager', 'prefix', 'ssh_askpass',
+  'git_askpass', 'git_editor', 'git_sequence_editor', 'git_pager',
+  'git_ssh', 'git_ssh_command', 'git_proxy_command',
+  'git_exec_path', 'git_external_diff', 'git_template_dir',
+  'git_config', 'git_config_global', 'git_config_system', 'git_config_count',
+]);
+
+/**
+ * The environment for engine-spawned git processes: the parent env (PATH /
+ * HOME / safe.directory must survive — simple-git's .env() REPLACES, not
+ * augments) minus the unsafe keys above, with the commit identity merged
+ * over it.
+ */
+export function buildGitEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (!UNSAFE_GIT_ENV_KEYS.has(key.toLowerCase())) env[key] = value;
+  }
+  return { ...env, ...resolveCommitAuthor() };
+}
+
+/**
  * 0.7.0 — Identity snapshot for commit-message enrichment. Populated from
  * the session's token when `MAAD_COMMIT_IDENTITY` is on (default true in
  * 0.7.0 per dec-maadb-071 since fup-066 resolved). Set to false in the
@@ -186,12 +218,10 @@ export async function autoCommit(
     let result;
     try {
       // 0.7.3 (fup-2026-095) — inject identity env so we never depend on the
-      // host's `git config user.name/user.email`. Must merge over process.env:
-      // simple-git's .env() REPLACES the child environment (and persists on
-      // the shared executor), so the key-by-key form stripped PATH/HOME/
-      // safe.directory from every subsequent git spawn on this instance.
+      // host's `git config user.name/user.email`. See buildGitEnv for why
+      // this merges over process.env and strips askpass vars.
       result = await git
-        .env({ ...process.env, ...resolveCommitAuthor() })
+        .env(buildGitEnv())
         .commit(message, opts.files);
     } catch (e) {
       // The add succeeded but the commit itself failed — worst case, since

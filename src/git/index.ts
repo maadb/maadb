@@ -16,7 +16,7 @@ import type {
   DiffResult,
   SnapshotResult,
 } from '../types.js';
-import { autoCommit, resolveCommitAuthor, type CommitOptions, type CommitOutcome } from './commit.js';
+import { autoCommit, buildGitEnv, type CommitOptions, type CommitOutcome } from './commit.js';
 import { getHistory, getAudit } from './log.js';
 import { getDiff } from './diff.js';
 import { getSnapshot } from './snapshot.js';
@@ -76,12 +76,11 @@ export class GitLayer {
 
     // Initial commit. Identity env per fup-2026-095 — same fragility as
     // autoCommit: a host without `git config user.name/email` would otherwise
-    // fail this initial commit too. Merged over process.env because .env()
-    // replaces (not augments) the child environment and persists on the
-    // shared executor.
+    // fail this initial commit too. See buildGitEnv for the merge + askpass
+    // stripping rationale.
     await this.git.add('.gitignore');
     await this.git
-      .env({ ...process.env, ...resolveCommitAuthor() })
+      .env(buildGitEnv())
       .commit('maad:init — Initialize MAAD project');
   }
 
@@ -132,10 +131,10 @@ export class GitLayer {
     // Inject the committer identity env — annotated tags need a tagger
     // identity and we can't depend on the host having `git config
     // user.name/user.email` set. Same pattern as autoCommit + initRepo
-    // (0.7.3 fup-2026-095): merged over process.env because .env() replaces
-    // the child environment and persists on the shared executor.
+    // (0.7.3 fup-2026-095); see buildGitEnv for the merge + askpass
+    // stripping rationale.
     await this.git
-      .env({ ...process.env, ...resolveCommitAuthor() })
+      .env(buildGitEnv())
       .addAnnotatedTag(name, message);
   }
 
