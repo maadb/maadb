@@ -26,10 +26,10 @@ const FIXTURE_SRC = path.resolve(__dirname, '../fixtures/simple-crm');
 
 async function makeEngine(label: string): Promise<{ engine: MaadEngine; root: string }> {
   const root = path.resolve(__dirname, `../fixtures/_temp-changes-${label}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
-  if (existsSync(root)) rmSync(root, { recursive: true });
+  if (existsSync(root)) rmSync(root, { recursive: true, maxRetries: 10, retryDelay: 200 });
   cpSync(FIXTURE_SRC, root, { recursive: true });
   const backendDir = path.join(root, '_backend');
-  if (existsSync(backendDir)) rmSync(backendDir, { recursive: true });
+  if (existsSync(backendDir)) rmSync(backendDir, { recursive: true, maxRetries: 10, retryDelay: 200 });
   const engine = new MaadEngine();
   const result = await engine.init(root);
   expect(result.ok).toBe(true);
@@ -40,7 +40,7 @@ async function makeEngine(label: string): Promise<{ engine: MaadEngine; root: st
 async function cleanup(engine: MaadEngine, root: string): Promise<void> {
   engine.close();
   await new Promise((r) => setTimeout(r, 50));
-  try { if (existsSync(root)) rmSync(root, { recursive: true, force: true }); } catch { /* windows */ }
+  try { if (existsSync(root)) rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); } catch { /* windows */ }
 }
 
 describe('changesSince — first call, no cursor', () => {

@@ -9,7 +9,7 @@ const TEMP_ROOT = path.resolve(__dirname, '../fixtures/.tmp-simple-crm-pipeline'
 let engine: MaadEngine;
 
 beforeAll(async () => {
-  if (existsSync(TEMP_ROOT)) rmSync(TEMP_ROOT, { recursive: true, force: true });
+  if (existsSync(TEMP_ROOT)) rmSync(TEMP_ROOT, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   // Copy fixture to a temp root so this test never writes into the shared
   // tests/fixtures/simple-crm/_backend SQLite db. Other tests that cpSync
   // simple-crm now treat it as truly read-only.
@@ -21,7 +21,7 @@ beforeAll(async () => {
 
 afterAll(() => {
   engine.close();
-  if (existsSync(TEMP_ROOT)) rmSync(TEMP_ROOT, { recursive: true, force: true });
+  if (existsSync(TEMP_ROOT)) rmSync(TEMP_ROOT, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 });
 
 describe('indexAll', () => {

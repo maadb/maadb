@@ -49,7 +49,7 @@ async function softDeleteAndBackdate(id: string, updatedAtIso: string) {
 }
 
 beforeEach(async () => {
-  if (existsSync(TEMP_ROOT)) rmSync(TEMP_ROOT, { recursive: true, force: true });
+  if (existsSync(TEMP_ROOT)) rmSync(TEMP_ROOT, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   cpSync(FIXTURE_SRC, TEMP_ROOT, {
     recursive: true,
     filter: (src) => !src.includes(`${path.sep}_backend`) && !src.includes(`${path.sep}.git`),
@@ -71,7 +71,7 @@ afterEach(async () => {
   engine.close();
   await new Promise(r => setTimeout(r, 100));
   try {
-    if (existsSync(TEMP_ROOT)) rmSync(TEMP_ROOT, { recursive: true, force: true });
+    if (existsSync(TEMP_ROOT)) rmSync(TEMP_ROOT, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   } catch {
     // Windows may briefly hold a db handle — non-fatal.
   }

@@ -28,7 +28,7 @@ let engine: MaadEngine;
  * validate against.
  */
 async function buildFixture(): Promise<void> {
-  if (existsSync(TEMP_ROOT)) rmSync(TEMP_ROOT, { recursive: true, force: true });
+  if (existsSync(TEMP_ROOT)) rmSync(TEMP_ROOT, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   mkdirSync(path.join(TEMP_ROOT, '_registry'), { recursive: true });
   mkdirSync(path.join(TEMP_ROOT, '_schema'), { recursive: true });
   mkdirSync(path.join(TEMP_ROOT, 'events'), { recursive: true });
@@ -102,7 +102,7 @@ afterAll(async () => {
   engine.close();
   await new Promise(r => setTimeout(r, 100));
   try {
-    if (existsSync(TEMP_ROOT)) rmSync(TEMP_ROOT, { recursive: true, force: true });
+    if (existsSync(TEMP_ROOT)) rmSync(TEMP_ROOT, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   } catch {
     // Windows may hold handles briefly — non-fatal
   }

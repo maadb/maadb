@@ -12,10 +12,10 @@ let engine: MaadEngine;
 
 beforeAll(async () => {
   // Clean slate
-  if (existsSync(TEMP_ROOT)) rmSync(TEMP_ROOT, { recursive: true });
+  if (existsSync(TEMP_ROOT)) rmSync(TEMP_ROOT, { recursive: true, maxRetries: 10, retryDelay: 200 });
   cpSync(FIXTURE_SRC, TEMP_ROOT, { recursive: true });
   const backendDir = path.join(TEMP_ROOT, '_backend');
-  if (existsSync(backendDir)) rmSync(backendDir, { recursive: true });
+  if (existsSync(backendDir)) rmSync(backendDir, { recursive: true, maxRetries: 10, retryDelay: 200 });
 
   // Initialize git repo
   const git = simpleGit(TEMP_ROOT);
@@ -37,7 +37,7 @@ afterAll(async () => {
   // Small delay to let file handles release on Windows
   await new Promise(r => setTimeout(r, 100));
   try {
-    if (existsSync(TEMP_ROOT)) rmSync(TEMP_ROOT, { recursive: true, force: true });
+    if (existsSync(TEMP_ROOT)) rmSync(TEMP_ROOT, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   } catch {
     // Windows may hold handles briefly — non-fatal
   }
@@ -114,10 +114,10 @@ describe('no git graceful degradation', () => {
   it('engine works without git', async () => {
     // Create a project without git
     const noGitRoot = path.resolve(__dirname, '../fixtures/_temp-nogit');
-    if (existsSync(noGitRoot)) rmSync(noGitRoot, { recursive: true });
+    if (existsSync(noGitRoot)) rmSync(noGitRoot, { recursive: true, maxRetries: 10, retryDelay: 200 });
     cpSync(FIXTURE_SRC, noGitRoot, { recursive: true });
     const bd = path.join(noGitRoot, '_backend');
-    if (existsSync(bd)) rmSync(bd, { recursive: true });
+    if (existsSync(bd)) rmSync(bd, { recursive: true, maxRetries: 10, retryDelay: 200 });
 
     const noGitEngine = new MaadEngine();
     const initResult = await noGitEngine.init(noGitRoot);
@@ -137,7 +137,7 @@ describe('no git graceful degradation', () => {
     noGitEngine.close();
     await new Promise(r => setTimeout(r, 100));
     try {
-      if (existsSync(noGitRoot)) rmSync(noGitRoot, { recursive: true, force: true });
+      if (existsSync(noGitRoot)) rmSync(noGitRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
     } catch {
       // non-fatal
     }

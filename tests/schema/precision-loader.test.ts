@@ -12,7 +12,7 @@ import { loadSchemas } from '../../src/schema/loader.js';
 const TEMP_ROOT = path.resolve(__dirname, '../fixtures/_temp-precision-loader');
 
 function buildProject(schemaYaml: string): string {
-  if (existsSync(TEMP_ROOT)) rmSync(TEMP_ROOT, { recursive: true, force: true });
+  if (existsSync(TEMP_ROOT)) rmSync(TEMP_ROOT, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   mkdirSync(path.join(TEMP_ROOT, '_registry'), { recursive: true });
   mkdirSync(path.join(TEMP_ROOT, '_schema'), { recursive: true });
   writeFileSync(
@@ -30,7 +30,7 @@ function buildProject(schemaYaml: string): string {
 }
 
 function cleanup(): void {
-  if (existsSync(TEMP_ROOT)) rmSync(TEMP_ROOT, { recursive: true, force: true });
+  if (existsSync(TEMP_ROOT)) rmSync(TEMP_ROOT, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 }
 
 describe('schema loader — precision DSL parse (0.6.7)', () => {

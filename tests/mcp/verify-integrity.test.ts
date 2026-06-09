@@ -16,7 +16,7 @@ const TEMP_ROOT = path.resolve(__dirname, '../fixtures/_temp-integrity');
 let engine: MaadEngine;
 
 beforeEach(async () => {
-  if (existsSync(TEMP_ROOT)) rmSync(TEMP_ROOT, { recursive: true, force: true });
+  if (existsSync(TEMP_ROOT)) rmSync(TEMP_ROOT, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   // Skip _backend during copy — pipeline.test.ts runs in parallel against
   // the source fixture's live SQLite db; reading it mid-write races.
   cpSync(FIXTURE_SRC, TEMP_ROOT, {
@@ -34,7 +34,7 @@ afterEach(async () => {
   engine.close();
   await new Promise(r => setTimeout(r, 100));
   try {
-    if (existsSync(TEMP_ROOT)) rmSync(TEMP_ROOT, { recursive: true, force: true });
+    if (existsSync(TEMP_ROOT)) rmSync(TEMP_ROOT, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   } catch {
     // Windows may briefly hold a db handle — non-fatal.
   }

@@ -14,10 +14,10 @@ const FIXTURE_SRC = path.resolve(__dirname, '../fixtures/simple-crm');
 
 async function makeEngine(label: string): Promise<{ engine: MaadEngine; root: string }> {
   const root = path.resolve(__dirname, `../fixtures/_temp-health-${label}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
-  if (existsSync(root)) rmSync(root, { recursive: true });
+  if (existsSync(root)) rmSync(root, { recursive: true, maxRetries: 10, retryDelay: 200 });
   cpSync(FIXTURE_SRC, root, { recursive: true });
   const backendDir = path.join(root, '_backend');
-  if (existsSync(backendDir)) rmSync(backendDir, { recursive: true });
+  if (existsSync(backendDir)) rmSync(backendDir, { recursive: true, maxRetries: 10, retryDelay: 200 });
 
   const git = simpleGit(root);
   await git.init();
@@ -39,7 +39,7 @@ async function cleanup(engine: MaadEngine, root: string): Promise<void> {
   engine.close();
   await new Promise((r) => setTimeout(r, 100));
   try {
-    if (existsSync(root)) rmSync(root, { recursive: true, force: true });
+    if (existsSync(root)) rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   } catch {
     // windows — non-fatal
   }
@@ -75,10 +75,10 @@ describe('HealthReport extensions', () => {
   it('lastWriteAt is null on a fresh engine with no writes', async () => {
     // Make a fresh engine that DOES NOT run indexAll (makeEngine does).
     const freshRoot = path.resolve(__dirname, `../fixtures/_temp-health-fresh-${Date.now()}`);
-    if (existsSync(freshRoot)) rmSync(freshRoot, { recursive: true });
+    if (existsSync(freshRoot)) rmSync(freshRoot, { recursive: true, maxRetries: 10, retryDelay: 200 });
     cpSync(FIXTURE_SRC, freshRoot, { recursive: true });
     const backendDir = path.join(freshRoot, '_backend');
-    if (existsSync(backendDir)) rmSync(backendDir, { recursive: true });
+    if (existsSync(backendDir)) rmSync(backendDir, { recursive: true, maxRetries: 10, retryDelay: 200 });
 
     const git = simpleGit(freshRoot);
     await git.init();
@@ -241,13 +241,13 @@ describe('HealthReport extensions — no-git project', () => {
   it('repoSizeBytes and gitClean are null when git is unavailable', async () => {
     // Create a temp project WITHOUT git init
     const root = path.resolve(__dirname, `../fixtures/_temp-health-nogit-${Date.now()}`);
-    if (existsSync(root)) rmSync(root, { recursive: true });
+    if (existsSync(root)) rmSync(root, { recursive: true, maxRetries: 10, retryDelay: 200 });
     cpSync(FIXTURE_SRC, root, { recursive: true });
     const backendDir = path.join(root, '_backend');
-    if (existsSync(backendDir)) rmSync(backendDir, { recursive: true });
+    if (existsSync(backendDir)) rmSync(backendDir, { recursive: true, maxRetries: 10, retryDelay: 200 });
     // Also remove any .git that may have been copied from the fixture
     const gitDir = path.join(root, '.git');
-    if (existsSync(gitDir)) rmSync(gitDir, { recursive: true, force: true });
+    if (existsSync(gitDir)) rmSync(gitDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 
     const engine = new MaadEngine();
     const result = await engine.init(root);

@@ -17,10 +17,10 @@ const FIXTURE_SRC = path.resolve(__dirname, '../fixtures/simple-crm');
 
 async function makeEngine(label: string): Promise<{ engine: MaadEngine; root: string }> {
   const root = path.resolve(__dirname, `../fixtures/_temp-concurrency-${label}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
-  if (existsSync(root)) rmSync(root, { recursive: true });
+  if (existsSync(root)) rmSync(root, { recursive: true, maxRetries: 10, retryDelay: 200 });
   cpSync(FIXTURE_SRC, root, { recursive: true });
   const backendDir = path.join(root, '_backend');
-  if (existsSync(backendDir)) rmSync(backendDir, { recursive: true });
+  if (existsSync(backendDir)) rmSync(backendDir, { recursive: true, maxRetries: 10, retryDelay: 200 });
 
   // Fresh git repo per test
   const git = simpleGit(root);
@@ -41,7 +41,7 @@ async function cleanup(engine: MaadEngine, root: string): Promise<void> {
   engine.close();
   await new Promise((r) => setTimeout(r, 100));
   try {
-    if (existsSync(root)) rmSync(root, { recursive: true, force: true });
+    if (existsSync(root)) rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   } catch {
     // Windows may hold handles briefly — non-fatal
   }
@@ -180,10 +180,10 @@ describe('T3 — writer + concurrent readers', () => {
 describe('T4 — stale .git/index.lock recovery', () => {
   it('removes a stale lock (mtime > 30s) on init and records the action', async () => {
     const root = path.resolve(__dirname, `../fixtures/_temp-t4-stale-${Date.now()}`);
-    if (existsSync(root)) rmSync(root, { recursive: true });
+    if (existsSync(root)) rmSync(root, { recursive: true, maxRetries: 10, retryDelay: 200 });
     cpSync(FIXTURE_SRC, root, { recursive: true });
     const backendDir = path.join(root, '_backend');
-    if (existsSync(backendDir)) rmSync(backendDir, { recursive: true });
+    if (existsSync(backendDir)) rmSync(backendDir, { recursive: true, maxRetries: 10, retryDelay: 200 });
 
     const git = simpleGit(root);
     await git.init();
@@ -219,10 +219,10 @@ describe('T4 — stale .git/index.lock recovery', () => {
 
   it('refuses init when lock is recent (mtime < 30s) and leaves lock alone', async () => {
     const root = path.resolve(__dirname, `../fixtures/_temp-t4-recent-${Date.now()}`);
-    if (existsSync(root)) rmSync(root, { recursive: true });
+    if (existsSync(root)) rmSync(root, { recursive: true, maxRetries: 10, retryDelay: 200 });
     cpSync(FIXTURE_SRC, root, { recursive: true });
     const backendDir = path.join(root, '_backend');
-    if (existsSync(backendDir)) rmSync(backendDir, { recursive: true });
+    if (existsSync(backendDir)) rmSync(backendDir, { recursive: true, maxRetries: 10, retryDelay: 200 });
 
     const git = simpleGit(root);
     await git.init();
@@ -249,7 +249,7 @@ describe('T4 — stale .git/index.lock recovery', () => {
     engine.close();
     await new Promise((r) => setTimeout(r, 100));
     try {
-      rmSync(root, { recursive: true, force: true });
+      rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
     } catch {
       // Windows — non-fatal
     }

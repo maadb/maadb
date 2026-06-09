@@ -68,10 +68,10 @@ describe('updateDocument on a CRLF file', () => {
   let engine: MaadEngine;
 
   beforeAll(async () => {
-    if (existsSync(TEMP_ROOT)) rmSync(TEMP_ROOT, { recursive: true });
+    if (existsSync(TEMP_ROOT)) rmSync(TEMP_ROOT, { recursive: true, maxRetries: 10, retryDelay: 200 });
     cpSync(FIXTURE_SRC, TEMP_ROOT, { recursive: true });
     const backendDir = path.join(TEMP_ROOT, '_backend');
-    if (existsSync(backendDir)) rmSync(backendDir, { recursive: true });
+    if (existsSync(backendDir)) rmSync(backendDir, { recursive: true, maxRetries: 10, retryDelay: 200 });
 
     // Rewrite one fixture record with CRLF line endings, as a Windows editor would
     const target = path.join(TEMP_ROOT, 'clients', 'cli-acme.md');
@@ -88,7 +88,7 @@ describe('updateDocument on a CRLF file', () => {
     engine.close();
     await new Promise(r => setTimeout(r, 100));
     try {
-      if (existsSync(TEMP_ROOT)) rmSync(TEMP_ROOT, { recursive: true, force: true });
+      if (existsSync(TEMP_ROOT)) rmSync(TEMP_ROOT, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
     } catch {
       // Windows may hold handles briefly — non-fatal
     }

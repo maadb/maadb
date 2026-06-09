@@ -24,7 +24,7 @@ afterEach(async () => {
   while (createdDirs.length > 0) {
     const dir = createdDirs.pop()!;
     try {
-      if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
+      if (existsSync(dir)) rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
     } catch {
       // Windows file handle lag — non-fatal
     }

@@ -19,7 +19,7 @@ function makeTempDir(): string {
 afterEach(() => {
   while (createdDirs.length > 0) {
     const dir = createdDirs.pop()!;
-    try { if (existsSync(dir)) rmSync(dir, { recursive: true, force: true }); } catch { /* windows */ }
+    try { if (existsSync(dir)) rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); } catch { /* windows */ }
   }
 });
 

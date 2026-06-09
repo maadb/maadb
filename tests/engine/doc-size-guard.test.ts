@@ -26,7 +26,7 @@ const ANNOTATED_ID = 'note-annotated';
 const BIG_ID = 'note-big';
 
 function writeProject(): void {
-  if (existsSync(TEMP_ROOT)) rmSync(TEMP_ROOT, { recursive: true });
+  if (existsSync(TEMP_ROOT)) rmSync(TEMP_ROOT, { recursive: true, maxRetries: 10, retryDelay: 200 });
   mkdirSync(path.join(TEMP_ROOT, '_registry'), { recursive: true });
   mkdirSync(path.join(TEMP_ROOT, '_schema'), { recursive: true });
   mkdirSync(path.join(TEMP_ROOT, 'notes'), { recursive: true });
@@ -77,7 +77,7 @@ beforeEach(() => {
   // backend must start empty — otherwise a doc indexed by a prior test (e.g.
   // under a disabled cap) would leave a row that a later skip can't reconcile.
   const backend = path.join(TEMP_ROOT, '_backend');
-  if (existsSync(backend)) rmSync(backend, { recursive: true, force: true });
+  if (existsSync(backend)) rmSync(backend, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 });
 
 afterEach(() => {
@@ -90,7 +90,7 @@ afterEach(() => {
 
 afterAll(() => {
   try {
-    if (existsSync(TEMP_ROOT)) rmSync(TEMP_ROOT, { recursive: true, force: true });
+    if (existsSync(TEMP_ROOT)) rmSync(TEMP_ROOT, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   } catch {
     // Windows handle release race — non-fatal
   }

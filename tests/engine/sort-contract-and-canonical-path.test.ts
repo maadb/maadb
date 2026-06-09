@@ -102,11 +102,11 @@ const TEMP_ROOT = path.resolve(__dirname, '../fixtures/.tmp-sort-contract');
 let engine: MaadEngine;
 
 beforeAll(async () => {
-  if (existsSync(TEMP_ROOT)) rmSync(TEMP_ROOT, { recursive: true, force: true });
+  if (existsSync(TEMP_ROOT)) rmSync(TEMP_ROOT, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   cpSync(FIXTURE_SRC, TEMP_ROOT, { recursive: true });
   // Strip any prebuilt _backend so we start from a fresh 0.7.12 schema.
   const backendDir = path.join(TEMP_ROOT, '_backend');
-  if (existsSync(backendDir)) rmSync(backendDir, { recursive: true });
+  if (existsSync(backendDir)) rmSync(backendDir, { recursive: true, maxRetries: 10, retryDelay: 200 });
 
   engine = new MaadEngine();
   const initResult = await engine.init(TEMP_ROOT);
@@ -118,7 +118,7 @@ afterAll(async () => {
   engine.close();
   await new Promise(r => setTimeout(r, 100));
   try {
-    if (existsSync(TEMP_ROOT)) rmSync(TEMP_ROOT, { recursive: true, force: true });
+    if (existsSync(TEMP_ROOT)) rmSync(TEMP_ROOT, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   } catch {
     // Windows may briefly hold the SQLite handle — non-fatal cleanup.
   }

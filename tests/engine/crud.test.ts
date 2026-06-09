@@ -12,12 +12,12 @@ let engine: MaadEngine;
 
 beforeAll(async () => {
   // Copy fixture to temp
-  if (existsSync(TEMP_ROOT)) rmSync(TEMP_ROOT, { recursive: true });
+  if (existsSync(TEMP_ROOT)) rmSync(TEMP_ROOT, { recursive: true, maxRetries: 10, retryDelay: 200 });
   cpSync(FIXTURE_SRC, TEMP_ROOT, { recursive: true });
 
   // Remove _backend if copied
   const backendDir = path.join(TEMP_ROOT, '_backend');
-  if (existsSync(backendDir)) rmSync(backendDir, { recursive: true });
+  if (existsSync(backendDir)) rmSync(backendDir, { recursive: true, maxRetries: 10, retryDelay: 200 });
 
   engine = new MaadEngine();
   const result = await engine.init(TEMP_ROOT);
@@ -31,7 +31,7 @@ afterAll(async () => {
   engine.close();
   await new Promise(r => setTimeout(r, 100));
   try {
-    if (existsSync(TEMP_ROOT)) rmSync(TEMP_ROOT, { recursive: true, force: true });
+    if (existsSync(TEMP_ROOT)) rmSync(TEMP_ROOT, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   } catch {
     // Windows may hold handles briefly — non-fatal
   }
