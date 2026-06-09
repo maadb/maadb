@@ -1,9 +1,17 @@
 ---
 enabled: true
-current: 0.7.15
+current: 0.7.16
 ---
 
 # Version History
+
+## 0.7.16 — 2026-06-09
+
+Dependency security wave. **simple-git 3.35.2 → 3.36.0** — closes a high-severity advisory (CVE-2026-6951: the `-c` option block could be bypassed with its `--config` long form, enabling `ext::` transport RCE where untrusted input reaches git options). The engine never passes user input as git options, so practical exposure was low, but this is the core dependency of the per-write commit path. 3.36.0 also default-blocks a denylist of env vars (EDITOR, PAGER, GIT_ASKPASS, GIT_SSH*, etc.) in custom child environments; new `buildGitEnv()` strips that denylist from the merged env — the engine's local plumbing commands must never open an editor, pager, or credential prompt, and several of those vars are present in every interactive shell and CI runner.
+
+**js-yaml 4.1.1 → 4.2.0** — the 4.2.0 resolver stopped coercing some number-shaped scalars (bare sci-notation, underscore digits), which silently disabled the serializer's parse-back quoting guard for those forms. The guard now quotes numeric lookalikes via a static version-independent pattern, so string fields survive round-trip under any downstream YAML parser, not just the installed resolver. **better-sqlite3 12.8.0 → 12.10.0** (native rebuild verified on both CI platforms). Dev deps: @types/node 24.13.1, typescript 6.0.3, vitest 4.1.8. `npm audit fix` cleared all remaining transitive advisories — `npm audit` now reports zero vulnerabilities (was 2 high + 5 moderate). Lockfile root version resynced.
+
+982 tests passing (unchanged). No engine API changes. Test-infrastructure hardening for CI runners (30s vitest timeouts, rmSync retry options) also landed in this window.
 
 ## 0.7.15 — 2026-06-09
 
@@ -437,10 +445,10 @@ Initial engine build. Parser, registry, schema, extractor (11 primitives), SQLit
 
 ## Planned
 
-Releases through 0.8.0 form an agent-first optimization track; 0.8.5+ unchanged from prior roadmap. Cascade renumbered after 0.7.13 (index-memory guards), 0.7.14 (audit correctness patch), and 0.7.15 (housekeeping + CI) consumed the planned slots.
+Releases through 0.8.0 form an agent-first optimization track; 0.8.5+ unchanged from prior roadmap. Cascade renumbered after 0.7.13–0.7.16 (index-memory guards, audit correctness patch, housekeeping + CI, dependency security wave) consumed the planned slots.
 
-- **0.7.16** — Durability & hot-path (from the 2026-06-09 engine audit). fsync'd atomic writes (unique temp suffix, failure cleanup), `maad_summary` rework (index-time validation state instead of full-corpus sync scan), journal reconcile that repairs `file_written` divergence and survives failed commits, prepared-statement caching, `documents(updated_at, doc_id)` index, pathspec-limited per-write `git status`, engine-owned `git gc --auto` hook, `indexAll` mtime+size precheck.
-- **0.7.17** — Agent-First Engine (renumbered from 0.7.13). `maad_status` cross-project rollup, followup `supersedes` schema field, canonical `_skills/session-protocol.md` in engine. Plus remaining composites that collapse common call chains: `maad_bulk_update_where`, `maad_context(docId)`, `maad_get_many`, `maad_related depth: 'hydrated'`, `maad_subscribe_from(cursor)`. (`maad_query depth: 'cold'|'full'` shipped early in 0.7.3.)
+- **0.7.17** — Durability & hot-path (from the 2026-06-09 engine audit). fsync'd atomic writes (unique temp suffix, failure cleanup), `maad_summary` rework (index-time validation state instead of full-corpus sync scan), journal reconcile that repairs `file_written` divergence and survives failed commits, prepared-statement caching, `documents(updated_at, doc_id)` index, pathspec-limited per-write `git status`, engine-owned `git gc --auto` hook, `indexAll` mtime+size precheck.
+- **0.7.18** — Agent-First Engine (renumbered from 0.7.13). `maad_status` cross-project rollup, followup `supersedes` schema field, canonical `_skills/session-protocol.md` in engine. Plus remaining composites that collapse common call chains: `maad_bulk_update_where`, `maad_context(docId)`, `maad_get_many`, `maad_related depth: 'hydrated'`, `maad_subscribe_from(cursor)`. (`maad_query depth: 'cold'|'full'` shipped early in 0.7.3.)
 - **0.8.0** — Operational Hygiene + Imports. `maad_prune_sessions` (stale-session sweeper), `maad_compact` (`VACUUM` + `git gc`), `maad_reindex_selective`, `maad_find_duplicates` + original Import workflow: `_inbox/` convention, source tracking, duplicate detection, readonly type flag.
 - **0.8.5** — Remote MCP hardening: per-connection role tiers, rate-limit policy (per-token aggregation + live-session caps), backpressure thresholds, mutex timeout, stress suite, metrics export.
 - **0.9.0** — Eviction Stage 2 + query power: LRU + hard pool cap (Stage 1 idle-timeout shipped in 0.7.3), in-place project mutations (lifts `INSTANCE_MUTATION_UNSUPPORTED`), FTS5, fuzzy entity matching, compound filters (AND/OR), cursor-based pagination.

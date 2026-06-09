@@ -5,7 +5,7 @@
 [![TypeScript](https://img.shields.io/badge/typescript-strict-blue.svg)](tsconfig.json)
 [![Tests](https://img.shields.io/badge/tests-982%20passing-brightgreen.svg)](tests)
 [![npm](https://img.shields.io/npm/v/@maadb/core.svg)](https://www.npmjs.com/package/@maadb/core)
-[![Version](https://img.shields.io/badge/version-0.7.15-purple.svg)](Version.md)
+[![Version](https://img.shields.io/badge/version-0.7.16-purple.svg)](Version.md)
 
 > **Markdown is the database. The engine makes it queryable.**
 
@@ -350,9 +350,10 @@ In multi-project mode, session tools are always available pre-bind: `maad_projec
 
 ## Current state
 
-**Current:** v0.7.15 — `maad version` command, CI on every push/PR (Ubuntu + Windows), LF line-ending enforcement, MAADb brand sweep, packaging hardening.
+**Current:** v0.7.16 — dependency security wave: simple-git 3.36.0 (high-severity advisory) with engine-side env hardening, js-yaml 4.2.0 with version-independent serializer quoting, better-sqlite3 12.10.0; zero `npm audit` findings.
 
 Recent shipped scope:
+- **0.7.15** — `maad version` command, CI on every push/PR (Ubuntu + Windows), LF line-ending enforcement, MAADb brand sweep, packaging hardening
 - **0.7.14** — Correctness patch from a full engine audit: CRLF/BOM-tolerant writes, merged git child environment, numeric sort ordering, composite filters on join/verify, pagination guards, pathspec-scoped audit commits
 - **0.7.13** — Per-document index-time memory guards (annotation cap + byte backstop) so one pathological document can't exhaust the engine process
 - **0.7.12** — `maad_query` sort contract (`UNSUPPORTED_SORT_FIELD` instead of silent NULL ordering), engine-stamped `createdAt`, file-path canonicalization
