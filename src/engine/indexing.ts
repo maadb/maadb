@@ -138,6 +138,13 @@ export async function indexAll(ctx: EngineContext, opts?: { force?: boolean }): 
     result.rebuiltTypes = [...dirtyTypes].sort();
   }
 
+  // 0.7.17 — refresh planner statistics after a rebuild touched rows. Skipped
+  // on a no-op pass (everything hash-skipped) so steady-state reindex polling
+  // doesn't pay for an ANALYZE that would change nothing.
+  if (result.indexed > 0) {
+    ctx.backend.analyze();
+  }
+
   return result;
 }
 

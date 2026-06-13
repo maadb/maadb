@@ -1,9 +1,17 @@
 ---
 enabled: true
-current: 0.7.16
+current: 0.7.17
 ---
 
 # Version History
+
+## 0.7.17 — 2026-06-13
+
+Query performance — covering indexes for filtered + sorted reads. A `findDocuments` call that filters on indexed schema fields and sorts on another indexed field compiled to a correlated subquery for the sort key plus `IN (SELECT …)` filter membership, and the planner drove the scan off the low-selectivity `deleted` index — forcing a full materialize-and-sort of the matched set with no `LIMIT` push-down. Cost grew superlinearly with corpus size.
+
+Three new `field_index` covering indexes — `(field_name, field_value, doc_id)`, `(field_name, numeric_value, doc_id)`, and `(doc_id, field_name, field_value, numeric_value)` — let the planner satisfy filter membership and the scalar sort key directly from an index, and a new `documents(deleted, doc_type, doc_id)` composite stops it choosing the all-rows `deleted` index. A post-reindex `ANALYZE` (new `MaadBackend.analyze()`, called from `indexAll` only when rows were touched) keeps planner statistics current so the composites are actually chosen. All indexes apply automatically on next `init()` via `CREATE INDEX IF NOT EXISTS`; existing databases build them once on first boot after upgrade — adding index-maintenance cost to a full reindex in exchange for the read-path win.
+
+982 tests passing (unchanged). No new dependencies, no new env vars, no schema-shape changes (indexes only). No breaking changes — additive indexes plus an internal backend method.
 
 ## 0.7.16 — 2026-06-09
 

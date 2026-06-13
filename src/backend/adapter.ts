@@ -64,6 +64,13 @@ export interface MaadBackend {
 
   // Maintenance
   removeDocument(docId: DocId): void;
+  /**
+   * 0.7.17 — refresh SQLite query-planner statistics (`ANALYZE`). Called after
+   * a full reindex so the planner has up-to-date selectivity data for the
+   * composite field_index indexes; without stats it can fall back to the
+   * low-selectivity deleted index and full-scan on sorted queries.
+   */
+  analyze(): void;
   getFileHash(path: FilePath): string | null;
   getAllFileHashes(): Map<FilePath, string>;
   getStats(): BackendStats;

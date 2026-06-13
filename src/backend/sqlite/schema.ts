@@ -23,6 +23,11 @@ CREATE TABLE IF NOT EXISTS documents (
 CREATE INDEX IF NOT EXISTS idx_documents_type ON documents(doc_type);
 CREATE INDEX IF NOT EXISTS idx_documents_path ON documents(file_path);
 CREATE INDEX IF NOT EXISTS idx_documents_deleted ON documents(deleted);
+-- 0.7.17 — composite for the findDocuments driving scan. Without it the planner
+-- picks the low-selectivity idx_documents_deleted (deleted=0 matches every live
+-- row) and full-scans documents before sorting. Leading deleted keeps the
+-- live-rows predicate sargable; doc_type narrows; doc_id covers the tie-breaker.
+CREATE INDEX IF NOT EXISTS idx_documents_del_type_id ON documents(deleted, doc_type, doc_id);
 
 -- Extracted objects table: inline annotations and indexed fields
 CREATE TABLE IF NOT EXISTS objects (
@@ -80,6 +85,16 @@ CREATE TABLE IF NOT EXISTS field_index (
 CREATE INDEX IF NOT EXISTS idx_field_doc ON field_index(doc_id);
 CREATE INDEX IF NOT EXISTS idx_field_name_value ON field_index(field_name, field_value);
 CREATE INDEX IF NOT EXISTS idx_field_name_numeric ON field_index(field_name, numeric_value);
+-- 0.7.17 — covering indexes for the sort-index-driven query path. The first two
+-- let the engine walk a scalar sort field (text/date -> field_value,
+-- number/amount -> numeric_value) in index order with doc_id covered, so a
+-- sorted+limited query terminates early instead of materializing + temp-b-tree
+-- sorting the whole matched set. The third covers the per-doc EXISTS filter
+-- probes (one 4-col index subsumes both text and numeric by-doc lookups, vs two
+-- 3-col indexes — half the write amplification).
+CREATE INDEX IF NOT EXISTS idx_field_name_value_doc ON field_index(field_name, field_value, doc_id);
+CREATE INDEX IF NOT EXISTS idx_field_name_numeric_doc ON field_index(field_name, numeric_value, doc_id);
+CREATE INDEX IF NOT EXISTS idx_field_doc_name_value ON field_index(doc_id, field_name, field_value, numeric_value);
 
 -- Engine meta key/value store (0.7.4, fup-2026-093). Holds per-type schema
 -- index fingerprints so indexAll can detect "indexed-field set changed since

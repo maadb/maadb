@@ -579,6 +579,14 @@ export class SqliteBackend implements MaadBackend {
     this.db.prepare('DELETE FROM documents WHERE doc_id = ?').run(docId as string);
   }
 
+  // 0.7.17 — refresh planner statistics after a full reindex. ANALYZE scans the
+  // indexes to populate sqlite_stat1; cheap relative to the reindex that
+  // precedes it (~1s at 240k field_index rows) and keeps the planner choosing
+  // the composite field_index indexes over the low-selectivity deleted index.
+  analyze(): void {
+    this.db.exec('ANALYZE');
+  }
+
   getFileHash(path: FilePath): string | null {
     const row = this.db.prepare(
       'SELECT file_hash FROM documents WHERE file_path = ? AND deleted = 0',
