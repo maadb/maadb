@@ -246,6 +246,22 @@ export function sampleOnce(): void {
   }
 }
 
+/**
+ * Side-effect-free point sample of current memory. Runs the configured
+ * sampler and returns the raw byte counts without mutating watcher state or
+ * emitting logs. Returns null if the sampler throws. Used by the heavy-op
+ * admission gate to decide free-headroom shedding on demand, independent of
+ * the watcher's interval. Reuses the configured sampler so a test-injected
+ * sampler (via initMemoryPressureWatcher) also drives the gate.
+ */
+export function sampleMemoryNow(): MemorySample | null {
+  try {
+    return state.sampler();
+  } catch {
+    return null;
+  }
+}
+
 export function getMemoryPressureSnapshot(): MemoryPressureSnapshot {
   const heapUsed = state.heapUsedBytes;
   const heapCap = state.heapCapBytes;

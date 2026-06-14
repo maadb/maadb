@@ -1,9 +1,22 @@
 ---
 enabled: true
-current: 0.7.17
+current: 0.7.18
 ---
 
 # Version History
+
+## 0.7.18 — 2026-06-14
+
+Engine self-defense against heavy-op load storms. A misbehaving background caller that hammers the expensive maintenance ops (`maad_reindex`, `maad_reload`, `maad_schema`, `maad_summary`) in a tight loop could pile up transient heap faster than GC reclaims it and OOM-crash-loop a memory-capped engine — the process died rather than shedding the excess. A new `HeavyOpGuard` at the MCP request boundary adds four independent, false-positive-cheap defenses, all returning the retryable `OVERLOADED` code rather than risking a crash:
+
+- **Free-headroom admission gate** — refuses a heavy op when free heap, or free cgroup budget, whichever is tighter, drops below a floor (default 96 MiB). Keyed on *absolute* free bytes, not a heap ratio: per-op cost is roughly fixed regardless of dataset size, so a byte floor protects a small engine without false-tripping a legitimately large resident working set that needs its own headroom. Fails open if memory can't be sampled.
+- **Single-flight coalescing** — folds identical concurrent heavy ops into one execution instead of re-running each.
+- **Process-global concurrency cap** (default 4) — the pool runs one engine per project in a single process, so heavy ops on different projects allocate heap concurrently in the same process; a global semaphore bounds the executing count across all engines and sheds over the cap.
+- **Circuit breaker** — after repeated memory sheds it opens for a cooldown (default 3 sheds → 5 s) and fast-fails all heavy ops without re-sampling, adding temporal hysteresis that breaks an OOM→hot-retry loop even when a caller ignores `retryAfterMs`; half-opens after the cooldown and closes on a healthy sample.
+
+Refusals are retryable, so the guard is a backstop, never a correctness boundary. `maad_health.runtime` gains a `heavyOpGuard` block (free-heap floor, concurrency cap, breaker state, shed/coalesce/concurrency/breaker counters). New env: `MAAD_HEAVY_OP_GUARD_DISABLE`, `MAAD_HEAVY_OP_MIN_FREE_HEAP_MB`, `MAAD_HEAVY_OP_RETRY_AFTER_MS`, `MAAD_HEAVY_OP_MAX_CONCURRENT`, `MAAD_HEAVY_OP_BREAKER_THRESHOLD`, `MAAD_HEAVY_OP_BREAKER_COOLDOWN_MS`.
+
+1017 tests passing (+24). New error code: `OVERLOADED`. No new dependencies, no schema changes. Behavior change: identical concurrent reindex/reload/schema/summary calls now coalesce to one run, and heavy ops shed (retryable) under low memory headroom, concurrency saturation, or an open breaker rather than risking an OOM.
 
 ## 0.7.17 — 2026-06-13
 

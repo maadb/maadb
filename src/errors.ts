@@ -99,7 +99,12 @@ export type ErrorCode =
   // params all live at once), enough to FATAL the whole engine process on a
   // memory-capped deployment. indexFile skips such a doc with this code
   // instead, leaving every other project on the engine alive.
-  | 'DOC_TOO_LARGE';
+  | 'DOC_TOO_LARGE'
+  // 0.7.18 — engine self-defense. A heavy maintenance op (reindex / reload /
+  // schema / summary) is refused up front when free heap headroom is below
+  // the configured floor, so a misbehaving background caller that hammers
+  // these ops sheds load (retryable) instead of OOM-crash-looping the engine.
+  | 'OVERLOADED';
 
 export interface MaadError {
   code: ErrorCode;

@@ -137,9 +137,13 @@ describe('concurrent reads do not block on a held write mutex', () => {
     // maad_reindex is classified 'write' and therefore routes through
     // runExclusive. We don't care about the engine result here — we
     // replace the handler with a controlled sleep to measure serialization.
+    // NOTE: each call carries a distinct arg (`shard`) so the heavy-op guard's
+    // single-flight does NOT coalesce them — identical concurrent reindexes
+    // intentionally collapse to one run (covered in tests/mcp/heavy-ops.test.ts);
+    // here we want distinct ops to prove the write mutex serializes them.
     const started = Date.now();
     const writes = Array.from({ length: N_WRITES }, (_, i) =>
-      withEngine(ctx, { sessionId: `sid-w-${i}` }, 'maad_reindex', {}, async () => {
+      withEngine(ctx, { sessionId: `sid-w-${i}` }, 'maad_reindex', { shard: i }, async () => {
         await sleep(PER_WRITE_MS);
         return { content: [{ type: 'text', text: JSON.stringify({ ok: true, data: { n: i } }) }] };
       }),

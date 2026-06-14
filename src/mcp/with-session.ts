@@ -25,6 +25,7 @@ import { getRateLimiter } from './rate-limit.js';
 import { logToolCall, getOpsLog } from '../logging.js';
 import { isShuttingDown } from './shutdown.js';
 import { getKindForTool, isEngineLess } from './kinds.js';
+import { getHeavyOpGuard, heavyOpKey } from './heavy-ops.js';
 import { isCommitIdentityEnabled, type CommitIdentity } from '../git/commit.js';
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
@@ -238,10 +239,50 @@ export async function withEngine(
         engine.setCommitIdentity(undefined);
       }
     };
-    const handlerPromise: Promise<McpToolResponse> =
+    // Engine self-defense for heavy maintenance ops (reindex/reload/schema/
+    // summary). The admission gate sheds (retryable OVERLOADED) when free heap
+    // headroom is below the floor so a storm can't OOM-crash-loop the engine;
+    // single-flight coalesces concurrent identical ops into one execution.
+    const guard = getHeavyOpGuard();
+    const heavy = guard.isHeavy(toolName);
+    if (heavy) {
+      const rejection = guard.checkAdmission();
+      if (rejection) {
+        return finalize(mcpErrorWithDetails('OVERLOADED',
+          'Engine shed a heavy maintenance op to protect memory; retry shortly.', {
+            reason: rejection.reason,
+            freeMb: rejection.freeMb,
+            minFreeMb: rejection.minFreeMb,
+            retryAfterMs: rejection.retryAfterMs,
+          }));
+      }
+    }
+
+    const runDispatch = (): Promise<McpToolResponse> =>
       kind === 'write'
         ? poolResult.value.runExclusive(toolName, runWithIdentity)
         : invokeHandler();
+    // For heavy ops, the single-flight leader also takes a process-global
+    // concurrency slot (followers share its result and take none). At the cap,
+    // shed with retryable OVERLOADED instead of piling onto the heap.
+    const handlerPromise: Promise<McpToolResponse> = heavy
+      ? guard.runCoalesced(heavyOpKey(projectName, toolName, args), async () => {
+          const slot = guard.tryAcquireConcurrencySlot();
+          if (!slot.ok) {
+            return mcpErrorWithDetails('OVERLOADED',
+              'Engine at heavy-op concurrency limit; retry shortly.', {
+                reason: slot.rejection.reason,
+                limit: slot.rejection.limit,
+                retryAfterMs: slot.rejection.retryAfterMs,
+              });
+          }
+          try {
+            return await runDispatch();
+          } finally {
+            slot.release();
+          }
+        })
+      : runDispatch();
 
     let timedOut = false;
     let timeoutHandle: ReturnType<typeof setTimeout> | null = null;

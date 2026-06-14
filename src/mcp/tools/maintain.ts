@@ -13,6 +13,7 @@ import type { InstanceCtx } from '../ctx.js';
 import { withEngine } from '../with-session.js';
 import { getTransportSnapshot, isInitialized as telemetryInitialized } from '../transport/telemetry.js';
 import { getMemoryPressureSnapshot } from '../memory-pressure.js';
+import { getHeavyOpGuard } from '../heavy-ops.js';
 
 export function register(server: McpServer, ctx: InstanceCtx): number {
   server.registerTool('maad_delete', {
@@ -122,7 +123,7 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
     // 0.7.10 P5 — runtime block surfaces process-level memory-pressure state so
     // operators can read V8 heap pressure without grepping logs. Snapshot is
     // always present; `enabled: false` indicates the sampler is disabled.
-    const runtime = { memoryPressure: getMemoryPressureSnapshot() };
+    const runtime = { memoryPressure: getMemoryPressureSnapshot(), heavyOpGuard: getHeavyOpGuard().snapshot() };
     const payload = telemetry
       ? { ...health, provenance: provMode, transport: telemetry.transport, sessions: sessionsBlock, instance: instanceBlock, runtime }
       : { ...health, provenance: provMode, sessions: sessionsBlock, instance: instanceBlock, runtime };
