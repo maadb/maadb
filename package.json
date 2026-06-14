@@ -1,6 +1,6 @@
 {
   "name": "@maadb/core",
-  "version": "0.7.16",
+  "version": "0.7.17",
   "description": "Markdown As A Database — treats markdown as the canonical data store, builds a queryable index, and gives LLMs deterministic read/write access.",
   "repository": {
     "type": "git",
