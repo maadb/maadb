@@ -440,6 +440,14 @@ export interface DocumentQuery {
    * field_value column, so 9 < 100 sorts numerically rather than "100" < "9".
    */
   sortNumeric?: boolean;
+  /**
+   * 0.7.17 — set by the engine when sortBy is a *list* schema field. List
+   * fields have multiple field_index rows per document, so the backend keeps
+   * the aggregate MIN/MAX sort path for them; scalar schema fields take the
+   * sort-index-driven fast path (drive from the sort field's index + EXISTS
+   * filters, early-terminating at LIMIT) instead.
+   */
+  sortListField?: boolean;
   limit?: number;
   offset?: number;
 }

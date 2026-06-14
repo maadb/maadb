@@ -200,8 +200,8 @@ function validateSortBy(
   ctx: EngineContext,
   sortBy: string,
   docType: DocType | undefined,
-): Result<{ numeric: boolean }> {
-  if (resolveSystemSortKey(sortBy) !== null) return ok({ numeric: false });
+): Result<{ numeric: boolean; isList: boolean }> {
+  if (resolveSystemSortKey(sortBy) !== null) return ok({ numeric: false, isList: false });
 
   if (!docType) {
     return singleErr('UNSUPPORTED_SORT_FIELD',
@@ -248,7 +248,10 @@ function validateSortBy(
     );
   }
 
-  return ok({ numeric: field.type === 'number' || field.type === 'amount' });
+  return ok({
+    numeric: field.type === 'number' || field.type === 'amount',
+    isList: field.type === 'list',
+  });
 }
 
 export function findDocuments(ctx: EngineContext, query: DocumentQuery): Result<FindResult> {
@@ -261,13 +264,15 @@ export function findDocuments(ctx: EngineContext, query: DocumentQuery): Result<
   // indexed schema field of the requested docType. Unknown or unindexed keys
   // reject up front so callers don't silently get all-NULL ordering.
   let sortNumeric = false;
+  let sortListField = false;
   if (query.sortBy !== undefined) {
     const sortValidation = validateSortBy(ctx, query.sortBy, query.docType);
     if (!sortValidation.ok) return sortValidation;
     sortNumeric = sortValidation.value.numeric;
+    sortListField = sortValidation.value.isList;
   }
 
-  let effectiveQuery: DocumentQuery = { ...query, filters: expanded.value as any, sortNumeric };
+  let effectiveQuery: DocumentQuery = { ...query, filters: expanded.value as any, sortNumeric, sortListField };
   let limitClamped: { requested: number; applied: number } | undefined;
   if (query.limit !== undefined && query.limit > MAX_QUERY_LIMIT) {
     limitClamped = { requested: query.limit, applied: MAX_QUERY_LIMIT };

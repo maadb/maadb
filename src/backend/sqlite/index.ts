@@ -252,6 +252,13 @@ export class SqliteBackend implements MaadBackend {
   }
 
   findDocuments(query: DocumentQuery): DocumentMatch[] {
+    // 0.7.17 — scalar schema-field sort takes the sort-index-driven fast path:
+    // walk the sort field's field_index in order, gate rows with EXISTS filter
+    // probes, and stop at LIMIT (no full materialize + temp-b-tree sort). System
+    // sort keys and list schema fields fall through to the aggregate path below.
+    if (query.sortBy && resolveSystemSortKey(query.sortBy) === null && !query.sortListField) {
+      return this.findDocumentsScalarSorted(query);
+    }
     const { where, params } = this.buildDocQuery(query);
     // 0.7.12 — sort resolution. Engine layer validates sortBy as either a
     // system sort key or an indexed schema field before we get here. Backend
@@ -290,6 +297,100 @@ export class SqliteBackend implements MaadBackend {
     const rows = this.db.prepare(sql).all(...params) as RawDocRow[];
 
     return rows.map((row): DocumentMatch => ({
+      docId: toDocId(row.doc_id),
+      docType: toDocType(row.doc_type),
+      filePath: toFilePath(row.file_path),
+    }));
+  }
+
+  // 0.7.17 — sort-index-driven query for scalar schema-field sorts. Drives from
+  // the sort field's field_index rows (one per doc for a scalar field) so the
+  // covering index yields rows already in sort order and the LIMIT terminates
+  // early — O(limit) instead of materializing and temp-b-tree sorting the whole
+  // matched set. Filters become correlated EXISTS probes against the index.
+  //
+  // Docs with no value for the sort field own no driving row, so they are
+  // gathered by a second query and concatenated on the NULL-ordering side
+  // (SQLite orders NULL smallest: missing sorts last under DESC, first under
+  // ASC) — preserving the same result SET and missing-value ordering as the
+  // aggregate path, while keeping the early-terminating scan for present docs.
+  private findDocumentsScalarSorted(query: DocumentQuery): DocumentMatch[] {
+    const dir = query.sortOrder === 'asc' ? 'ASC' : 'DESC';
+    const sortCol = query.sortNumeric ? 'sfi.numeric_value' : 'sfi.field_value';
+    const sortField = query.sortBy as string;
+    const limit = sanitizePageParam(query.limit, 50);
+    const offset = sanitizePageParam(query.offset, 0);
+    const need = offset + limit;
+    if (need === 0) return [];
+
+    const docTypeClause = query.docType ? ' AND d.doc_type = ?' : '';
+    const docTypeParam: unknown[] = query.docType ? [query.docType as string] : [];
+
+    // Correlated EXISTS probes for filters (present-value arm). buildFilterSQL
+    // emits unqualified field_name/field_value/numeric_value, which bind to the
+    // inner field_index alias; the correlation is the alias.doc_id = sfi.doc_id.
+    const existsConds: string[] = [];
+    const existsParams: unknown[] = [];
+    let exIdx = 0;
+    if (query.filters) {
+      for (const [field, condition] of Object.entries(query.filters)) {
+        const atomics: unknown[] = Array.isArray(condition) ? condition : [condition];
+        for (const c of atomics) {
+          const { sql, values } = buildFilterSQL(field, c);
+          const alias = `fex${exIdx++}`;
+          existsConds.push(`EXISTS (SELECT 1 FROM field_index ${alias} WHERE ${alias}.doc_id = sfi.doc_id AND ${sql})`);
+          existsParams.push(...values);
+        }
+      }
+    }
+    const existsWhere = existsConds.length ? ' AND ' + existsConds.join(' AND ') : '';
+
+    type Row = { doc_id: string; doc_type: string; file_path: string };
+
+    // Arm A — docs that HAVE the sort field, in index order, early-terminating.
+    const presentArm = (lim: number): Row[] => {
+      const sql =
+        `SELECT d.doc_id, d.doc_type, d.file_path ` +
+        `FROM field_index sfi ` +
+        `JOIN documents d ON d.doc_id = sfi.doc_id AND d.deleted = 0${docTypeClause} ` +
+        `WHERE sfi.field_name = ?${existsWhere} ` +
+        `ORDER BY ${sortCol} ${dir}, sfi.doc_id ${dir} ` +
+        `LIMIT ?`;
+      const params = [...docTypeParam, sortField, ...existsParams, lim];
+      return this.db.prepare(sql).all(...params) as Row[];
+    };
+
+    // Arm B — docs MISSING the sort field. Filters reuse the IN form on d.doc_id.
+    const missingArm = (lim: number): Row[] => {
+      const conds: string[] = ['d.deleted = 0'];
+      const params: unknown[] = [];
+      if (query.docType) { conds.push('d.doc_type = ?'); params.push(query.docType as string); }
+      conds.push('NOT EXISTS (SELECT 1 FROM field_index WHERE doc_id = d.doc_id AND field_name = ?)');
+      params.push(sortField);
+      if (query.filters) {
+        for (const [field, condition] of Object.entries(query.filters)) {
+          applyFieldFilters(field, condition, conds, params);
+        }
+      }
+      const sql =
+        `SELECT d.doc_id, d.doc_type, d.file_path FROM documents d ` +
+        `WHERE ${conds.join(' AND ')} ORDER BY d.doc_id ${dir} LIMIT ?`;
+      params.push(lim);
+      return this.db.prepare(sql).all(...params) as Row[];
+    };
+
+    // NULL (missing) sorts smallest: present-first under DESC, missing-first
+    // under ASC. Fetch the leading arm up to `need`; only touch the trailing
+    // arm if the requested page extends past the leading arm's rows.
+    const leading = dir === 'DESC' ? presentArm(need) : missingArm(need);
+    let combined = leading;
+    if (leading.length < need) {
+      const remaining = need - leading.length;
+      const trailing = dir === 'DESC' ? missingArm(remaining) : presentArm(remaining);
+      combined = leading.concat(trailing);
+    }
+
+    return combined.slice(offset, offset + limit).map((row): DocumentMatch => ({
       docId: toDocId(row.doc_id),
       docType: toDocType(row.doc_type),
       filePath: toFilePath(row.file_path),

@@ -11,7 +11,9 @@ Query performance — covering indexes for filtered + sorted reads. A `findDocum
 
 Three new `field_index` covering indexes — `(field_name, field_value, doc_id)`, `(field_name, numeric_value, doc_id)`, and `(doc_id, field_name, field_value, numeric_value)` — let the planner satisfy filter membership and the scalar sort key directly from an index, and a new `documents(deleted, doc_type, doc_id)` composite stops it choosing the all-rows `deleted` index. A post-reindex `ANALYZE` (new `MaadBackend.analyze()`, called from `indexAll` only when rows were touched) keeps planner statistics current so the composites are actually chosen. All indexes apply automatically on next `init()` via `CREATE INDEX IF NOT EXISTS`; existing databases build them once on first boot after upgrade — adding index-maintenance cost to a full reindex in exchange for the read-path win.
 
-982 tests passing (unchanged). No new dependencies, no new env vars, no schema-shape changes (indexes only). No breaking changes — additive indexes plus an internal backend method.
+Filtered queries that sort on a scalar schema field now take a sort-index-driven path: the engine walks the sort field's covering index in order and gates candidate rows with `EXISTS` filter probes, so a `LIMIT`ed query terminates early instead of materializing and sorting the whole matched set. Documents with no value for the sort field are gathered by a second query and ordered on the NULL side (last under `DESC`, first under `ASC`), preserving both the result set and the prior aggregate path's ordering. List-field sorts keep the aggregate MIN/MAX path; a new engine-set `sortListField` query flag routes the two.
+
+990 tests passing (+8 — missing-sort-field contract coverage). No new dependencies, no new env vars, no schema-shape changes. No breaking changes — query results are unchanged; only sorted-query performance improves.
 
 ## 0.7.16 — 2026-06-09
 
