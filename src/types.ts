@@ -404,6 +404,14 @@ export interface DocumentRecord {
   deleted: boolean;
   indexedAt: string;
   updatedAt: string;
+  /**
+   * 0.7.17 — structural validity captured at index time (validateFrontmatter
+   * mode 'index'). Persisted so summary() can COUNT invalid records instead of
+   * re-reading and re-validating every file on each call. Optional on the type:
+   * pre-0.7.17 rows and callers that don't set it are treated as valid (the
+   * column defaults to 1 and self-corrects on next reindex).
+   */
+  valid?: boolean;
 }
 
 export type FilterCondition =

@@ -48,11 +48,18 @@ export async function validate(
     return ok(report);
   }
 
-  const allDocs = ctx.backend.findDocuments({ limit: 100000 });
   const report: ValidationReport = { total: 0, valid: 0, invalid: 0, errors: [] };
   const drift: ValidationReport['precisionDrift'] = includePrecision ? [] : undefined;
 
-  for (const match of allDocs) {
+  // 0.7.17 — page through every live record instead of a single capped fetch.
+  // The prior findDocuments({ limit: 100000 }) silently dropped records past
+  // 100k from the audit, undercounting on large projects. PAGE-sized batches
+  // keep the audit unbounded while bounding per-iteration memory.
+  const PAGE = 1000;
+  for (let offset = 0; ; offset += PAGE) {
+    const page = ctx.backend.findDocuments({ limit: PAGE, offset });
+    if (page.length === 0) break;
+    for (const match of page) {
     report.total++;
     const doc = ctx.backend.getDocument(match.docId);
     if (!doc) continue;
@@ -76,6 +83,8 @@ export async function validate(
     if (drift) {
       drift.push(...collectPrecisionDrift(doc.docId, frontmatter, schema));
     }
+    }
+    if (page.length < PAGE) break;
   }
 
   if (drift) report.precisionDrift = drift;

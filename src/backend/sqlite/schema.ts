@@ -18,7 +18,12 @@ CREATE TABLE IF NOT EXISTS documents (
   -- 0.7.12 — engine-stamped creation time. Existing dbs pick it up via
   -- ALTER TABLE in the migration block below; pre-existing rows backfill
   -- to updated_at as the best-available approximation.
-  created_at   TEXT NOT NULL DEFAULT ''
+  created_at   TEXT NOT NULL DEFAULT '',
+  -- 0.7.17 — structural validity at index time (1 = valid, 0 = invalid). Lets
+  -- summary() COUNT invalid records instead of re-reading and re-validating
+  -- every file per call. Existing rows pick it up via ALTER (default 1) and
+  -- self-correct on next reindex.
+  valid        INTEGER NOT NULL DEFAULT 1
 );
 CREATE INDEX IF NOT EXISTS idx_documents_type ON documents(doc_type);
 CREATE INDEX IF NOT EXISTS idx_documents_path ON documents(file_path);
@@ -28,6 +33,10 @@ CREATE INDEX IF NOT EXISTS idx_documents_deleted ON documents(deleted);
 -- row) and full-scans documents before sorting. Leading deleted keeps the
 -- live-rows predicate sargable; doc_type narrows; doc_id covers the tie-breaker.
 CREATE INDEX IF NOT EXISTS idx_documents_del_type_id ON documents(deleted, doc_type, doc_id);
+-- NB: the idx_documents_valid index lives in the init() migration block, not
+-- here. It references the valid column, which existing databases only gain via
+-- ALTER after this SCHEMA_SQL runs, so creating it here would fail on
+-- pre-0.7.17 databases with a no-such-column error.
 
 -- Extracted objects table: inline annotations and indexed fields
 CREATE TABLE IF NOT EXISTS objects (

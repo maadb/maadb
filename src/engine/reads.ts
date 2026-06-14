@@ -9,7 +9,6 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 
 import { ok, singleErr, type Result } from '../errors.js';
-import { validateFrontmatter } from '../schema/index.js';
 import { logger } from './logger.js';
 import {
   docId as toDocId,
@@ -48,7 +47,7 @@ import type {
   ChangesPage,
   ChangesSinceParsedCursor,
 } from './types.js';
-import { readFrontmatter, readFrontmatterSync, readBlockContent, collectMarkdownFiles } from './helpers.js';
+import { readFrontmatter, readBlockContent, collectMarkdownFiles } from './helpers.js';
 
 export async function getDocument(
   ctx: EngineContext,
@@ -371,23 +370,15 @@ export function summary(ctx: EngineContext): SummaryResult {
     sampleIds: ctx.backend.getSampleDocIds(rt.name, 3).map(id => id as string),
   }));
 
-  // Warnings: broken refs (cheap SQL) + validation errors (scan all docs)
+  // Warnings: broken refs + invalid records, both cheap SQL counts. 0.7.17 —
+  // validationErrors now reads the per-doc validity persisted at index time
+  // (countInvalidDocuments) instead of re-reading and re-validating every file
+  // on each summary() call. This is uncapped (the prior inline scan silently
+  // stopped at 100k docs) and O(1) rather than O(N file reads). Index-time
+  // validity is structural (precision enforcement is write-time only) — the
+  // same posture as the read-mode validation this replaced.
   const brokenRefs = ctx.backend.countBrokenRefs();
-  let validationErrors = 0;
-  const allDocs = ctx.backend.findDocuments({ limit: 100000 });
-  for (const match of allDocs) {
-    const doc = ctx.backend.getDocument(match.docId);
-    if (!doc) continue;
-    const schema = ctx.schemaStore.getSchemaForType(doc.docType);
-    if (!schema) { validationErrors++; continue; }
-    const fm = readFrontmatterSync(ctx.projectRoot, doc);
-    if (fm) {
-      // Read mode: precision enforcement skipped (historical records must
-      // never be judged on the way out).
-      const result = validateFrontmatter(fm, schema, ctx.registry, undefined, { mode: 'read' });
-      if (!result.valid) validationErrors++;
-    }
-  }
+  const validationErrors = ctx.backend.countInvalidDocuments();
 
   const emptyProject = ctx.registry.types.size === 0 && stats.totalDocuments === 0;
 

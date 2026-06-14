@@ -58,6 +58,16 @@ export class SqliteBackend implements MaadBackend {
       this.db.exec("ALTER TABLE documents ADD COLUMN created_at TEXT NOT NULL DEFAULT ''");
       this.db.exec("UPDATE documents SET created_at = updated_at WHERE created_at = ''");
     }
+
+    // 0.7.17 — add valid column. Existing rows default to 1 (valid) and
+    // self-correct to their true index-time validity on the next reindex.
+    if (!cols.some(c => c.name === 'valid')) {
+      this.db.exec("ALTER TABLE documents ADD COLUMN valid INTEGER NOT NULL DEFAULT 1");
+    }
+    // Created here, after the column is guaranteed present (fresh DBs get it
+    // from SCHEMA_SQL's CREATE TABLE; existing DBs from the ALTER above) — it
+    // cannot live in SCHEMA_SQL, which runs before this migration.
+    this.db.exec('CREATE INDEX IF NOT EXISTS idx_documents_valid ON documents(valid, deleted)');
   }
 
   close(): void {
@@ -69,8 +79,8 @@ export class SqliteBackend implements MaadBackend {
   putDocument(doc: DocumentRecord): void {
     this.db.prepare(`
       INSERT OR REPLACE INTO documents
-        (doc_id, doc_type, schema_ref, file_path, file_hash, version, deleted, indexed_at, updated_at, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (doc_id, doc_type, schema_ref, file_path, file_hash, version, deleted, indexed_at, updated_at, created_at, valid)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       doc.docId as string,
       doc.docType as string,
@@ -82,6 +92,9 @@ export class SqliteBackend implements MaadBackend {
       doc.indexedAt,
       doc.updatedAt,
       doc.createdAt,
+      // 0.7.17 — undefined (callers that don't compute validity) is treated as
+      // valid so the column never blocks a write; the indexer always sets it.
+      doc.valid === false ? 0 : 1,
     );
   }
 
@@ -752,6 +765,19 @@ export class SqliteBackend implements MaadBackend {
     };
   }
 
+  // 0.7.17 — count live records flagged invalid at index time. Backs
+  // summary().warnings.validationErrors without re-reading every file. The
+  // count reflects index-mode structural validity (precision enforcement is
+  // write-time only — same posture as the read-mode validation summary() used
+  // to run inline), and is accurate for records indexed since the 0.7.17
+  // upgrade; pre-0.7.17 rows read as valid until their next reindex.
+  countInvalidDocuments(): number {
+    const row = this.db.prepare(
+      'SELECT COUNT(*) as cnt FROM documents WHERE deleted = 0 AND valid = 0',
+    ).get() as { cnt: number };
+    return row.cnt;
+  }
+
   countBrokenRefs(): number {
     const row = this.db.prepare(`
       SELECT COUNT(*) as cnt FROM relationships r
@@ -874,6 +900,7 @@ function rowToDocument(row: RawDocRow): DocumentRecord {
     indexedAt: row.indexed_at,
     updatedAt: row.updated_at,
     createdAt: row.created_at,
+    valid: row.valid !== 0,
   };
 }
 
@@ -890,6 +917,7 @@ interface RawDocRow {
   indexed_at: string;
   updated_at: string;
   created_at: string;
+  valid: number;
 }
 
 interface RawObjectRow {

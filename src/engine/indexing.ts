@@ -311,6 +311,10 @@ export function processDocument(ctx: EngineContext, parsed: ParsedDocument): Res
     indexedAt: now,
     updatedAt: contentChanged ? now : (existing?.updatedAt ?? now),
     createdAt,
+    // 0.7.17 — persist index-time structural validity so summary() can COUNT
+    // invalid records instead of re-reading every file. `validation` was
+    // computed above in mode 'index'.
+    valid: validation.valid,
   };
 
   const fieldIndex: Array<{ name: string; value: string; numericValue: number | null; type: string }> = [];

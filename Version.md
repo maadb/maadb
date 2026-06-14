@@ -13,7 +13,9 @@ Three new `field_index` covering indexes — `(field_name, field_value, doc_id)`
 
 Filtered queries that sort on a scalar schema field now take a sort-index-driven path: the engine walks the sort field's covering index in order and gates candidate rows with `EXISTS` filter probes, so a `LIMIT`ed query terminates early instead of materializing and sorting the whole matched set. Documents with no value for the sort field are gathered by a second query and ordered on the NULL side (last under `DESC`, first under `ASC`), preserving both the result set and the prior aggregate path's ordering. List-field sorts keep the aggregate MIN/MAX path; a new engine-set `sortListField` query flag routes the two.
 
-990 tests passing (+8 — missing-sort-field contract coverage). No new dependencies, no new env vars, no schema-shape changes. No breaking changes — query results are unchanged; only sorted-query performance improves.
+`summary()`'s validation-error warning and `maad_validate` now read per-document validity persisted at index time instead of re-reading and re-validating every record file on each call. A new `documents.valid` column — set from the structural validation the indexer already runs — backs a single `COUNT`; existing databases gain the column via `ALTER` on first boot (defaulting to valid, self-correcting on next reindex). This also fixes a latent correctness bug: both `summary()` and whole-project `validate` previously fetched records via `findDocuments({ limit: 100000 })` and silently undercounted past 100k records — `summary()` now counts in SQL and whole-project `validate` pages through every record.
+
+993 tests passing (+11 over 0.7.16 — sort-missing-field and validity-count coverage). One additive `documents.valid` column (auto-migrated; defaults to valid). No new dependencies, no new env vars. No breaking changes — query results and validation semantics are unchanged; reads and sorted queries get faster and validation counts are no longer capped.
 
 ## 0.7.16 — 2026-06-09
 

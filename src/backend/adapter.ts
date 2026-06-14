@@ -75,6 +75,12 @@ export interface MaadBackend {
   getAllFileHashes(): Map<FilePath, string>;
   getStats(): BackendStats;
   countBrokenRefs(): number;
+  /**
+   * 0.7.17 — count live records flagged invalid at index time (`valid = 0`).
+   * Backs summary()'s validation-error warning without re-reading every file,
+   * and is uncapped (the prior inline scan silently stopped at 100k docs).
+   */
+  countInvalidDocuments(): number;
 
   /**
    * 0.7.10 — return soft-deleted records (`deleted = 1`) whose `updated_at`
