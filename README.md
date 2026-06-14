@@ -3,9 +3,9 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/node-%E2%89%A524-brightgreen.svg)](package.json)
 [![TypeScript](https://img.shields.io/badge/typescript-strict-blue.svg)](tsconfig.json)
-[![Tests](https://img.shields.io/badge/tests-982%20passing-brightgreen.svg)](tests)
+[![Tests](https://img.shields.io/badge/tests-993%20passing-brightgreen.svg)](tests)
 [![npm](https://img.shields.io/npm/v/@maadb/core.svg)](https://www.npmjs.com/package/@maadb/core)
-[![Version](https://img.shields.io/badge/version-0.7.16-purple.svg)](Version.md)
+[![Version](https://img.shields.io/badge/version-0.7.17-purple.svg)](Version.md)
 
 > **Markdown is the database. The engine makes it queryable.**
 
@@ -350,9 +350,10 @@ In multi-project mode, session tools are always available pre-bind: `maad_projec
 
 ## Current state
 
-**Current:** v0.7.16 — dependency security wave: simple-git 3.36.0 (high-severity advisory) with engine-side env hardening, js-yaml 4.2.0 with version-independent serializer quoting, better-sqlite3 12.10.0; zero `npm audit` findings.
+**Current:** v0.7.17 — read-path performance + validation correctness: covering indexes and a sort-index-driven query path keep filtered + sorted queries fast as the corpus grows, and per-document validity makes `maad_summary` / `maad_validate` an uncapped SQL count instead of a per-call file scan.
 
 Recent shipped scope:
+- **0.7.16** — Dependency security wave: simple-git 3.36.0 (high-severity advisory) with engine-side env hardening, js-yaml 4.2.0 version-independent serializer quoting, better-sqlite3 12.10.0; zero `npm audit` findings
 - **0.7.15** — `maad version` command, CI on every push/PR (Ubuntu + Windows), LF line-ending enforcement, MAADb brand sweep, packaging hardening
 - **0.7.14** — Correctness patch from a full engine audit: CRLF/BOM-tolerant writes, merged git child environment, numeric sort ordering, composite filters on join/verify, pagination guards, pathspec-scoped audit commits
 - **0.7.13** — Per-document index-time memory guards (annotation cap + byte backstop) so one pathological document can't exhaust the engine process
@@ -368,7 +369,7 @@ See [Version.md](Version.md) for the full release history and forward plan.
 
 - TypeScript strict, Node.js 24+ (current Active LTS)
 - 6 production dependencies: `better-sqlite3`, `gray-matter`, `js-yaml`, `simple-git`, `@modelcontextprotocol/sdk`, `pino`
-- 982 tests, Vitest — run on every push/PR across Ubuntu and Windows
+- 993 tests, Vitest — run on every push/PR across Ubuntu and Windows
 - MIT license, pre-1.0, actively developed
 
 ## License
