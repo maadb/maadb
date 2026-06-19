@@ -1,6 +1,7 @@
 ---
 enabled: true
 current: 0.7.18
+dev_flow: formal
 ---
 
 # Version History
