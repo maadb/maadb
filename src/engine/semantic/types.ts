@@ -65,6 +65,40 @@ export interface FtsHit {
   snippet: string;
 }
 
+/** Input to maad_semantic_search. */
+export interface SemanticSearchQuery {
+  query: string;
+  mode: SearchMode;
+  /** Top results after block→doc rollup (default 10, clamped to MAX_QUERY_LIMIT). */
+  k?: number;
+  /** Scope filters (same shape as maad_query filters). */
+  filters?: Record<string, unknown>;
+  /** Scope to a single doc type. */
+  docType?: string;
+  /** Include snippets (default true). */
+  snippet?: boolean;
+}
+
+/** One ranked result (a document, represented by its best-matching block). */
+export interface SemanticHit {
+  docId: string;
+  docType: string;
+  /** Best-matching block ordinal (locate via maad_get with the heading). */
+  blockOrd: number;
+  heading: string;
+  /** Fused relevance score (RRF for hybrid; rank-based for single-leg). Higher = better. */
+  score: number;
+  snippet: string;
+}
+
+export interface SemanticSearchResult {
+  mode: SearchMode;
+  total: number;
+  results: SemanticHit[];
+  /** Set when the requested mode degraded (e.g. 'no_vector_provider' ⇒ lexical fallback). */
+  degraded?: string;
+}
+
 /** Embedding subsystem stats surfaced via maad_health.embeddings. */
 export interface SemanticStats {
   ready: boolean;

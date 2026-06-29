@@ -50,6 +50,7 @@ import * as backup from './backup.js';
 import * as maintenance from './maintenance.js';
 import * as repairs from './repairs.js';
 import * as auditOps from './audit.js';
+import * as semanticSearchOps from './semantic/search.js';
 
 // Re-export all result types
 export type {
@@ -68,6 +69,12 @@ export type {
   ValidationReport,
   VerifyResult,
 } from './types.js';
+export type {
+  SemanticSearchQuery,
+  SemanticSearchResult,
+  SemanticHit,
+  SearchMode,
+} from './semantic/types.js';
 
 export interface HealthReport {
   projectRoot: string;
@@ -645,6 +652,8 @@ export class MaadEngine {
   async backupList(opts?: import('./types.js').ListBackupsOptions) { return backup.listBackups(this.ctx(), opts); }
   async backupDelete(tag: string) { return backup.deleteBackup(this.ctx(), tag); }
   changesSince(query: import('./types.js').ChangesSinceQuery) { return reads.changesSince(this.ctx(), query); }
+  // 0.8.0 — semantic retrieval (async: embeds the query for semantic/hybrid).
+  async semanticSearch(query: import('./semantic/types.js').SemanticSearchQuery) { return semanticSearchOps.semanticSearch(this.ctx(), query); }
 
   // --- Composites (Tier 2, provisional) ---
   async getDocumentFull(id: DocId) { return composites.getDocumentFull(this.ctx(), id); }
