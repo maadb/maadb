@@ -111,12 +111,16 @@ export interface MaadBackend {
   initSemantic(cfg: { dim?: number | undefined; model?: string | undefined }): void;
   semantic(): SemanticIndex | null;
 
-  // Batch write (wraps all puts in a transaction for a single document)
+  // Batch write (wraps all puts in a transaction for a single document).
+  // 0.8.0 — `semanticBlocks` (when provided) populates the per-block semantic
+  // index (FTS + embed queue) inside the same transaction. Omitted/undefined
+  // when semantic retrieval is off, keeping the base write path unchanged.
   materializeDocument(
     doc: DocumentRecord,
     objects: ExtractedObject[],
     relationships: Relationship[],
     blocks: ParsedBlock[],
     fieldIndex: Array<{ name: string; value: string; numericValue: number | null; type: string }>,
+    semanticBlocks?: import('../engine/semantic/types.js').BlockTextInput[],
   ): void;
 }

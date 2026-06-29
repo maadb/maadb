@@ -23,11 +23,12 @@ import {
   type DocumentRecord,
   type SchemaDefinition,
 } from '../types.js';
-import { parseDocument } from '../parser/index.js';
+import { parseDocument, type ParseOptions } from '../parser/index.js';
 import { validateFrontmatter } from '../schema/index.js';
 import { extract } from '../extractor/index.js';
 import type { EngineContext } from './context.js';
 import type { IndexResult } from './types.js';
+import type { BlockTextInput } from './semantic/types.js';
 import { collectMarkdownFiles, computeNumericValue, toCanonicalRelPath } from './helpers.js';
 
 // 0.7.4 (fup-2026-093) — Per-type schema fingerprint covering the indexed
@@ -217,8 +218,11 @@ export async function indexFile(ctx: EngineContext, absolutePath: FilePath): Pro
   // build an unbounded object/relationship set. The doc still indexes (record
   // + frontmatter + capped body) and stays findable.
   const annoCap = maxDocAnnotations();
-  const parsed = await parseDocument(absolutePath, ctx.registry.subtypeMap,
-    annoCap > 0 ? { maxAnnotations: annoCap } : undefined);
+  // 0.8.0 — request per-block text only when semantic indexing is on, so a
+  // non-semantic parse pays nothing for the extra slicing.
+  const parseOpts: ParseOptions = { includeBlockText: ctx.semanticEnabled };
+  if (annoCap > 0) parseOpts.maxAnnotations = annoCap;
+  const parsed = await parseDocument(absolutePath, ctx.registry.subtypeMap, parseOpts);
   if (!parsed.ok) return parsed;
 
   if (parsed.value.annotationsTruncated) {
@@ -347,12 +351,28 @@ export function processDocument(ctx: EngineContext, parsed: ParsedDocument): Res
     }
   }
 
+  // 0.8.0 — per-block text for the semantic index (FTS + embed queue), persisted
+  // atomically inside the materialize transaction. Only built when semantic is
+  // on and the parser produced block text; empty blocks (heading-only) are
+  // skipped. Single-block docs fall back naturally to one whole-doc block.
+  let semanticBlocks: BlockTextInput[] | undefined;
+  if (ctx.semanticEnabled && parsed.blockTexts) {
+    const texts = parsed.blockTexts;
+    semanticBlocks = [];
+    parsed.blocks.forEach((b, i) => {
+      const text = texts[i] ?? '';
+      if (text.length === 0) return;
+      semanticBlocks!.push({ blockOrd: i, blockId: b.id as string | null, heading: b.heading, text });
+    });
+  }
+
   ctx.backend.materializeDocument(
     docRecord,
     extraction.objects,
     extraction.relationships,
     parsed.blocks,
     fieldIndex,
+    semanticBlocks,
   );
 
   // Carry the partial-index signal up so indexAll can tally it. The record +

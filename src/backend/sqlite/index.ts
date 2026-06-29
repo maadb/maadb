@@ -188,6 +188,7 @@ export class SqliteBackend implements MaadBackend {
     relationships: Relationship[],
     blocks: ParsedBlock[],
     fieldIndex: Array<{ name: string; value: string; numericValue: number | null; type: string }>,
+    semanticBlocks?: import('../../engine/semantic/types.js').BlockTextInput[],
   ): void {
     const txn = this.db.transaction(() => {
       this.putDocument(doc);
@@ -195,6 +196,11 @@ export class SqliteBackend implements MaadBackend {
       this.putRelationships(doc.docId, relationships);
       this.putBlocks(doc.docId, blocks);
       this.putFieldIndex(doc.docId, fieldIndex);
+      // 0.8.0 — atomically (re)populate the per-block semantic index. putBlockText
+      // is a no-op if the store isn't ready; passing [] still clears stale rows.
+      if (semanticBlocks !== undefined) {
+        this.semanticStore?.putBlockText(doc.docId as string, semanticBlocks);
+      }
     });
     txn();
   }

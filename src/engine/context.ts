@@ -7,6 +7,7 @@ import type { MaadBackend } from '../backend/index.js';
 import type { GitLayer, CommitOptions, CommitOutcome } from '../git/index.js';
 import type { CommitIdentity } from '../git/commit.js';
 import type { OperationJournal } from './journal.js';
+import type { EmbeddingProvider } from './semantic/types.js';
 import { logger } from './logger.js';
 import { logCommitFailure } from '../logging.js';
 
@@ -52,6 +53,17 @@ export interface EngineContext {
    * get role/token/agent/user lines appended.
    */
   commitIdentity?: CommitIdentity;
+  /**
+   * 0.8.0 — semantic retrieval gate. When true (MAAD_SEMANTIC_ENABLE on AND the
+   * backend's semantic index loaded), the index path computes + persists
+   * per-block text. False ⇒ the engine behaves exactly as pre-0.8.0.
+   */
+  semanticEnabled: boolean;
+  /**
+   * 0.8.0 — embedding provider for query-time embedding in semantic/hybrid
+   * search. Absent ⇒ lexical-only (exact works; semantic/hybrid degrade).
+   */
+  embeddingProvider?: EmbeddingProvider;
 }
 
 /**
