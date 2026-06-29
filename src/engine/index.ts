@@ -620,8 +620,19 @@ export class MaadEngine {
   async indexFile(absolutePath: FilePath) {
     return this.kickIndexer(await this.runExclusive('indexFile', () => indexing.indexFile(this.ctx(), absolutePath)));
   }
-  async reindex(opts?: { docId?: DocId; force?: boolean }) {
-    return this.kickIndexer(await this.runExclusive('reindex', () => indexing.reindex(this.ctx(), opts)));
+  async reindex(opts?: { docId?: DocId; force?: boolean; embeddings?: boolean }) {
+    // `embeddings` forces a full reindex (so block_text/FTS are (re)populated for
+    // every doc — needed when enabling semantic on an existing project), then
+    // re-enqueues all blocks and drains the worker so the rebuild is synchronous.
+    const force = (opts?.force ?? false) || (opts?.embeddings ?? false);
+    const idxOpts: { docId?: DocId; force?: boolean } = { force };
+    if (opts?.docId !== undefined) idxOpts.docId = opts.docId;
+    const result = this.kickIndexer(await this.runExclusive('reindex', () => indexing.reindex(this.ctx(), idxOpts)));
+    if (opts?.embeddings && this.semanticEnabled) {
+      this.backend.semantic()?.enqueueAll();
+      await this.flushSemanticIndex();
+    }
+    return result;
   }
 
   /**
@@ -632,6 +643,30 @@ export class MaadEngine {
    */
   async flushSemanticIndex(): Promise<void> {
     await this.semanticIndexer?.flush();
+  }
+
+  /**
+   * 0.8.0 — semantic subsystem health for maad_health.embeddings. Always returns
+   * a stable shape; `enabled:false` when semantic is off or the index never
+   * loaded. Provider id comes from the engine (not stored in the index).
+   */
+  semanticHealth(): {
+    enabled: boolean; provider: string | null; model: string | null; dim: number | null;
+    vecReady: boolean; queueDepth: number; embeddedBlocks: number; indexedBlocks: number; failures: number;
+  } {
+    const sem = this.backend.semantic();
+    if (!this.semanticEnabled || !sem || !sem.isReady()) {
+      return { enabled: false, provider: null, model: null, dim: null, vecReady: false,
+        queueDepth: 0, embeddedBlocks: 0, indexedBlocks: 0, failures: 0 };
+    }
+    const s = sem.stats();
+    return {
+      enabled: true,
+      provider: this.embeddingProvider?.id ?? null,
+      model: s.model, dim: s.dim, vecReady: s.vecReady,
+      queueDepth: s.queueDepth, embeddedBlocks: s.embeddedBlocks,
+      indexedBlocks: s.indexedBlocks, failures: s.failures,
+    };
   }
 
   // --- Reads ---

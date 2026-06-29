@@ -46,10 +46,11 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
     description: 'Rebuilds the SQLite index from markdown files. Use after external file changes or to recover from stale state. Auto-detects per-type schema-index changes and rebuilds affected types even when files are byte-identical (rebuiltTypes lists them in the response).',
     inputSchema: z.object({
       force: z.boolean().optional().default(false).describe('Force full rebuild (skip both hash check and the schema-fingerprint shortcut). Rarely needed since 0.7.4 — the engine now auto-rebuilds types whose indexed-field set changed.'),
+      embeddings: z.boolean().optional().default(false).describe('0.8.0 — rebuild the semantic index: force a full reindex (repopulating per-block text + FTS), re-enqueue every block, and drain the embed worker. Use after enabling MAAD_SEMANTIC_ENABLE on an existing project or after an embedding provider/model change. No-op when semantic is off.'),
       project: z.string().optional().describe('Project name (multi-project mode only)'),
     }),
   }, async (args, extra) => withEngine(ctx, extra, 'maad_reindex', args, async ({ engine }) => {
-    return resultToResponse(await engine.reindex({ force: args.force }));
+    return resultToResponse(await engine.reindex({ force: args.force, embeddings: args.embeddings }));
   }));
 
   server.registerTool('maad_reload', {
@@ -124,9 +125,12 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
     // operators can read V8 heap pressure without grepping logs. Snapshot is
     // always present; `enabled: false` indicates the sampler is disabled.
     const runtime = { memoryPressure: getMemoryPressureSnapshot(), heavyOpGuard: getHeavyOpGuard().snapshot() };
+    // 0.8.0 — semantic subsystem block: provider/model/dim + queue depth,
+    // embedded vs indexed block counts, and embed failures. enabled:false when off.
+    const embeddings = engine.semanticHealth();
     const payload = telemetry
-      ? { ...health, provenance: provMode, transport: telemetry.transport, sessions: sessionsBlock, instance: instanceBlock, runtime }
-      : { ...health, provenance: provMode, sessions: sessionsBlock, instance: instanceBlock, runtime };
+      ? { ...health, provenance: provMode, transport: telemetry.transport, sessions: sessionsBlock, instance: instanceBlock, runtime, embeddings }
+      : { ...health, provenance: provMode, sessions: sessionsBlock, instance: instanceBlock, runtime, embeddings };
     return successResponse(payload, 'maad_health');
   }));
 

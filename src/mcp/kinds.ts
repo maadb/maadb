@@ -36,6 +36,7 @@ export const READ_TOOLS: ReadonlySet<string> = new Set([
   'maad_validate',
   'maad_health',
   'maad_find_orphans',
+  'maad_semantic_search',
 ]);
 
 // Tools that flow through withEngine and may mutate engine state. Must

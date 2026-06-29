@@ -98,10 +98,11 @@ export async function cmdValidate(ctx: CliContext): Promise<void> {
 
 export async function cmdReindex(ctx: CliContext): Promise<void> {
   const force = ctx.args.includes('--force');
+  const embeddings = ctx.args.includes('--embeddings');
   const engine = await initEngine(ctx);
 
-  console.log('Indexing...');
-  const result = await engine.reindex({ force });
+  console.log(embeddings ? 'Indexing (+ rebuilding semantic index)...' : 'Indexing...');
+  const result = await engine.reindex({ force, embeddings });
   if (!result.ok) {
     console.error('Reindex errors:');
     for (const e of result.errors) console.error(`  ${e.code}: ${e.message}`);

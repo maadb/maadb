@@ -287,5 +287,35 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
     return resultToResponse(engine.changesSince(q), 'maad_changes_since');
   }));
 
-  return 10;
+  // 0.8.0 — semantic retrieval. One primitive, one ranked list out; the agent
+  // selects the mode and that choice lands in the audit trail.
+  server.registerTool('maad_semantic_search', {
+    description: 'Meaning-based retrieval over record bodies (block-level) with a 3-mode dial. mode=exact: lexical BM25 only — deterministic, touches no model, best for known-item lookup (precision). mode=semantic: vector similarity — best for free-form/exploratory research (recall). mode=hybrid: both legs fused via Reciprocal Rank Fusion (balanced). The agent picks the mode (it lands in the audit trail). Returns documents ranked by their best-matching block, each with heading + snippet. Requires MAAD_SEMANTIC_ENABLE; semantic/hybrid need an embedding provider, else they degrade to the lexical leg (response _meta.degraded is set).',
+    inputSchema: z.object({
+      query: z.string().describe('Natural-language or keyword query.'),
+      mode: z.enum(['exact', 'hybrid', 'semantic']).default('exact')
+        .describe('exact=BM25 lexical (no model, deterministic, precision); semantic=vector KNN (recall, exploratory); hybrid=RRF fusion of both (balanced).'),
+      k: z.number().int().min(1).optional().describe('Max documents to return (default 10, capped at 500).'),
+      filters: z.any().optional().describe('Scope filters (same format as maad_query).'),
+      docType: z.string().optional().describe('Scope to a single document type.'),
+      snippet: z.boolean().optional().describe('Include a matched snippet per result (default true).'),
+      project: z.string().optional().describe('Project name (multi-project mode only).'),
+    }),
+  }, async (args, extra) => withEngine(ctx, extra, 'maad_semantic_search', args, async ({ engine }) => {
+    const q: import('../../engine/semantic/types.js').SemanticSearchQuery = { query: args.query, mode: args.mode };
+    if (args.k !== undefined) q.k = args.k;
+    if (args.filters !== undefined) q.filters = args.filters as Record<string, unknown>;
+    if (args.docType !== undefined) q.docType = args.docType;
+    if (args.snippet !== undefined) q.snippet = args.snippet;
+    const result = await engine.semanticSearch(q);
+    let response = resultToResponse(result, 'maad_semantic_search');
+    if (result.ok) {
+      const meta: Record<string, unknown> = { mode: result.value.mode };
+      if (result.value.degraded !== undefined) meta['degraded'] = result.value.degraded;
+      response = attachMeta(response, meta);
+    }
+    return guardResponseSize(response, { tool: 'maad_semantic_search' });
+  }));
+
+  return 11;
 }
