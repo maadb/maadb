@@ -46,6 +46,18 @@ describe('semantic index — end to end', () => {
     expect(stats.embeddedBlocks).toBe(stats.indexedBlocks);
   });
 
+  it('reindex --embeddings rebuilds the index; semanticHealth reports caught-up', async () => {
+    const r = await engine.reindex({ embeddings: true });
+    expect(r.ok).toBe(true);
+    const h = engine.semanticHealth();
+    expect(h.enabled).toBe(true);
+    expect(h.provider).toBe('fake');
+    expect(h.vecReady).toBe(true);
+    expect(h.queueDepth).toBe(0);
+    expect(h.embeddedBlocks).toBe(h.indexedBlocks);
+    expect(h.indexedBlocks).toBeGreaterThan(0);
+  });
+
   it('a created doc becomes lexically + vector searchable after flush', async () => {
     const created = await engine.createDocument(
       docType('client'),
