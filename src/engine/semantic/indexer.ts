@@ -78,7 +78,7 @@ export class SemanticIndexer {
             throw new Error(`provider returned ${vectors.length} vectors for ${batch.length} inputs`);
           }
           const rows: BlockEmbedding[] = batch.map((b, i) => ({
-            docId: b.docId, blockOrd: b.blockOrd, vector: vectors[i]!,
+            qid: b.qid, docId: b.docId, blockOrd: b.blockOrd, vector: vectors[i]!,
           }));
           this.index.putBlockEmbeddings(rows);
         } catch (e) {

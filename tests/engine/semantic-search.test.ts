@@ -75,6 +75,22 @@ describe('maad_semantic_search — modes & fusion', () => {
     expect(r.value.results.some(h => h.docId === ids['fintech'])).toBe(true);
   });
 
+  it('vec-originated hits still carry a heading when snippet=false', async () => {
+    const c = await engine.createDocument(docType('client'), { name: 'Heading Co', status: 'active' },
+      '## Logistics Division\nWe operate warehouse robotics and automation lines.');
+    expect(c.ok).toBe(true);
+    if (!c.ok) return;
+    await engine.flushSemanticIndex();
+    // semantic mode ⇒ vec-only hits (no FTS heading); heading must be backfilled.
+    const r = await engine.semanticSearch({ query: 'warehouse robotics automation', mode: 'semantic', k: 5, snippet: false });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const hit = r.value.results.find(h => h.docId === c.value.docId);
+    expect(hit).toBeDefined();
+    expect(hit!.snippet).toBe('');                       // suppressed
+    expect(hit!.heading).toBe('Logistics Division');     // heading preserved (nav key)
+  });
+
   it('scope filter narrows to matching docs only', async () => {
     // "consultations" is unique to the health doc (status=active).
     const r = await engine.semanticSearch({ query: 'consultations', mode: 'exact', filters: { status: 'prospect' } });
@@ -100,6 +116,16 @@ describe('maad_semantic_search — disabled', () => {
       const r = await engine.semanticSearch({ query: 'anything', mode: 'exact' });
       expect(r.ok).toBe(false);
       if (!r.ok) expect(r.errors[0]!.code).toBe('SEMANTIC_DISABLED');
+    } finally { cleanup(engine, root); }
+  });
+
+  it('reindex --embeddings is a no-op (hash-skip) when semantic is off', async () => {
+    const { engine, root } = await freshEngine('off');
+    try {
+      await engine.indexAll({ force: true });            // initial build
+      const r = await engine.reindex({ embeddings: true }); // must NOT force a full rebuild
+      expect(r.ok).toBe(true);
+      if (r.ok) expect(r.value.indexed).toBe(0);          // everything hash-skipped
     } finally { cleanup(engine, root); }
   });
 });

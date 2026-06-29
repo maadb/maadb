@@ -37,6 +37,10 @@ export class SqliteBackend implements MaadBackend {
   // 0.8.0 — constructed only when MAAD_SEMANTIC_ENABLE is on (via initSemantic);
   // null otherwise so the base engine carries no semantic surface.
   private semanticStore: SemanticStore | null = null;
+  // 0.8.0 — flips on close() so an async read (e.g. semantic search resuming
+  // after a query-embed await) can detect a concurrent reload closed the backend
+  // out from under it, instead of throwing a raw "database is not open" error.
+  private closed = false;
 
   constructor(dbPath: string) {
     this.db = new Database(dbPath);
@@ -76,6 +80,7 @@ export class SqliteBackend implements MaadBackend {
   }
 
   close(): void {
+    this.closed = true;
     this.db.close();
   }
 
@@ -768,7 +773,7 @@ export class SqliteBackend implements MaadBackend {
   }
 
   semantic(): SemanticIndex | null {
-    return this.semanticStore;
+    return this.closed ? null : this.semanticStore;
   }
 
   getStats(): BackendStats {

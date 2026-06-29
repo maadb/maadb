@@ -43,7 +43,7 @@ function makeProvider(dim = 4, failFirst = 0) {
 }
 
 const pending = (n: number): PendingEmbed[] =>
-  Array.from({ length: n }, (_, i) => ({ docId: 'doc', blockOrd: i, text: `block ${i}` }));
+  Array.from({ length: n }, (_, i) => ({ qid: i + 1, docId: 'doc', blockOrd: i, text: `block ${i}` }));
 
 describe('SemanticIndexer', () => {
   it('crash-resume: start() drains a queue left by a prior process', async () => {

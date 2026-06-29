@@ -50,12 +50,15 @@ const FTS_DDL =
   `USING fts5(text, heading, doc_id UNINDEXED, block_ord UNINDEXED)`;
 
 // Pending-embed markers (no text — the worker joins block_text). FK CASCADE
-// cleans it on hard delete.
+// cleans it on hard delete. `id` is AUTOINCREMENT (never reused, even after the
+// table empties) so it serves as the worker's epoch token: a re-queued block
+// gets a strictly-new id, so a stale in-flight batch's id no longer matches.
 const QUEUE_DDL =
   `CREATE TABLE IF NOT EXISTS embed_queue (` +
+  `id INTEGER PRIMARY KEY AUTOINCREMENT, ` +
   `doc_id TEXT NOT NULL REFERENCES documents(doc_id) ON DELETE CASCADE, ` +
   `block_ord INTEGER NOT NULL, ` +
-  `PRIMARY KEY (doc_id, block_ord))`;
+  `UNIQUE (doc_id, block_ord))`;
 const QUEUE_IDX = `CREATE INDEX IF NOT EXISTS idx_embed_queue_doc ON embed_queue(doc_id)`;
 
 /** Raw little-endian float32 BLOB — the form sqlite-vec binds. */
@@ -187,7 +190,7 @@ export class SemanticStore implements SemanticIndex {
   takeEmbedBatch(limit: number): PendingEmbed[] {
     if (!this.ready) return [];
     return this.db.prepare(
-      'SELECT q.doc_id AS docId, q.block_ord AS blockOrd, t.text AS text ' +
+      'SELECT q.id AS qid, q.doc_id AS docId, q.block_ord AS blockOrd, t.text AS text ' +
       'FROM embed_queue q JOIN block_text t ' +
       'ON t.doc_id = q.doc_id AND t.block_ord = q.block_ord ' +
       'LIMIT ?',
@@ -196,17 +199,21 @@ export class SemanticStore implements SemanticIndex {
 
   putBlockEmbeddings(rows: BlockEmbedding[]): void {
     if (!this.vecReady || rows.length === 0) return;
+    const delQ = this.db.prepare('DELETE FROM embed_queue WHERE id = ?');
     const delVec = this.db.prepare('DELETE FROM vec_blocks WHERE doc_id = ? AND block_ord = ?');
     const insVec = this.db.prepare(
       'INSERT INTO vec_blocks(doc_id, block_ord, embedding) VALUES (?, ?, ?)');
-    const delQ = this.db.prepare('DELETE FROM embed_queue WHERE doc_id = ? AND block_ord = ?');
     const txn = this.db.transaction((rs: BlockEmbedding[]) => {
       for (const r of rs) {
+        // Epoch guard: only write the vector if THIS queue row still exists. If
+        // the block was re-queued during the embed await (putBlockText deletes +
+        // re-inserts with a new rowid), this delete removes 0 rows → skip the
+        // stale vector and leave the fresh row for the rerun to re-embed.
+        if (delQ.run(r.qid).changes !== 1) continue;
         // block_ord is a vec0 INTEGER metadata column — must bind as BigInt.
         const ord = BigInt(r.blockOrd);
         delVec.run(r.docId, ord);
         insVec.run(r.docId, ord, vecToBlob(r.vector));
-        delQ.run(r.docId, r.blockOrd);
       }
     });
     txn(rows);
@@ -220,19 +227,28 @@ export class SemanticStore implements SemanticIndex {
     ).all(vecToBlob(queryVec), k) as VecHit[];
   }
 
-  searchFts(query: string, k: number, withSnippet: boolean): FtsHit[] {
+  searchFts(query: string, k: number, withSnippet: boolean, scopeDocIds?: readonly string[]): FtsHit[] {
     if (!this.ready) return [];
     const match = toFtsMatch(query);
     if (match === null) return [];
     const snipCol = withSnippet
       ? `snippet(fts_blocks, 0, '', '', '…', 16) AS snippet`
       : `'' AS snippet`;
+    // Optional in-SQL scope filter on the UNINDEXED doc_id column so the LIMIT
+    // selects the top-k IN-SCOPE blocks (not the global top-k then post-filtered).
+    const params: unknown[] = [match];
+    let scopeClause = '';
+    if (scopeDocIds && scopeDocIds.length > 0) {
+      scopeClause = ` AND doc_id IN (${scopeDocIds.map(() => '?').join(', ')})`;
+      params.push(...scopeDocIds);
+    }
+    params.push(k);
     // block_ord is an FTS5 (affinity-less) column → CAST back to INTEGER.
     return this.db.prepare(
       `SELECT doc_id AS docId, CAST(block_ord AS INTEGER) AS blockOrd, heading, ` +
       `bm25(fts_blocks) AS score, ${snipCol} ` +
-      `FROM fts_blocks WHERE fts_blocks MATCH ? ORDER BY score LIMIT ?`,
-    ).all(match, k) as FtsHit[];
+      `FROM fts_blocks WHERE fts_blocks MATCH ?${scopeClause} ORDER BY score LIMIT ?`,
+    ).all(...params) as FtsHit[];
   }
 
   getBlockText(docId: string, blockOrd: number): { heading: string; text: string } | null {

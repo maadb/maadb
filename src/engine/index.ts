@@ -624,13 +624,23 @@ export class MaadEngine {
     // `embeddings` forces a full reindex (so block_text/FTS are (re)populated for
     // every doc — needed when enabling semantic on an existing project), then
     // re-enqueues all blocks and drains the worker so the rebuild is synchronous.
-    const force = (opts?.force ?? false) || (opts?.embeddings ?? false);
+    const force = (opts?.force ?? false) || ((opts?.embeddings ?? false) && this.semanticEnabled);
     const idxOpts: { docId?: DocId; force?: boolean } = { force };
     if (opts?.docId !== undefined) idxOpts.docId = opts.docId;
     const result = this.kickIndexer(await this.runExclusive('reindex', () => indexing.reindex(this.ctx(), idxOpts)));
     if (opts?.embeddings && this.semanticEnabled) {
       this.backend.semantic()?.enqueueAll();
       await this.flushSemanticIndex();
+      // The embed worker is fail-soft (a failed batch stays queued for retry), so
+      // flush can return with work outstanding. Surface that on the ops channel —
+      // maad_health.embeddings carries the live queueDepth/failures too.
+      const s = this.backend.semantic()?.stats();
+      if (s && (s.queueDepth > 0 || s.failures > 0)) {
+        logger.degraded('engine', 'reindex_embeddings_incomplete',
+          `reindex --embeddings left the vector index incomplete (queueDepth ${s.queueDepth}, failures ${s.failures}); ` +
+          `the embedding provider likely errored — retry once it recovers`,
+          { queueDepth: s.queueDepth, failures: s.failures });
+      }
     }
     return result;
   }

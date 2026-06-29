@@ -8,7 +8,7 @@ import {
   filePath,
   type DocumentRecord,
 } from '../../src/types.js';
-import type { BlockTextInput, BlockEmbedding } from '../../src/engine/semantic/types.js';
+import type { BlockTextInput, SemanticIndex } from '../../src/engine/semantic/types.js';
 
 let backend: SqliteBackend;
 
@@ -42,6 +42,14 @@ const blk = (ord: number, heading: string, text: string): BlockTextInput =>
 
 // Unit vectors in a 4-d space so KNN ordering is easy to reason about.
 const vec = (a: number[]): Float32Array => new Float32Array(a);
+
+// Build embeddings for all currently-queued blocks, attaching the real qid (the
+// epoch token putBlockEmbeddings requires) from the queue.
+function embedQueued(s: SemanticIndex, vectorFor: (docId: string, blockOrd: number) => number[]) {
+  return s.takeEmbedBatch(1000).map(b => ({
+    qid: b.qid, docId: b.docId, blockOrd: b.blockOrd, vector: vec(vectorFor(b.docId, b.blockOrd)),
+  }));
+}
 
 describe('SemanticStore', () => {
   describe('toFtsMatch', () => {
@@ -99,10 +107,10 @@ describe('SemanticStore', () => {
       expect(batch.map(b => b.blockOrd).sort()).toEqual([0, 1]);
       expect(batch.find(b => b.blockOrd === 0)!.text).toBe('block zero text');
 
-      const embeds: BlockEmbedding[] = [
-        { docId: 'note-a', blockOrd: 0, vector: vec([1, 0, 0, 0]) },
-        { docId: 'note-a', blockOrd: 1, vector: vec([0, 1, 0, 0]) },
-      ];
+      const embeds = batch.map(b => ({
+        qid: b.qid, docId: b.docId, blockOrd: b.blockOrd,
+        vector: b.blockOrd === 0 ? vec([1, 0, 0, 0]) : vec([0, 1, 0, 0]),
+      }));
       s.putBlockEmbeddings(embeds);
 
       const hits = s.searchVec(vec([1, 0, 0, 0]), 2);
@@ -113,6 +121,28 @@ describe('SemanticStore', () => {
       const stats = s.stats();
       expect(stats.queueDepth).toBe(0);            // drained
       expect(stats.embeddedBlocks).toBe(2);
+    });
+
+    it('epoch guard: a batch superseded by a re-index writes no stale vector', () => {
+      const s = backend.semantic()!;
+      s.putBlockText('note-a', [blk(0, 'X', 'original text')]);
+      const stale = s.takeEmbedBatch(10);          // captures the original row's qid
+      // doc re-indexed before the worker writes → row deleted + re-inserted (new qid)
+      s.putBlockText('note-a', [blk(0, 'X', 'rewritten text')]);
+      // worker resumes with the STALE batch → epoch guard skips the write
+      s.putBlockEmbeddings(stale.map(b => ({ qid: b.qid, docId: b.docId, blockOrd: b.blockOrd, vector: vec([1, 0, 0, 0]) })));
+      expect(s.stats().embeddedBlocks).toBe(0);    // no stale vector landed
+      expect(s.stats().queueDepth).toBe(1);        // fresh row still queued for re-embed
+    });
+
+    it('searchFts honors the in-SQL scope filter (scoped recall)', () => {
+      backend.putDocument(makeDoc('note-b'));
+      const s = backend.semantic()!;
+      s.putBlockText('note-a', [blk(0, 'X', 'shared keyword alpha')]);
+      s.putBlockText('note-b', [blk(0, 'Y', 'shared keyword beta')]);
+      expect(s.searchFts('shared', 10, false).length).toBe(2);                       // unscoped
+      const scoped = s.searchFts('shared', 10, false, ['note-a']);
+      expect(scoped.map(h => h.docId)).toEqual(['note-a']);                          // scoped in-SQL
     });
 
     it('getBlockText resolves typed (doc_id, block_ord) — the FTS5 affinity trap', () => {
@@ -136,7 +166,7 @@ describe('SemanticStore', () => {
     it('deleteDoc clears vec + fts + block_text + queue', () => {
       const s = backend.semantic()!;
       s.putBlockText('note-a', [blk(0, 'X', 'hello world')]);
-      s.putBlockEmbeddings([{ docId: 'note-a', blockOrd: 0, vector: vec([1, 0, 0, 0]) }]);
+      s.putBlockEmbeddings(embedQueued(s, () => [1, 0, 0, 0]));
       s.deleteDoc('note-a');
       const stats = s.stats();
       expect(stats.indexedBlocks).toBe(0);
@@ -148,7 +178,7 @@ describe('SemanticStore', () => {
     it('hard removeDocument cascades + clears the semantic index', () => {
       const s = backend.semantic()!;
       s.putBlockText('note-a', [blk(0, 'X', 'hello world')]);
-      s.putBlockEmbeddings([{ docId: 'note-a', blockOrd: 0, vector: vec([1, 0, 0, 0]) }]);
+      s.putBlockEmbeddings(embedQueued(s, () => [1, 0, 0, 0]));
       backend.removeDocument(docId('note-a'));
       const stats = s.stats();
       expect(stats.indexedBlocks).toBe(0);
@@ -163,10 +193,7 @@ describe('SemanticStore', () => {
       backend.putDocument(makeDoc('note-a'));
       const s = backend.semantic()!;
       s.putBlockText('note-a', [blk(0, 'X', 'a'), blk(1, 'Y', 'b')]);
-      s.putBlockEmbeddings([
-        { docId: 'note-a', blockOrd: 0, vector: vec([1, 0, 0, 0]) },
-        { docId: 'note-a', blockOrd: 1, vector: vec([0, 1, 0, 0]) },
-      ]);
+      s.putBlockEmbeddings(embedQueued(s, (_d, ord) => (ord === 0 ? [1, 0, 0, 0] : [0, 1, 0, 0])));
       expect(s.stats().queueDepth).toBe(0);
       expect(s.stats().embeddedBlocks).toBe(2);
 

@@ -35,8 +35,12 @@ export interface BlockTextInput {
   text: string;
 }
 
-/** A queued block awaiting embedding (text carried so the worker needs no join). */
+/** A queued block awaiting embedding. `qid` is the embed_queue rowid — an epoch
+ *  token: if the block is re-queued (re-index) during the embed await, the new
+ *  row gets a fresh rowid, so the worker's stale qid no longer matches and its
+ *  vector write is skipped (prevents the stale-vector / dropped-re-embed race). */
 export interface PendingEmbed {
+  qid: number;
   docId: string;
   blockOrd: number;
   text: string;
@@ -44,6 +48,7 @@ export interface PendingEmbed {
 
 /** A computed block embedding ready to upsert into the vector index. */
 export interface BlockEmbedding {
+  qid: number;
   docId: string;
   blockOrd: number;
   vector: Float32Array;
@@ -135,8 +140,9 @@ export interface SemanticIndex {
   putBlockEmbeddings(rows: BlockEmbedding[]): void;
   /** Vector KNN. */
   searchVec(queryVec: Float32Array, k: number): VecHit[];
-  /** Lexical BM25 search. */
-  searchFts(query: string, k: number, withSnippet: boolean): FtsHit[];
+  /** Lexical BM25 search. `scopeDocIds` (when given) constrains the match to
+   *  those docs in-SQL, so the top-k is computed within scope. */
+  searchFts(query: string, k: number, withSnippet: boolean, scopeDocIds?: readonly string[]): FtsHit[];
   /** Resolve a block's heading + text (for semantic-only snippets). */
   getBlockText(docId: string, blockOrd: number): { heading: string; text: string } | null;
   /** Tally embedding failures (surfaced in stats). */

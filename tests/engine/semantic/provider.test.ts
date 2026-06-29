@@ -46,16 +46,24 @@ describe('OpenAiEmbeddingProvider', () => {
     }) as unknown as typeof fetch;
   }
 
+  // A dim-wide vector with `marker` in element 0 (so order is verifiable). The
+  // provider validates returned width against its declared dim, so mocks must
+  // be correctly sized.
+  const vecOf = (dim: number, marker: number): number[] =>
+    Array.from({ length: dim }, (_, i) => (i === 0 ? marker : 0));
+
   it('resolves dim from the model map and posts the right request', async () => {
     const cap: { url?: string; init?: RequestInit } = {};
     const p = new OpenAiEmbeddingProvider({
       apiKey: 'sk-test', model: 'text-embedding-3-small',
-      fetchImpl: mockFetch(cap, [[1, 2, 3], [4, 5, 6]]),
+      fetchImpl: mockFetch(cap, [vecOf(1536, 1), vecOf(1536, 2)]),
     });
     expect(p.dim).toBe(1536);
     const out = await p.embed(['a', 'b'], 'document');
     expect(out.length).toBe(2);
-    expect(Array.from(out[0]!)).toEqual([1, 2, 3]);
+    expect(out[0]!.length).toBe(1536);
+    expect(out[0]![0]).toBe(1);
+    expect(out[1]![0]).toBe(2);
     expect(cap.url).toBe('https://api.openai.com/v1/embeddings');
     expect((cap.init!.headers as Record<string, string>)['authorization']).toBe('Bearer sk-test');
     const body = JSON.parse(cap.init!.body as string);
@@ -68,7 +76,7 @@ describe('OpenAiEmbeddingProvider', () => {
     const cap: { url?: string; init?: RequestInit } = {};
     const p = new OpenAiEmbeddingProvider({
       apiKey: 'k', model: 'text-embedding-3-large', dim: 512,
-      fetchImpl: mockFetch(cap, [[0, 0, 0]]),
+      fetchImpl: mockFetch(cap, [vecOf(512, 0)]),
     });
     expect(p.dim).toBe(512);
     await p.embed(['x'], 'document');
@@ -80,13 +88,32 @@ describe('OpenAiEmbeddingProvider', () => {
       apiKey: 'k', model: 'text-embedding-3-small',
       fetchImpl: (async () => ({
         ok: true, status: 200,
-        json: async () => ({ data: [{ embedding: [9], index: 1 }, { embedding: [8], index: 0 }] }),
+        json: async () => ({ data: [{ embedding: vecOf(1536, 9), index: 1 }, { embedding: vecOf(1536, 8), index: 0 }] }),
         text: async () => '',
       })) as unknown as typeof fetch,
     });
     const out = await p.embed(['first', 'second'], 'document');
-    expect(Array.from(out[0]!)).toEqual([8]);
-    expect(Array.from(out[1]!)).toEqual([9]);
+    expect(out[0]![0]).toBe(8);
+    expect(out[1]![0]).toBe(9);
+  });
+
+  it('throws when the returned width disagrees with the declared dim', async () => {
+    const cap: { url?: string; init?: RequestInit } = {};
+    const p = new OpenAiEmbeddingProvider({
+      apiKey: 'k', model: 'text-embedding-3-small',
+      fetchImpl: mockFetch(cap, [vecOf(8, 1)]),   // 8-dim, but provider declares 1536
+    });
+    await expect(p.embed(['x'], 'document')).rejects.toThrow(/dim/);
+  });
+
+  it('rejects dim > native (OpenAI cannot expand)', () => {
+    expect(() => new OpenAiEmbeddingProvider({ apiKey: 'k', model: 'text-embedding-3-small', dim: 3072 }))
+      .toThrow(/exceeds the native dim/);
+  });
+
+  it('rejects truncation on a non-3-* model (ada-002)', () => {
+    expect(() => new OpenAiEmbeddingProvider({ apiKey: 'k', model: 'text-embedding-ada-002', dim: 512 }))
+      .toThrow(/does not support dimension truncation/);
   });
 
   it('throws a clear error on non-200', async () => {

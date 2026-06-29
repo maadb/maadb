@@ -52,9 +52,22 @@ export class OpenAiEmbeddingProvider implements EmbeddingProvider {
         `Cannot determine embedding dim for OpenAI model "${opts.model}". ` +
         `Set MAAD_EMBED_DIM explicitly.`);
     }
+    // Only text-embedding-3-* support server-side dimension truncation.
+    const supportsTruncation = /^text-embedding-3-/.test(opts.model);
+    if (opts.dim !== undefined && native !== undefined) {
+      if (opts.dim > native) {
+        throw new Error(
+          `MAAD_EMBED_DIM=${opts.dim} exceeds the native dim ${native} for "${opts.model}"; ` +
+          `OpenAI embeddings can be truncated below native but never expanded.`);
+      }
+      if (opts.dim < native && !supportsTruncation) {
+        throw new Error(
+          `Model "${opts.model}" does not support dimension truncation; ` +
+          `set MAAD_EMBED_DIM=${native} or omit it (only text-embedding-3-* can truncate).`);
+      }
+    }
     this.dim = resolved;
-    // Only send `dimensions` when truncating below native (3-* models only).
-    this.sendDimensions = opts.dim !== undefined && native !== undefined && opts.dim < native;
+    this.sendDimensions = supportsTruncation && opts.dim !== undefined && native !== undefined && opts.dim < native;
     const base = (opts.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, '');
     this.url = `${base}/v1/embeddings`;
     this.fetchImpl = opts.fetchImpl ?? fetch;
@@ -85,9 +98,16 @@ export class OpenAiEmbeddingProvider implements EmbeddingProvider {
     if (!json.data || json.data.length !== texts.length) {
       throw new Error(`OpenAI embeddings returned ${json.data?.length ?? 0} vectors for ${texts.length} inputs`);
     }
-    // Preserve input order regardless of response ordering.
+    // Preserve input order regardless of response ordering, and assert the
+    // returned width matches the declared dim — a mismatch would otherwise only
+    // surface as a sqlite-vec insert failure inside the async worker.
     const out: Float32Array[] = new Array(texts.length);
     for (const item of json.data) {
+      if (item.embedding.length !== this.dim) {
+        throw new Error(
+          `OpenAI returned a ${item.embedding.length}-dim vector but the provider is configured for ${this.dim} ` +
+          `(model "${this.model}"). Check MAAD_EMBED_DIM / MAAD_EMBED_MODEL.`);
+      }
       out[item.index] = Float32Array.from(item.embedding);
     }
     return out;
