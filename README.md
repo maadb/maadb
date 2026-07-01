@@ -330,7 +330,7 @@ my-project/
 All tools return `{ ok: true, data: {...} }` or `{ ok: false, errors: [...] }`. Call `maad_schema <type>` for full field definitions before writing.
 
 **Discover:** `maad_scan`, `maad_summary`, `maad_describe`, `maad_schema`
-**Read:** `maad_get`, `maad_query`, `maad_search`, `maad_related`, `maad_aggregate`, `maad_join`, `maad_verify`, `maad_find_orphans`, `maad_changes_since`
+**Read:** `maad_get`, `maad_query`, `maad_search`, `maad_related`, `maad_aggregate`, `maad_join`, `maad_verify`, `maad_find_orphans`, `maad_changes_since`, `maad_semantic_search`
 **Write:** `maad_create`, `maad_update`, `maad_bulk_create`, `maad_bulk_update`, `maad_validate`
 **Maintain:** `maad_delete`, `maad_reindex`, `maad_reload`, `maad_health`, `maad_history`, `maad_audit`
 **Recovery anchors (0.7.10+):** `maad_backup` — annotated git tags as snapshot points.
@@ -340,6 +340,20 @@ All tools return `{ ok: true, data: {...} }` or `{ ok: false, errors: [...] }`. 
 **Auth admin (0.7.0+):** `maad_issue_token`, `maad_revoke_token`, `maad_rotate_token`, `maad_list_tokens`, `maad_show_token`.
 
 In multi-project mode, session tools are always available pre-bind: `maad_projects`, `maad_use_project`, `maad_use_projects`, `maad_current_session`.
+
+### Semantic retrieval (0.8.0, opt-in)
+
+`maad_semantic_search` adds meaning-based retrieval over record bodies, indexed per block, with a 3-mode dial:
+
+- **`exact`** — lexical BM25 only. Deterministic, touches no model. Best for known-item lookup.
+- **`semantic`** — vector KNN over embeddings. Best for free-form / exploratory research.
+- **`hybrid`** — both legs fused via Reciprocal Rank Fusion (rank-based, scale-free). Balanced.
+
+The agent selects the mode, and that choice lands in the audit trail — the engine never silently auto-fuses, preserving the determinism contract. Results roll up to documents (best-matching block + snippet); one ranked list out.
+
+Off by default — set `MAAD_SEMANTIC_ENABLE=1`. Embeddings are derived and rebuildable (canonical source stays markdown), generated async-on-write so the deterministic write/commit path is unchanged. The embedding provider is pluggable: inject one from the host, or env-construct (`MAAD_EMBED_PROVIDER=openai`, `MAAD_EMBED_MODEL`, `MAAD_OPENAI_API_KEY`). With no provider, `semantic`/`hybrid` degrade to the lexical leg (flagged in `_meta.degraded`); `exact` always works. After enabling on an existing project, run `maad reindex --embeddings` to build the index. `maad_health.embeddings` reports provider/model/dim, queue depth, embedded vs indexed blocks, and failures.
+
+The vector store is `sqlite-vec` (in the same SQLite file); the lexical leg is FTS5. `exact` needs neither a model nor a key.
 
 ## Agent boot flow
 
@@ -368,8 +382,8 @@ See [Version.md](Version.md) for the full release history and forward plan.
 ## Stack
 
 - TypeScript strict, Node.js 24+ (current Active LTS)
-- 6 production dependencies: `better-sqlite3`, `gray-matter`, `js-yaml`, `simple-git`, `@modelcontextprotocol/sdk`, `pino`
-- 993 tests, Vitest — run on every push/PR across Ubuntu and Windows
+- 6 production dependencies: `better-sqlite3`, `gray-matter`, `js-yaml`, `simple-git`, `@modelcontextprotocol/sdk`, `pino`. Plus one **optional** dependency `sqlite-vec` (semantic retrieval) — lazily loaded only when `MAAD_SEMANTIC_ENABLE` is on; absent or failed to load ⇒ semantic disabled, engine unaffected
+- 1063 tests, Vitest — run on every push/PR across Ubuntu and Windows
 - MIT license, pre-1.0, actively developed
 
 ## License

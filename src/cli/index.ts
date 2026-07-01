@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type { CliContext } from './helpers.js';
 import { cmdScan, cmdSummary, cmdDescribe } from './commands/discover.js';
-import { cmdGet, cmdQuery, cmdSearch, cmdRelated, cmdSchema } from './commands/read.js';
+import { cmdGet, cmdQuery, cmdSearch, cmdRelated, cmdSchema, cmdSemanticSearch } from './commands/read.js';
 import { cmdCreate, cmdUpdate } from './commands/write.js';
 import { cmdInit, cmdValidate, cmdReindex, cmdParse } from './commands/maintain.js';
 import { cmdHistory, cmdAudit } from './commands/audit.js';
@@ -59,6 +59,7 @@ async function main(): Promise<void> {
     case 'get':       await cmdGet(ctx); break;
     case 'query':     await cmdQuery(ctx); break;
     case 'search':    await cmdSearch(ctx); break;
+    case 'semantic-search': await cmdSemanticSearch(ctx); break;
     case 'related':   await cmdRelated(ctx); break;
     case 'schema':    await cmdSchema(ctx); break;
     // Write
@@ -218,12 +219,13 @@ Commands:
   get <doc_id> [depth] [block]      Read a document (hot/warm/cold/full)
   query <type> [--filter k=v]       Find documents by type and filters
   search <primitive> [opts]         Search extracted objects (--subtype, --value, --contains, --doc)
+  semantic-search <query> [opts]    Meaning-based search (--mode exact|hybrid|semantic, --k, --doc-type, --no-snippet)
   related <doc_id> [direction]      Show related documents
   schema <type>                     Show field definitions for a type (for writes)
   create <type> --field k=v [...]   Create a new document
   update <doc_id> --field k=v [...] Update a document's fields or body
   validate [doc_id]                 Validate one or all documents
-  reindex [--force]                 Rebuild the index from markdown
+  reindex [--force] [--embeddings]  Rebuild the index from markdown (--embeddings rebuilds the semantic index)
   parse <file.md>                   Parse a file and print the result
   history <doc_id>                  Show git history for a document
   audit [--since date]              Show project-wide activity

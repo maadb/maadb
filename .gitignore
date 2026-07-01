@@ -35,6 +35,12 @@ scratch/
 # Local profiling / repro harnesses — never tracked (public repo)
 scripts/
 
+# Benchmark harness + results — HELD for analysis. First v0.7.16 baseline was
+# run on a loaded, unsanitized dev workstation: directional only, not for
+# publication. Re-run on a clean dedicated environment before un-ignoring.
+bench/
+docs/benchmarks.md
+
 # Spec docs — in-flight (docs/specs/) and shipped-for-reference (docs/archive/) — stay local.
 # Version.md history and brain decision records carry the durable rationale.
 docs/specs/

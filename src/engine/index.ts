@@ -36,6 +36,10 @@ import { GitLayer } from '../git/index.js';
 import type { EngineContext, CommitFailureTracker } from './context.js';
 import { newCommitFailureTracker } from './context.js';
 import { OperationJournal } from './journal.js';
+import { isSemanticEnabled, readSemanticEnv } from './semantic/config.js';
+import { resolveEmbeddingProvider } from './semantic/provider.js';
+import { SemanticIndexer } from './semantic/indexer.js';
+import type { EmbeddingProvider } from './semantic/types.js';
 
 // Domain modules
 import * as indexing from './indexing.js';
@@ -46,6 +50,7 @@ import * as backup from './backup.js';
 import * as maintenance from './maintenance.js';
 import * as repairs from './repairs.js';
 import * as auditOps from './audit.js';
+import * as semanticSearchOps from './semantic/search.js';
 
 // Re-export all result types
 export type {
@@ -64,6 +69,12 @@ export type {
   ValidationReport,
   VerifyResult,
 } from './types.js';
+export type {
+  SemanticSearchQuery,
+  SemanticSearchResult,
+  SemanticHit,
+  SearchMode,
+} from './semantic/types.js';
 
 export interface HealthReport {
   projectRoot: string;
@@ -165,6 +176,20 @@ export class MaadEngine {
   private _readOnly = false;
   private startupRecovery: string[] = [];
 
+  // 0.8.0 — semantic retrieval. All null/false unless MAAD_SEMANTIC_ENABLE (or
+  // the init `semantic` opt) is on. The indexer (async embed worker) runs
+  // outside the write mutex.
+  private semanticEnabled = false;
+  private embeddingProvider: EmbeddingProvider | null = null;
+  private semanticIndexer: SemanticIndexer | null = null;
+  // Boot opts captured so reload() re-applies them (esp. an injected provider,
+  // which env can't reconstruct).
+  private bootOpts: {
+    readOnly?: boolean;
+    semantic?: boolean;
+    embeddingProvider?: EmbeddingProvider;
+  } | undefined;
+
   // Write mutex — serializes all mutating engine operations per instance.
   // FIFO. Blocks indefinitely in 0.4.1; timeout deferred to 0.8.5.
   private writeLock = new AsyncFifoMutex();
@@ -234,9 +259,19 @@ export class MaadEngine {
     }
   }
 
-  async init(projectRoot: string, opts?: { readOnly?: boolean }): Promise<Result<void>> {
+  async init(
+    projectRoot: string,
+    opts?: {
+      readOnly?: boolean;
+      // 0.8.0 — force semantic on/off regardless of env (host integration / tests).
+      semantic?: boolean;
+      // 0.8.0 — host-injected embedding provider (engine holds no API keys).
+      embeddingProvider?: EmbeddingProvider;
+    },
+  ): Promise<Result<void>> {
     this.projectRoot = path.resolve(projectRoot);
     this._readOnly = opts?.readOnly ?? false;
+    this.bootOpts = opts;
 
     // Self-heal engine-owned state on empty projects. In read-only mode we
     // refuse to write anything: a missing registry/schema/backend is a hard
@@ -281,6 +316,27 @@ export class MaadEngine {
     this.backend = new SqliteBackend(dbPath);
     this.backend.init();
 
+    // 0.8.0 — semantic retrieval bring-up. Off by default ⇒ no extension load,
+    // no new tables, no worker (the engine behaves exactly as pre-0.8.0). When
+    // on, load the vector/lexical index and, if a provider is available, start
+    // the async embed worker (crash-resume drains any leftover queue).
+    this.semanticEnabled = opts?.semantic ?? isSemanticEnabled();
+    if (this.semanticEnabled) {
+      this.embeddingProvider = resolveEmbeddingProvider({ injected: opts?.embeddingProvider });
+      this.backend.initSemantic({
+        dim: this.embeddingProvider?.dim,
+        model: this.embeddingProvider?.model,
+      });
+      const semIndex = this.backend.semantic();
+      // Require a usable vector table: with a provider but no vec index (broken
+      // vec0 → lexical-only), the worker would embed forever without draining.
+      if (semIndex && semIndex.isVecReady() && this.embeddingProvider) {
+        this.semanticIndexer = new SemanticIndexer(
+          semIndex, this.embeddingProvider, readSemanticEnv().batchSize);
+        this.semanticIndexer.start();
+      }
+    }
+
     // Operation journal — tracks pending writes for crash recovery
     this.journal = new OperationJournal(backendDir);
     this.startupRecovery = this.journal.reconcile();
@@ -324,9 +380,10 @@ export class MaadEngine {
 
   async reload(): Promise<Result<void>> {
     return this.runExclusive('reload', async () => {
+      if (this.semanticIndexer) { await this.semanticIndexer.stop(); this.semanticIndexer = null; }
       if (this.backend) this.backend.close();
       this.initialized = false;
-      return this.init(this.projectRoot, { readOnly: this._readOnly });
+      return this.init(this.projectRoot, this.bootOpts);
     });
   }
 
@@ -505,6 +562,9 @@ export class MaadEngine {
   }
 
   close(): void {
+    // Signal the worker to stop (sets its stopped flag synchronously); any
+    // in-flight batch fails soft against the closing DB.
+    if (this.semanticIndexer) { void this.semanticIndexer.stop(); this.semanticIndexer = null; }
     if (this.backend) this.backend.close();
   }
 
@@ -519,8 +579,21 @@ export class MaadEngine {
       journal: this.journal,
       readOnly: this._readOnly,
       commitFailures: this.commitFailures,
+      semanticEnabled: this.semanticEnabled,
+      ...(this.embeddingProvider !== null ? { embeddingProvider: this.embeddingProvider } : {}),
       ...(this.pendingCommitIdentity !== undefined ? { commitIdentity: this.pendingCommitIdentity } : {}),
     };
+  }
+
+  /**
+   * 0.8.0 — wake the async embed worker after a write/index op that may have
+   * enqueued blocks. Fire-and-forget; the worker drains outside the write mutex.
+   * No-op when semantic is off (indexer is null). `result` is passed through so
+   * callers stay one-liners.
+   */
+  private kickIndexer<T>(result: T): T {
+    this.semanticIndexer?.kick();
+    return result;
   }
 
   /**
@@ -544,13 +617,68 @@ export class MaadEngine {
   // first; these inner wraps are reentrant no-ops. Direct callers (CLI,
   // tests) get serialized via the first (outer) acquire.
   async indexAll(opts?: { force?: boolean }) {
-    return this.runExclusive('indexAll', () => indexing.indexAll(this.ctx(), opts));
+    return this.kickIndexer(await this.runExclusive('indexAll', () => indexing.indexAll(this.ctx(), opts)));
   }
   async indexFile(absolutePath: FilePath) {
-    return this.runExclusive('indexFile', () => indexing.indexFile(this.ctx(), absolutePath));
+    return this.kickIndexer(await this.runExclusive('indexFile', () => indexing.indexFile(this.ctx(), absolutePath)));
   }
-  async reindex(opts?: { docId?: DocId; force?: boolean }) {
-    return this.runExclusive('reindex', () => indexing.reindex(this.ctx(), opts));
+  async reindex(opts?: { docId?: DocId; force?: boolean; embeddings?: boolean }) {
+    // `embeddings` forces a full reindex (so block_text/FTS are (re)populated for
+    // every doc — needed when enabling semantic on an existing project), then
+    // re-enqueues all blocks and drains the worker so the rebuild is synchronous.
+    const force = (opts?.force ?? false) || ((opts?.embeddings ?? false) && this.semanticEnabled);
+    const idxOpts: { docId?: DocId; force?: boolean } = { force };
+    if (opts?.docId !== undefined) idxOpts.docId = opts.docId;
+    const result = this.kickIndexer(await this.runExclusive('reindex', () => indexing.reindex(this.ctx(), idxOpts)));
+    if (opts?.embeddings && this.semanticEnabled) {
+      this.backend.semantic()?.enqueueAll();
+      await this.flushSemanticIndex();
+      // The embed worker is fail-soft (a failed batch stays queued for retry), so
+      // flush can return with work outstanding. Surface that on the ops channel —
+      // maad_health.embeddings carries the live queueDepth/failures too.
+      const s = this.backend.semantic()?.stats();
+      if (s && (s.queueDepth > 0 || s.failures > 0)) {
+        logger.degraded('engine', 'reindex_embeddings_incomplete',
+          `reindex --embeddings left the vector index incomplete (queueDepth ${s.queueDepth}, failures ${s.failures}); ` +
+          `the embedding provider likely errored — retry once it recovers`,
+          { queueDepth: s.queueDepth, failures: s.failures });
+      }
+    }
+    return result;
+  }
+
+  /**
+   * 0.8.0 — await the async embed worker draining the queue to completion, so
+   * the vector index is caught up with what's been written. No-op when semantic
+   * is off or no provider is configured. Used by `reindex --embeddings`, by
+   * hosts needing a consistent vector index, and by tests.
+   */
+  async flushSemanticIndex(): Promise<void> {
+    await this.semanticIndexer?.flush();
+  }
+
+  /**
+   * 0.8.0 — semantic subsystem health for maad_health.embeddings. Always returns
+   * a stable shape; `enabled:false` when semantic is off or the index never
+   * loaded. Provider id comes from the engine (not stored in the index).
+   */
+  semanticHealth(): {
+    enabled: boolean; provider: string | null; model: string | null; dim: number | null;
+    vecReady: boolean; queueDepth: number; embeddedBlocks: number; indexedBlocks: number; failures: number;
+  } {
+    const sem = this.backend.semantic();
+    if (!this.semanticEnabled || !sem || !sem.isReady()) {
+      return { enabled: false, provider: null, model: null, dim: null, vecReady: false,
+        queueDepth: 0, embeddedBlocks: 0, indexedBlocks: 0, failures: 0 };
+    }
+    const s = sem.stats();
+    return {
+      enabled: true,
+      provider: this.embeddingProvider?.id ?? null,
+      model: s.model, dim: s.dim, vecReady: s.vecReady,
+      queueDepth: s.queueDepth, embeddedBlocks: s.embeddedBlocks,
+      indexedBlocks: s.indexedBlocks, failures: s.failures,
+    };
   }
 
   // --- Reads ---
@@ -571,6 +699,8 @@ export class MaadEngine {
   async backupList(opts?: import('./types.js').ListBackupsOptions) { return backup.listBackups(this.ctx(), opts); }
   async backupDelete(tag: string) { return backup.deleteBackup(this.ctx(), tag); }
   changesSince(query: import('./types.js').ChangesSinceQuery) { return reads.changesSince(this.ctx(), query); }
+  // 0.8.0 — semantic retrieval (async: embeds the query for semantic/hybrid).
+  async semanticSearch(query: import('./semantic/types.js').SemanticSearchQuery) { return semanticSearchOps.semanticSearch(this.ctx(), query); }
 
   // --- Composites (Tier 2, provisional) ---
   async getDocumentFull(id: DocId) { return composites.getDocumentFull(this.ctx(), id); }
@@ -579,15 +709,15 @@ export class MaadEngine {
   // Self-wrapping. Reentrant under an outer runExclusive scope.
   async createDocument(dt: DocType, fields: Record<string, unknown>, body?: string, customDocId?: string) {
     if (this._readOnly) return singleErr('READ_ONLY', 'Engine is in read-only mode');
-    return this.runExclusive('createDocument',
+    return this.kickIndexer(await this.runExclusive('createDocument',
       () => writes.createDocument(this.ctx(), dt, fields, body, customDocId),
-    );
+    ));
   }
   async updateDocument(id: DocId, fields?: Record<string, unknown>, body?: string, appendBody?: string, expectedVersion?: number) {
     if (this._readOnly) return singleErr('READ_ONLY', 'Engine is in read-only mode');
-    return this.runExclusive('updateDocument',
+    return this.kickIndexer(await this.runExclusive('updateDocument',
       () => writes.updateDocument(this.ctx(), id, fields, body, appendBody, expectedVersion),
-    );
+    ));
   }
   async deleteDocument(id: DocId, mode: 'soft' | 'hard') {
     if (this._readOnly) return singleErr('READ_ONLY', 'Engine is in read-only mode');
@@ -597,15 +727,15 @@ export class MaadEngine {
   }
   async bulkCreate(records: import('./types.js').BulkCreateInput[]) {
     if (this._readOnly) return singleErr('READ_ONLY', 'Engine is in read-only mode');
-    return this.runExclusive('bulkCreate',
+    return this.kickIndexer(await this.runExclusive('bulkCreate',
       () => writes.bulkCreate(this.ctx(), records),
-    );
+    ));
   }
   async bulkUpdate(updates: import('./types.js').BulkUpdateInput[]) {
     if (this._readOnly) return singleErr('READ_ONLY', 'Engine is in read-only mode');
-    return this.runExclusive('bulkUpdate',
+    return this.kickIndexer(await this.runExclusive('bulkUpdate',
       () => writes.bulkUpdate(this.ctx(), updates),
-    );
+    ));
   }
   async bulkDelete(docIds: string[], mode: 'soft' | 'hard') {
     if (this._readOnly) return singleErr('READ_ONLY', 'Engine is in read-only mode');
@@ -626,9 +756,9 @@ export class MaadEngine {
     maxRecords: number,
   ) {
     if (this._readOnly) return singleErr('READ_ONLY', 'Engine is in read-only mode');
-    return this.runExclusive('repairWhere',
+    return this.kickIndexer(await this.runExclusive('repairWhere',
       () => repairs.repairWhere(this.ctx(), filter, docType, repairTypes, maxRecords),
-    );
+    ));
   }
 
   // --- Maintenance ---

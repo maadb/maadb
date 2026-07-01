@@ -193,6 +193,13 @@ export interface SourceLocation {
 export interface ParsedDocument {
   filePath: FilePath;
   fileHash: string;
+  /**
+   * 0.8.0 — per-block text, parallel to `blocks` (blockTexts[i] is blocks[i]'s
+   * body text, heading line excluded, trimmed). Computed by the parser only when
+   * ParseOptions.includeBlockText is set (semantic indexing on), so the index
+   * path gets block text without a second file read. Absent otherwise.
+   */
+  blockTexts?: string[];
   frontmatter: Record<string, unknown>;
   blocks: ParsedBlock[];
   valueCalls: ValueCall[];

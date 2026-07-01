@@ -1,10 +1,18 @@
 ---
 enabled: true
-current: 0.7.18
+current: 0.8.0
 dev_flow: formal
 ---
 
 # Version History
+
+## 0.8.0 — 2026-06-29
+
+Semantic Retrieval. A new `maad_semantic_search` primitive adds meaning-based retrieval over record bodies, indexed per block, with a 3-mode dial — `exact` (FTS5/BM25, deterministic, no model), `semantic` (`sqlite-vec` vector KNN), and `hybrid` (both legs fused by Reciprocal Rank Fusion). One call in, one ranked list out; the agent picks the mode and that choice lands in the audit trail, so the engine never silently auto-fuses. Block-level hits roll up to documents with a best-block snippet.
+
+Embeddings are derived and rebuildable — the canonical source stays markdown. They are generated async-on-write by a worker that runs outside the write mutex, so the deterministic write/commit path is unchanged and `exact` touches no model. The embedding provider is pluggable: host-injected (the engine holds no API keys) or env-constructed for standalone `maad serve`. This release ships the OpenAI provider and a deterministic offline provider; the local ONNX default (`nomic-embed-text-v1.5` via transformers.js) is deferred to a follow-up. With no provider, `semantic`/`hybrid` degrade to the lexical leg (flagged in `_meta.degraded`); `exact` always works.
+
+Entirely opt-in behind `MAAD_SEMANTIC_ENABLE` — off, the engine behaves exactly as 0.7.x (no extension load, no new tables, no worker, fully additive). New surface: `maad_semantic_search`, `MAAD_SEMANTIC_ENABLE` / `MAAD_EMBED_*`, `maad_health.embeddings`, `maad_reindex --embeddings`. New **optional** dependency `sqlite-vec` — lazily required only when enabled, so the engine boots and runs unchanged whether or not the package is installed (absent or failed load ⇒ semantic disabled). The index self-heals on an embedding dim/model change (drops stale vectors, re-enqueues for re-embed) and is cleaned on delete.
 
 ## 0.7.18 — 2026-06-14
 
@@ -471,12 +479,13 @@ Initial engine build. Parser, registry, schema, extractor (11 primitives), SQLit
 
 ## Planned
 
-Releases through 0.8.0 form an agent-first optimization track; 0.8.5+ unchanged from prior roadmap. Cascade renumbered after 0.7.13–0.7.16 (index-memory guards, audit correctness patch, housekeeping + CI, dependency security wave) consumed the planned slots.
+Cascade renumbered after 0.7.13–0.7.16 (index-memory guards, audit correctness patch, housekeeping + CI, dependency security wave) consumed the planned slots. 0.8.0 shipped as Semantic Retrieval (the priority line; FTS5 moved up into it); the prior hygiene/imports → remote-hardening → query-power track sits +0.5 below it. (The 0.7.17/0.7.18 bullets below predate the shipped 0.7.17/0.7.18 — read-path performance + heavy-op self-defense — and describe displaced scope still pending a re-slot.)
 
 - **0.7.17** — Durability & hot-path (from the 2026-06-09 engine audit). fsync'd atomic writes (unique temp suffix, failure cleanup), `maad_summary` rework (index-time validation state instead of full-corpus sync scan), journal reconcile that repairs `file_written` divergence and survives failed commits, prepared-statement caching, `documents(updated_at, doc_id)` index, pathspec-limited per-write `git status`, engine-owned `git gc --auto` hook, `indexAll` mtime+size precheck.
 - **0.7.18** — Agent-First Engine (renumbered from 0.7.13). `maad_status` cross-project rollup, followup `supersedes` schema field, canonical `_skills/session-protocol.md` in engine. Plus remaining composites that collapse common call chains: `maad_bulk_update_where`, `maad_context(docId)`, `maad_get_many`, `maad_related depth: 'hydrated'`, `maad_subscribe_from(cursor)`. (`maad_query depth: 'cold'|'full'` shipped early in 0.7.3.)
-- **0.8.0** — Operational Hygiene + Imports. `maad_prune_sessions` (stale-session sweeper), `maad_compact` (`VACUUM` + `git gc`), `maad_reindex_selective`, `maad_find_duplicates` + original Import workflow: `_inbox/` convention, source tracking, duplicate detection, readonly type flag.
-- **0.8.5** — Remote MCP hardening: per-connection role tiers, rate-limit policy (per-token aggregation + live-session caps), backpressure thresholds, mutex timeout, stress suite, metrics export.
-- **0.9.0** — Eviction Stage 2 + query power: LRU + hard pool cap (Stage 1 idle-timeout shipped in 0.7.3), in-place project mutations (lifts `INSTANCE_MUTATION_UNSUPPORTED`), FTS5, fuzzy entity matching, compound filters (AND/OR), cursor-based pagination.
-- **0.9.5** — Object attributes: user-defined tags on extracted objects, stored as YAML, indexed on reindex.
+- **0.8.x (follow-up)** — Semantic Retrieval Phase 2: local ONNX embedding provider (`nomic-embed-text-v1.5`, 512-dim Matryoshka, via transformers.js) as the default offline/no-key option, shipped as an optional dependency so an API-only install stays lean. (Phase 1 — the primitive, vector + FTS5 index, RRF, and OpenAI/injected providers — shipped in 0.8.0.)
+- **0.8.5** — Operational Hygiene + Imports. `maad_prune_sessions` (stale-session sweeper), `maad_compact` (`VACUUM` + `git gc`), `maad_reindex_selective`, `maad_find_duplicates` + original Import workflow: `_inbox/` convention, source tracking, duplicate detection, readonly type flag.
+- **0.9.0** — Remote MCP hardening: per-connection role tiers, rate-limit policy (per-token aggregation + live-session caps), backpressure thresholds, mutex timeout, stress suite, metrics export.
+- **0.9.5** — Eviction Stage 2 + query power: LRU + hard pool cap (Stage 1 idle-timeout shipped in 0.7.3), in-place project mutations (lifts `INSTANCE_MUTATION_UNSUPPORTED`), fuzzy entity matching, compound filters (AND/OR), cursor-based pagination. (FTS5 moved into 0.8.0 Semantic Retrieval.)
+- **0.10.0** — Object attributes: user-defined tags on extracted objects, stored as YAML, indexed on reindex.
 - **1.0.0** — Stable release: API locked, npm published, full test coverage, migration guide.

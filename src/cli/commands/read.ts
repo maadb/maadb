@@ -5,6 +5,7 @@
 import { docId, docType, isValidPrimitive, PRIMITIVES } from '../../types.js';
 import type { CliContext } from '../helpers.js';
 import { initEngine } from '../helpers.js';
+import type { SemanticSearchQuery, SearchMode } from '../../engine/semantic/types.js';
 
 export async function cmdGet(ctx: CliContext): Promise<void> {
   const id = ctx.args[1];
@@ -109,6 +110,50 @@ export async function cmdSearch(ctx: CliContext): Promise<void> {
   }
 
   console.log(JSON.stringify(result.value.results, null, 2));
+  engine.close();
+}
+
+const SEMANTIC_MODES: readonly SearchMode[] = ['exact', 'hybrid', 'semantic'];
+
+export async function cmdSemanticSearch(ctx: CliContext): Promise<void> {
+  const queryText = ctx.args[1];
+  if (!queryText) {
+    console.error(
+      'Usage: maad semantic-search <query> [--mode exact|hybrid|semantic] [--k N] [--doc-type T] [--no-snippet]\n' +
+      '  Requires MAAD_SEMANTIC_ENABLE=1. semantic/hybrid need an embedding provider + built index (maad reindex --embeddings).');
+    process.exit(1);
+  }
+  let mode: SearchMode = 'exact';
+  let k: number | undefined;
+  let docTypeArg: string | undefined;
+  let snippet = true;
+  for (let i = 2; i < ctx.args.length; i++) {
+    const a = ctx.args[i];
+    const next = ctx.args[i + 1];
+    if (a === '--mode' && next !== undefined) { mode = next as SearchMode; i++; }
+    else if (a === '--k' && next !== undefined) { k = Number.parseInt(next, 10); i++; }
+    else if (a === '--doc-type' && next !== undefined) { docTypeArg = next; i++; }
+    else if (a === '--no-snippet') { snippet = false; }
+  }
+  if (!SEMANTIC_MODES.includes(mode)) {
+    console.error(`Semantic search failed:\n  INVALID_MODE: mode must be ${SEMANTIC_MODES.join(', ')}.`);
+    process.exit(1);
+  }
+
+  const engine = await initEngine(ctx);
+  const query: SemanticSearchQuery = { query: queryText, mode, snippet };
+  if (k !== undefined && Number.isFinite(k)) query.k = k;
+  if (docTypeArg !== undefined) query.docType = docTypeArg;
+
+  const result = await engine.semanticSearch(query);
+  if (!result.ok) {
+    console.error('Semantic search failed:');
+    for (const e of result.errors) console.error(`  ${e.code}: ${e.message}`);
+    engine.close();
+    process.exit(1);
+  }
+
+  console.log(JSON.stringify(result.value, null, 2));
   engine.close();
 }
 

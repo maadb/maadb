@@ -320,6 +320,11 @@ export async function deleteDocument(
       updatedAt: new Date().toISOString(),
     };
     ctx.backend.putDocument(updatedDoc);
+    // 0.8.0 — soft delete only flips deleted=1; clear the per-block semantic
+    // index too so the doc's blocks stop consuming the search candidate pool and
+    // the worker stops embedding dead blocks. A later restore + reindex rebuilds
+    // them. (Hard delete handles this via removeDocument.)
+    ctx.backend.semantic()?.deleteDoc(id as string);
   }
 
   let commitOutcome: CommitOutcome = { status: 'noop' };

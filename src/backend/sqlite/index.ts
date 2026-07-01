@@ -7,6 +7,8 @@ import Database from 'better-sqlite3';
 import type { Database as DatabaseType } from 'better-sqlite3';
 import { SCHEMA_SQL } from './schema.js';
 import type { MaadBackend } from '../adapter.js';
+import { SemanticStore } from './semantic-store.js';
+import type { SemanticIndex } from '../../engine/semantic/types.js';
 import {
   docId as toDocId,
   docType as toDocType,
@@ -32,6 +34,13 @@ import type { AggregateQuery, AggregateResult } from '../../engine/types.js';
 
 export class SqliteBackend implements MaadBackend {
   private db: DatabaseType;
+  // 0.8.0 — constructed only when MAAD_SEMANTIC_ENABLE is on (via initSemantic);
+  // null otherwise so the base engine carries no semantic surface.
+  private semanticStore: SemanticStore | null = null;
+  // 0.8.0 — flips on close() so an async read (e.g. semantic search resuming
+  // after a query-embed await) can detect a concurrent reload closed the backend
+  // out from under it, instead of throwing a raw "database is not open" error.
+  private closed = false;
 
   constructor(dbPath: string) {
     this.db = new Database(dbPath);
@@ -71,6 +80,7 @@ export class SqliteBackend implements MaadBackend {
   }
 
   close(): void {
+    this.closed = true;
     this.db.close();
   }
 
@@ -183,6 +193,7 @@ export class SqliteBackend implements MaadBackend {
     relationships: Relationship[],
     blocks: ParsedBlock[],
     fieldIndex: Array<{ name: string; value: string; numericValue: number | null; type: string }>,
+    semanticBlocks?: import('../../engine/semantic/types.js').BlockTextInput[],
   ): void {
     const txn = this.db.transaction(() => {
       this.putDocument(doc);
@@ -190,6 +201,11 @@ export class SqliteBackend implements MaadBackend {
       this.putRelationships(doc.docId, relationships);
       this.putBlocks(doc.docId, blocks);
       this.putFieldIndex(doc.docId, fieldIndex);
+      // 0.8.0 — atomically (re)populate the per-block semantic index. putBlockText
+      // is a no-op if the store isn't ready; passing [] still clears stale rows.
+      if (semanticBlocks !== undefined) {
+        this.semanticStore?.putBlockText(doc.docId as string, semanticBlocks);
+      }
     });
     txn();
   }
@@ -689,7 +705,12 @@ export class SqliteBackend implements MaadBackend {
   // --- Maintenance ---------------------------------------------------------
 
   removeDocument(docId: DocId): void {
-    // CASCADE deletes handle objects, relationships, blocks, field_index
+    // CASCADE deletes handle objects, relationships, blocks, field_index.
+    // 0.8.0 — vec0/fts5 virtual tables do NOT participate in FK CASCADE, so the
+    // semantic index rows are removed explicitly here. Centralizing it in
+    // removeDocument covers every hard-removal caller (deleteDocument hard,
+    // purgeSoftDeleted, the indexAll stale-row sweep) in one place.
+    this.semanticStore?.deleteDoc(docId as string);
     this.db.prepare('DELETE FROM documents WHERE doc_id = ?').run(docId as string);
   }
 
@@ -739,6 +760,20 @@ export class SqliteBackend implements MaadBackend {
     this.db.prepare(
       'INSERT INTO engine_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
     ).run(key, value);
+  }
+
+  // 0.8.0 — bring up the semantic index (sqlite-vec + FTS5). Idempotent: a
+  // second call is ignored. Fails open inside SemanticStore.init if the
+  // loadable extension can't load.
+  initSemantic(cfg: { dim?: number | undefined; model?: string | undefined }): void {
+    if (this.semanticStore) return;
+    const store = new SemanticStore(this.db);
+    store.init(cfg);
+    this.semanticStore = store;
+  }
+
+  semantic(): SemanticIndex | null {
+    return this.closed ? null : this.semanticStore;
   }
 
   getStats(): BackendStats {

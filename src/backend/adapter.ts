@@ -17,6 +17,7 @@ import type {
   ParsedBlock,
   BackendStats,
 } from '../types.js';
+import type { SemanticIndex } from '../engine/semantic/types.js';
 
 export interface MaadBackend {
   // Lifecycle
@@ -103,12 +104,23 @@ export interface MaadBackend {
   getMeta(key: string): string | null;
   setMeta(key: string, value: string): void;
 
-  // Batch write (wraps all puts in a transaction for a single document)
+  // Semantic retrieval (0.8.0). initSemantic loads the vector/lexical index
+  // (sqlite-vec + FTS5) when MAAD_SEMANTIC_ENABLE is on; semantic() exposes it
+  // (or null on a backend without semantic support). Both are no-ops/null when
+  // the feature is off, keeping the base engine semantic-free.
+  initSemantic(cfg: { dim?: number | undefined; model?: string | undefined }): void;
+  semantic(): SemanticIndex | null;
+
+  // Batch write (wraps all puts in a transaction for a single document).
+  // 0.8.0 — `semanticBlocks` (when provided) populates the per-block semantic
+  // index (FTS + embed queue) inside the same transaction. Omitted/undefined
+  // when semantic retrieval is off, keeping the base write path unchanged.
   materializeDocument(
     doc: DocumentRecord,
     objects: ExtractedObject[],
     relationships: Relationship[],
     blocks: ParsedBlock[],
     fieldIndex: Array<{ name: string; value: string; numericValue: number | null; type: string }>,
+    semanticBlocks?: import('../engine/semantic/types.js').BlockTextInput[],
   ): void;
 }

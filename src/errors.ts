@@ -104,7 +104,12 @@ export type ErrorCode =
   // schema / summary) is refused up front when free heap headroom is below
   // the configured floor, so a misbehaving background caller that hammers
   // these ops sheds load (retryable) instead of OOM-crash-looping the engine.
-  | 'OVERLOADED';
+  | 'OVERLOADED'
+  // 0.8.0 — semantic retrieval. INVALID_MODE: maad_semantic_search.mode must be
+  // exact | hybrid | semantic. SEMANTIC_DISABLED: the tool was called but
+  // MAAD_SEMANTIC_ENABLE is off / the vector index never loaded.
+  | 'INVALID_MODE'
+  | 'SEMANTIC_DISABLED';
 
 export interface MaadError {
   code: ErrorCode;

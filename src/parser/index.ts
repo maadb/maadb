@@ -7,7 +7,7 @@
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { ok, singleErr, type Result } from '../errors.js';
-import { filePath as toFilePath, type FilePath, type ParsedDocument, type Primitive } from '../types.js';
+import { filePath as toFilePath, type FilePath, type ParsedDocument, type ParsedBlock, type Primitive } from '../types.js';
 import { parseFrontmatter } from './frontmatter.js';
 import { parseBlocks } from './blocks.js';
 import { findVerbatimZones } from './verbatim.js';
@@ -27,6 +27,29 @@ export { validateYamlProfile } from './yaml-profile.js';
 // document still parses and indexes (record + frontmatter + capped body).
 export interface ParseOptions {
   maxAnnotations?: number;
+  /**
+   * 0.8.0 — when true, compute per-block text (ParsedDocument.blockTexts) for
+   * the semantic index. Off by default so a non-semantic parse pays nothing.
+   */
+  includeBlockText?: boolean;
+}
+
+/**
+ * 0.8.0 — slice each block's body text, mirroring readBlockContent's full-file
+ * math but against the (already-in-memory) stripped body. Block line numbers are
+ * 1-based absolute-to-file and endLine is inclusive; bodyLines[0] is file line
+ * `bodyStartLine`, so subtract that offset. Heading blocks drop the heading line
+ * (start at startLine); the preamble (level 0) starts one earlier.
+ */
+export function sliceBlockTexts(body: string, bodyStartLine: number, blocks: ParsedBlock[]): string[] {
+  const lines = body.split('\n');
+  const off = bodyStartLine - 1;
+  return blocks.map(block => {
+    const isPreamble = block.level === 0;
+    const start = (isPreamble ? block.startLine - 1 : block.startLine) - off;
+    const end = block.endLine - off; // exclusive slice bound → inclusive of endLine
+    return lines.slice(Math.max(0, start), Math.max(0, end)).join('\n').trim();
+  });
 }
 
 export async function parseDocument(
@@ -78,6 +101,7 @@ export function parseDocumentFromContent(
     blocks,
     valueCalls,
     annotations,
+    ...(opts?.includeBlockText ? { blockTexts: sliceBlockTexts(body, bodyStartLine, blocks) } : {}),
     ...(annotationsTruncated ? { annotationsTruncated: true } : {}),
   });
 }

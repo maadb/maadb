@@ -1,6 +1,6 @@
 {
   "name": "@maadb/core",
-  "version": "0.7.18",
+  "version": "0.8.0",
   "description": "Markdown As A Database — treats markdown as the canonical data store, builds a queryable index, and gives LLMs deterministic read/write access.",
   "repository": {
     "type": "git",
@@ -54,6 +54,9 @@
     "js-yaml": "~4.2.0",
     "pino": "10.3.1",
     "simple-git": "3.36.0"
+  },
+  "optionalDependencies": {
+    "sqlite-vec": "0.1.9"
   },
   "devDependencies": {
     "@types/better-sqlite3": "~7.6.13",
