@@ -2,7 +2,7 @@
 // Embedding provider resolution (0.8.0)
 // Two construction paths, in priority order:
 //   1. Injected — the host app passes an EmbeddingProvider; the engine holds no
-//      API keys. This is how patchnet-projects wires its existing client.
+//      API keys. This is how an embedding host reuses its existing client.
 //   2. Env-constructed — for standalone `maad serve`: MAAD_EMBED_PROVIDER picks
 //      openai | fake | local, sized via MAAD_EMBED_MODEL / MAAD_EMBED_DIM.
 // Returns null when no vector provider is configured — semantic stays in
