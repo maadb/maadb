@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import Database from 'better-sqlite3';
 import { SqliteBackend } from '../../src/backend/sqlite/index.js';
-import { toFtsMatch } from '../../src/backend/sqlite/semantic-store.js';
+import { toFtsMatch, SemanticStore } from '../../src/backend/sqlite/semantic-store.js';
 import {
   docId,
   docType,
@@ -66,6 +67,18 @@ describe('SemanticStore', () => {
   describe('not enabled', () => {
     it('semantic() is null until initSemantic, and reads are absent', () => {
       expect(backend.semantic()).toBeNull();
+    });
+  });
+
+  describe('fail-open when sqlite-vec is unavailable (optionalDependency absent)', () => {
+    it('a load failure is caught: init does not throw, semantic stays disabled', () => {
+      // Simulate the package not being installed — the lazy require throws.
+      const db = new Database(':memory:');
+      const store = new SemanticStore(db, () => { throw new Error("Cannot find module 'sqlite-vec'"); });
+      expect(() => store.init({ dim: 4 })).not.toThrow();
+      expect(store.isReady()).toBe(false);
+      expect(store.isVecReady()).toBe(false);
+      db.close();
     });
   });
 

@@ -382,7 +382,7 @@ See [Version.md](Version.md) for the full release history and forward plan.
 ## Stack
 
 - TypeScript strict, Node.js 24+ (current Active LTS)
-- 7 production dependencies: `better-sqlite3`, `gray-matter`, `js-yaml`, `simple-git`, `@modelcontextprotocol/sdk`, `pino`, `sqlite-vec` (semantic retrieval; loaded only when enabled)
+- 6 production dependencies: `better-sqlite3`, `gray-matter`, `js-yaml`, `simple-git`, `@modelcontextprotocol/sdk`, `pino`. Plus one **optional** dependency `sqlite-vec` (semantic retrieval) — lazily loaded only when `MAAD_SEMANTIC_ENABLE` is on; absent or failed to load ⇒ semantic disabled, engine unaffected
 - 1063 tests, Vitest — run on every push/PR across Ubuntu and Windows
 - MIT license, pre-1.0, actively developed
 

@@ -15,8 +15,8 @@
 //   vec_blocks  — sqlite-vec vectors (virtual; explicit delete, no FK CASCADE).
 // ============================================================================
 
+import { createRequire } from 'node:module';
 import type { Database as DatabaseType } from 'better-sqlite3';
-import * as sqliteVec from 'sqlite-vec';
 import { logger } from '../../engine/logger.js';
 import type {
   SemanticIndex,
@@ -78,15 +78,30 @@ export function toFtsMatch(query: string): string | null {
   return tokens.map(t => `"${t.replace(/"/g, '""')}"`).join(' OR ');
 }
 
+/** Loads a sqlite-vec extension into a better-sqlite3 handle. */
+export type VecExtensionLoader = (db: DatabaseType) => void;
+
+// Default loader: lazily require sqlite-vec (an optionalDependency) at init time,
+// NOT as a static top-level import, so the engine boots even when the package is
+// absent — the require throws, SemanticStore.init catches it, and semantic
+// retrieval stays disabled. sqlite-vec ships CommonJS, so createRequire resolves it.
+const nodeRequire = createRequire(import.meta.url);
+const defaultVecLoader: VecExtensionLoader = (db) => {
+  const mod = nodeRequire('sqlite-vec') as { load(db: DatabaseType): void };
+  mod.load(db);
+};
+
 export class SemanticStore implements SemanticIndex {
   private readonly db: DatabaseType;
+  private readonly loadVec: VecExtensionLoader;
   private ready = false;
   private vecReady = false;
   private dim: number | null = null;
   private failures = 0;
 
-  constructor(db: DatabaseType) {
+  constructor(db: DatabaseType, loadVec: VecExtensionLoader = defaultVecLoader) {
     this.db = db;
+    this.loadVec = loadVec;
   }
 
   /**
@@ -101,7 +116,7 @@ export class SemanticStore implements SemanticIndex {
     // install, or a SQLite without FTS5) disables semantic retrieval rather than
     // throwing out of MaadEngine.init().
     try {
-      sqliteVec.load(this.db);
+      this.loadVec(this.db);
       this.db.exec(BLOCK_TEXT_DDL);
       this.db.exec(FTS_DDL);
       this.db.exec(QUEUE_DDL);
