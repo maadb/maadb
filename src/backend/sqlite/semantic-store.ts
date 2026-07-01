@@ -96,20 +96,34 @@ export class SemanticStore implements SemanticIndex {
    * when `dim` is known (provider present), else lazily via ensureVecTable.
    */
   init(cfg: { dim?: number | undefined; model?: string | undefined }): void {
+    // Fail OPEN across the whole bring-up: a failure loading the extension OR
+    // creating the lexical/queue tables (e.g. a partially-broken sqlite-vec
+    // install, or a SQLite without FTS5) disables semantic retrieval rather than
+    // throwing out of MaadEngine.init().
     try {
       sqliteVec.load(this.db);
+      this.db.exec(BLOCK_TEXT_DDL);
+      this.db.exec(FTS_DDL);
+      this.db.exec(QUEUE_DDL);
+      this.db.exec(QUEUE_IDX);
+      this.ready = true;
     } catch (e) {
-      logger.degraded('engine', 'semantic_ext_load_failed',
-        `sqlite-vec failed to load; semantic retrieval disabled: ${(e as Error).message}`);
+      logger.degraded('engine', 'semantic_init_failed',
+        `sqlite-vec/FTS5 unavailable; semantic retrieval disabled: ${(e as Error).message}`);
       this.ready = false;
       return;
     }
-    this.db.exec(BLOCK_TEXT_DDL);
-    this.db.exec(FTS_DDL);
-    this.db.exec(QUEUE_DDL);
-    this.db.exec(QUEUE_IDX);
-    this.ready = true;
-    if (cfg.dim !== undefined) this.ensureVecTable(cfg.dim, cfg.model);
+    // The vector table is best-effort: if vec0 creation throws (broken extension),
+    // keep the lexical leg — `exact` search still works — and disable vectors.
+    if (cfg.dim !== undefined) {
+      try {
+        this.ensureVecTable(cfg.dim, cfg.model);
+      } catch (e) {
+        logger.degraded('engine', 'semantic_vec_init_failed',
+          `vector index unavailable; lexical-only semantic retrieval: ${(e as Error).message}`);
+        this.vecReady = false;
+      }
+    }
   }
 
   isReady(): boolean { return this.ready; }

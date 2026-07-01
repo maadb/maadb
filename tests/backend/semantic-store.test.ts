@@ -207,6 +207,21 @@ describe('SemanticStore', () => {
     });
   });
 
+  describe('fail-open on a broken vec index', () => {
+    it('a vec-table failure keeps the lexical leg and never throws out of init', () => {
+      // dim > MAX_DIM makes ensureVecTable throw internally, simulating a broken
+      // vec0 create. init must catch it: ready (lexical) stays true, vec disabled.
+      expect(() => backend.initSemantic({ dim: 99999, model: 'broken' })).not.toThrow();
+      const s = backend.semantic()!;
+      expect(s.isReady()).toBe(true);
+      expect(s.isVecReady()).toBe(false);
+      backend.putDocument(makeDoc('note-a'));
+      s.putBlockText('note-a', [blk(0, 'X', 'lexical still works')]);
+      expect(s.searchFts('lexical', 10, false).length).toBe(1);
+      expect(s.searchVec(vec([1, 0, 0, 0]), 5).length).toBe(0);
+    });
+  });
+
   describe('lexical-only (vec table not created until dim known)', () => {
     it('fts works before a provider/dim is set; vec is absent', () => {
       backend.initSemantic({});                 // no dim → no vec table yet

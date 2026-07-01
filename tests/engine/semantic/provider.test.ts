@@ -116,6 +116,30 @@ describe('OpenAiEmbeddingProvider', () => {
       .toThrow(/does not support dimension truncation/);
   });
 
+  it('rejects an out-of-range response index (compat endpoint hardening)', async () => {
+    const p = new OpenAiEmbeddingProvider({
+      apiKey: 'k', model: 'text-embedding-3-small', dim: 4,
+      fetchImpl: (async () => ({
+        ok: true, status: 200,
+        json: async () => ({ data: [{ embedding: vecOf(4, 1), index: 5 }] }),
+        text: async () => '',
+      })) as unknown as typeof fetch,
+    });
+    await expect(p.embed(['x'], 'document')).rejects.toThrow(/out-of-range index/);
+  });
+
+  it('rejects duplicate response indices', async () => {
+    const p = new OpenAiEmbeddingProvider({
+      apiKey: 'k', model: 'text-embedding-3-small', dim: 4,
+      fetchImpl: (async () => ({
+        ok: true, status: 200,
+        json: async () => ({ data: [{ embedding: vecOf(4, 1), index: 0 }, { embedding: vecOf(4, 2), index: 0 }] }),
+        text: async () => '',
+      })) as unknown as typeof fetch,
+    });
+    await expect(p.embed(['a', 'b'], 'document')).rejects.toThrow(/duplicate index/);
+  });
+
   it('throws a clear error on non-200', async () => {
     const p = new OpenAiEmbeddingProvider({
       apiKey: 'k', model: 'text-embedding-3-small',

@@ -98,11 +98,22 @@ export class OpenAiEmbeddingProvider implements EmbeddingProvider {
     if (!json.data || json.data.length !== texts.length) {
       throw new Error(`OpenAI embeddings returned ${json.data?.length ?? 0} vectors for ${texts.length} inputs`);
     }
-    // Preserve input order regardless of response ordering, and assert the
-    // returned width matches the declared dim — a mismatch would otherwise only
-    // surface as a sqlite-vec insert failure inside the async worker.
+    // Preserve input order regardless of response ordering. Validate each index
+    // (integer, in range, unique) and the vector width before use: an
+    // OpenAI-compatible endpoint (custom base URL) returning out-of-range or
+    // duplicate indices would otherwise leave holes in `out` that the worker's
+    // vectors[i]! trips over — failing and retrying the batch forever. A width
+    // mismatch would otherwise only surface as a sqlite-vec insert failure.
     const out: Float32Array[] = new Array(texts.length);
+    const seen = new Set<number>();
     for (const item of json.data) {
+      if (!Number.isInteger(item.index) || item.index < 0 || item.index >= texts.length) {
+        throw new Error(`OpenAI embeddings returned an out-of-range index ${item.index} for ${texts.length} inputs.`);
+      }
+      if (seen.has(item.index)) {
+        throw new Error(`OpenAI embeddings returned a duplicate index ${item.index}.`);
+      }
+      seen.add(item.index);
       if (item.embedding.length !== this.dim) {
         throw new Error(
           `OpenAI returned a ${item.embedding.length}-dim vector but the provider is configured for ${this.dim} ` +

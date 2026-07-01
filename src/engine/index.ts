@@ -328,7 +328,9 @@ export class MaadEngine {
         model: this.embeddingProvider?.model,
       });
       const semIndex = this.backend.semantic();
-      if (semIndex && this.embeddingProvider) {
+      // Require a usable vector table: with a provider but no vec index (broken
+      // vec0 → lexical-only), the worker would embed forever without draining.
+      if (semIndex && semIndex.isVecReady() && this.embeddingProvider) {
         this.semanticIndexer = new SemanticIndexer(
           semIndex, this.embeddingProvider, readSemanticEnv().batchSize);
         this.semanticIndexer.start();
