@@ -16,6 +16,7 @@
 // ============================================================================
 
 import { createRequire } from 'node:module';
+import { createHash } from 'node:crypto';
 import type { Database as DatabaseType } from 'better-sqlite3';
 import { logger } from '../../engine/logger.js';
 import type {
@@ -41,6 +42,9 @@ const BLOCK_TEXT_DDL =
   `block_id TEXT, ` +
   `heading TEXT NOT NULL, ` +
   `text TEXT NOT NULL, ` +
+  // 0.8.2 — content hash of `text`, the re-embed gate. Nullable: pre-0.8.2
+  // rows migrate in with NULL and re-embed once on their next touch.
+  `text_hash TEXT, ` +
   `PRIMARY KEY (doc_id, block_ord))`;
 
 // FTS5 lexical leg. doc_id/block_ord are UNINDEXED carry-back columns; FTS5
@@ -121,6 +125,12 @@ export class SemanticStore implements SemanticIndex {
       this.db.exec(FTS_DDL);
       this.db.exec(QUEUE_DDL);
       this.db.exec(QUEUE_IDX);
+      // 0.8.2 — add text_hash to pre-0.8.2 block_text tables. NULL rows hash
+      // as "changed" on next touch and heal to hashed form.
+      const cols = this.db.pragma('table_info(block_text)') as Array<{ name: string }>;
+      if (!cols.some(c => c.name === 'text_hash')) {
+        this.db.exec('ALTER TABLE block_text ADD COLUMN text_hash TEXT');
+      }
       this.ready = true;
     } catch (e) {
       logger.degraded('engine', 'semantic_init_failed',
@@ -183,18 +193,70 @@ export class SemanticStore implements SemanticIndex {
 
   putBlockText(docId: string, blocks: BlockTextInput[]): void {
     if (!this.ready) return;
-    this.db.prepare('DELETE FROM block_text WHERE doc_id = ?').run(docId);
-    this.db.prepare('DELETE FROM fts_blocks WHERE doc_id = ?').run(docId);
-    this.db.prepare('DELETE FROM embed_queue WHERE doc_id = ?').run(docId);
-    if (this.vecReady) this.db.prepare('DELETE FROM vec_blocks WHERE doc_id = ?').run(docId);
+    // 0.8.2 — diff against the stored per-block text hashes instead of
+    // wholesale delete + re-enqueue. Embedding is the expensive leg (network/
+    // model-bound); pre-0.8.2 ANY reindex of a doc re-embedded EVERY block,
+    // so a one-character edit — or a frontmatter-only change — paid the full
+    // re-embed cost. Now:
+    //   unchanged block  → untouched (vector kept, no queue row added; a
+    //                      pending queue row from an earlier failed embed
+    //                      survives and retries)
+    //   metadata change  → block_text/FTS rows refreshed, vector kept
+    //   text change/new  → replaced + re-enqueued (fresh AUTOINCREMENT id =
+    //                      the worker's epoch token, as before)
+    //   removed ord      → all four tables cleaned for that ord
+    const existing = new Map(
+      (this.db.prepare(
+        'SELECT block_ord AS ord, block_id AS blockId, heading, text_hash AS hash FROM block_text WHERE doc_id = ?',
+      ).all(docId) as Array<{ ord: number; blockId: string | null; heading: string; hash: string | null }>)
+        .map(r => [r.ord, r]),
+    );
+
+    const delText = this.db.prepare('DELETE FROM block_text WHERE doc_id = ? AND block_ord = ?');
+    const delFts = this.db.prepare('DELETE FROM fts_blocks WHERE doc_id = ? AND block_ord = ?');
+    const delQ = this.db.prepare('DELETE FROM embed_queue WHERE doc_id = ? AND block_ord = ?');
+    // block_ord is a vec0 INTEGER metadata column — must bind as BigInt.
+    const delVec = this.vecReady
+      ? this.db.prepare('DELETE FROM vec_blocks WHERE doc_id = ? AND block_ord = ?')
+      : null;
     const insText = this.db.prepare(
-      'INSERT INTO block_text(doc_id, block_ord, block_id, heading, text) VALUES (?, ?, ?, ?, ?)');
+      'INSERT INTO block_text(doc_id, block_ord, block_id, heading, text, text_hash) VALUES (?, ?, ?, ?, ?, ?)');
+    const updTextMeta = this.db.prepare(
+      'UPDATE block_text SET block_id = ?, heading = ? WHERE doc_id = ? AND block_ord = ?');
     const insFts = this.db.prepare(
       'INSERT INTO fts_blocks(text, heading, doc_id, block_ord) VALUES (?, ?, ?, ?)');
     const insQ = this.db.prepare(
       'INSERT INTO embed_queue(doc_id, block_ord) VALUES (?, ?)');
+
+    const incomingOrds = new Set(blocks.map(b => b.blockOrd));
+    for (const [ord] of existing) {
+      if (incomingOrds.has(ord)) continue;
+      delText.run(docId, ord);
+      delFts.run(docId, ord);
+      delQ.run(docId, ord);
+      delVec?.run(docId, BigInt(ord));
+    }
+
     for (const b of blocks) {
-      insText.run(docId, b.blockOrd, b.blockId, b.heading, b.text);
+      const hash = createHash('sha256').update(b.text).digest('hex').slice(0, 32);
+      const prev = existing.get(b.blockOrd);
+      if (prev && prev.hash === hash) {
+        // Text unchanged — the vector stays valid, nothing re-enqueues.
+        if (prev.blockId !== b.blockId || prev.heading !== b.heading) {
+          updTextMeta.run(b.blockId, b.heading, docId, b.blockOrd);
+          // FTS indexes heading — refresh via delete+insert (contentless-safe).
+          delFts.run(docId, b.blockOrd);
+          insFts.run(b.text, b.heading, docId, b.blockOrd);
+        }
+        continue;
+      }
+      if (prev) {
+        delText.run(docId, b.blockOrd);
+        delFts.run(docId, b.blockOrd);
+        delQ.run(docId, b.blockOrd);
+        delVec?.run(docId, BigInt(b.blockOrd));
+      }
+      insText.run(docId, b.blockOrd, b.blockId, b.heading, b.text, hash);
       insFts.run(b.text, b.heading, docId, b.blockOrd);
       insQ.run(docId, b.blockOrd);
     }

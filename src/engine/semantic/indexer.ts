@@ -60,7 +60,15 @@ export class SemanticIndexer {
   private ensureDraining(): Promise<void> {
     if (this.currentDrain) {
       this.rerun = true;            // fold this request into the running drain
-      return this.currentDrain;
+      // 0.8.2 — the fold can be lost: an empty-queue drain never awaits, so it
+      // may already be past its final rerun check when this request lands
+      // (surfaced by the embed-hash gate, which makes empty-at-kick queues the
+      // common case for reindex). Chain a follow-up: if the rerun flag
+      // survived the drain, it was never consumed — run again.
+      return this.currentDrain.then(() => {
+        if (this.rerun && !this.stopped) return this.ensureDraining();
+        return undefined;
+      });
     }
     this.currentDrain = this.drain().finally(() => { this.currentDrain = null; });
     return this.currentDrain;

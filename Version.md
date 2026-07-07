@@ -1,10 +1,18 @@
 ---
 enabled: true
-current: 0.8.1
+current: 0.8.2
 dev_flow: formal
 ---
 
 # Version History
+
+## 0.8.2 — 2026-07-07
+
+Semantic re-embed gating. `putBlockText` now diffs incoming blocks against stored per-block content hashes instead of wholesale delete + re-enqueue: unchanged blocks keep their vectors and never re-enqueue (a pending queue row from an earlier failed embed survives and retries), metadata-only changes (heading/block id) refresh the text and FTS rows but keep the vector, text changes and new blocks replace and re-enqueue as before, and removed blocks clean all four semantic tables for their ordinal. Embedding is the expensive network/model-bound leg of the semantic index — previously ANY reindex of a doc re-embedded EVERY block, so a one-character edit or a frontmatter-only change paid the full re-embed cost. `maad_reindex --embeddings` still force-re-enqueues everything (the explicit rebuild path is unchanged).
+
+Also fixes a latent single-flight race in the embed worker, present since 0.8.0 but surfaced by the gate: an empty-queue drain completes without awaiting, so a concurrent `flush()`/`kick()` could fold into a drain that had already passed its final rerun check and return without draining newly queued work. The fold now chains a follow-up check, so `flush()` reliably drains work enqueued at any point.
+
+New `block_text.text_hash` column (auto-migrated via `ALTER`; pre-0.8.2 rows re-embed once on their next touch and heal to hashed form). 1090 tests passing (+6). No new dependencies, no new env vars, no API changes.
 
 ## 0.8.1 — 2026-07-07
 
