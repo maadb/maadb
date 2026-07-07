@@ -5,7 +5,7 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { docId } from '../../types.js';
-import { resultToResponse, successResponse, getProvenanceMode, attachDurability } from '../response.js';
+import { resultToResponse, successResponse, getProvenanceMode, attachDurability, attachWarnings } from '../response.js';
 import type { DeleteResult } from '../../engine/types.js';
 import { notifyWrite } from '../notifications.js';
 import { isDryRun, dryRunResponse, auditToolCall } from '../guardrails.js';
@@ -50,7 +50,20 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
       project: z.string().optional().describe('Project name (multi-project mode only)'),
     }),
   }, async (args, extra) => withEngine(ctx, extra, 'maad_reindex', args, async ({ engine }) => {
-    return resultToResponse(await engine.reindex({ force: args.force, embeddings: args.embeddings }));
+    const result = await engine.reindex({ force: args.force, embeddings: args.embeddings });
+    const response = resultToResponse(result);
+    // 0.8.1 — scan/sweep warnings (registry path mismatch, kept-not-pruned
+    // rows, glob fallback) ride the standard _meta.warnings channel so clients
+    // that already read write-tool warnings see reindex warnings the same way.
+    if (result.ok && result.value.warnings && result.value.warnings.length > 0) {
+      return attachWarnings(response, result.value.warnings.map(message => ({
+        field: '',
+        message,
+        code: 'REINDEX_WARNING',
+        location: null,
+      })));
+    }
+    return response;
   }));
 
   server.registerTool('maad_reload', {

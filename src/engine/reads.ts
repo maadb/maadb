@@ -379,6 +379,9 @@ export function summary(ctx: EngineContext): SummaryResult {
   // same posture as the read-mode validation this replaced.
   const brokenRefs = ctx.backend.countBrokenRefs();
   const validationErrors = ctx.backend.countInvalidDocuments();
+  // 0.8.1 — partial/stale rows (annotation-capped bodies, over-byte-cap docs
+  // serving their last indexed content), persisted at index time.
+  const partialDocs = ctx.backend.countPartialDocuments();
 
   const emptyProject = ctx.registry.types.size === 0 && stats.totalDocuments === 0;
 
@@ -388,7 +391,7 @@ export function summary(ctx: EngineContext): SummaryResult {
     totalObjects: stats.totalObjects,
     totalRelationships: stats.totalRelationships,
     lastIndexedAt: stats.lastIndexedAt,
-    warnings: { brokenRefs, validationErrors },
+    warnings: { brokenRefs, validationErrors, partialDocs },
     emptyProject,
     bootstrapHint: emptyProject ? '_skills/architect-core.md' : null,
     readOnly: ctx.readOnly,
@@ -881,7 +884,7 @@ export async function verifyIntegrity(
     const dirPath = path.join(ctx.projectRoot, regType.path);
     if (!existsSync(dirPath)) continue;
 
-    const files = await collectMarkdownFiles(dirPath);
+    const { files } = await collectMarkdownFiles(dirPath);
     for (const file of files) {
       // 0.7.12 — write-path canonicalizes file_path to forward slashes and
       // getDocumentByPath is now separator-tolerant, so the prior two-forms

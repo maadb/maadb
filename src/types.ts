@@ -334,6 +334,12 @@ export interface ValidatedField {
   name: string;
   value: unknown;
   fieldType: FieldType;
+  /**
+   * 0.8.1 — item type for list fields (schema `item_type`), carried through so
+   * the field indexer can compute numeric values for list-of-number /
+   * list-of-amount items. Null/undefined means string items.
+   */
+  itemType?: FieldType | null;
   role: string | null;
   indexed: boolean;
 }
@@ -419,6 +425,15 @@ export interface DocumentRecord {
    * column defaults to 1 and self-corrects on next reindex).
    */
   valid?: boolean;
+  /**
+   * 0.8.1 — set when the index row does not fully reflect the on-disk file:
+   * body annotation extraction hit the per-doc cap (partial body objects), or
+   * the file has grown past MAAD_MAX_DOC_BYTES and the row is serving the last
+   * successfully indexed content (stale). Persisted so the state survives the
+   * reindex run that detected it and stays queryable (summary/health).
+   * Defaults false; clears on the next clean index of the doc.
+   */
+  partial?: boolean;
 }
 
 export type FilterCondition =

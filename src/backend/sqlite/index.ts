@@ -73,6 +73,12 @@ export class SqliteBackend implements MaadBackend {
     if (!cols.some(c => c.name === 'valid')) {
       this.db.exec("ALTER TABLE documents ADD COLUMN valid INTEGER NOT NULL DEFAULT 1");
     }
+
+    // 0.8.1 — add partial column (annotation-capped or over-byte-cap stale
+    // rows). Existing rows default to 0 and self-correct on the next reindex.
+    if (!cols.some(c => c.name === 'partial')) {
+      this.db.exec("ALTER TABLE documents ADD COLUMN partial INTEGER NOT NULL DEFAULT 0");
+    }
     // Created here, after the column is guaranteed present (fresh DBs get it
     // from SCHEMA_SQL's CREATE TABLE; existing DBs from the ALTER above) — it
     // cannot live in SCHEMA_SQL, which runs before this migration.
@@ -87,10 +93,29 @@ export class SqliteBackend implements MaadBackend {
   // --- Write operations ----------------------------------------------------
 
   putDocument(doc: DocumentRecord): void {
+    // 0.8.1 — targeted upsert on doc_id, replacing INSERT OR REPLACE. REPLACE
+    // resolves on ANY unique constraint: a file_path conflict with a DIFFERENT
+    // doc_id silently deleted that other doc's row and CASCADE-wiped its
+    // objects/relationships/blocks/field_index. With ON CONFLICT(doc_id) a
+    // path collision now raises SQLITE_CONSTRAINT instead of destroying data —
+    // the indexer resolves legitimate cases (doc_id renamed in place) before
+    // calling here, so a throw means a real collision that must surface.
     this.db.prepare(`
-      INSERT OR REPLACE INTO documents
-        (doc_id, doc_type, schema_ref, file_path, file_hash, version, deleted, indexed_at, updated_at, created_at, valid)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO documents
+        (doc_id, doc_type, schema_ref, file_path, file_hash, version, deleted, indexed_at, updated_at, created_at, valid, partial)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(doc_id) DO UPDATE SET
+        doc_type = excluded.doc_type,
+        schema_ref = excluded.schema_ref,
+        file_path = excluded.file_path,
+        file_hash = excluded.file_hash,
+        version = excluded.version,
+        deleted = excluded.deleted,
+        indexed_at = excluded.indexed_at,
+        updated_at = excluded.updated_at,
+        created_at = excluded.created_at,
+        valid = excluded.valid,
+        partial = excluded.partial
     `).run(
       doc.docId as string,
       doc.docType as string,
@@ -100,11 +125,15 @@ export class SqliteBackend implements MaadBackend {
       doc.version,
       doc.deleted ? 1 : 0,
       doc.indexedAt,
-      doc.updatedAt,
-      doc.createdAt,
+      // 0.8.1 — explicit '' coalesce. INSERT OR REPLACE silently substituted
+      // the column DEFAULT for a NOT NULL violation; the targeted upsert does
+      // not, so callers that never populated these get the same '' explicitly.
+      doc.updatedAt ?? '',
+      doc.createdAt ?? '',
       // 0.7.17 — undefined (callers that don't compute validity) is treated as
       // valid so the column never blocks a write; the indexer always sets it.
       doc.valid === false ? 0 : 1,
+      doc.partial === true ? 1 : 0,
     );
   }
 
@@ -710,8 +739,39 @@ export class SqliteBackend implements MaadBackend {
     // semantic index rows are removed explicitly here. Centralizing it in
     // removeDocument covers every hard-removal caller (deleteDocument hard,
     // purgeSoftDeleted, the indexAll stale-row sweep) in one place.
-    this.semanticStore?.deleteDoc(docId as string);
-    this.db.prepare('DELETE FROM documents WHERE doc_id = ?').run(docId as string);
+    // 0.8.1 — transaction-wrapped so the semantic deletes and the documents
+    // delete commit or roll back together (same atomicity as
+    // materializeDocument on the write side).
+    const txn = this.db.transaction(() => {
+      this.semanticStore?.deleteDoc(docId as string);
+      this.db.prepare('DELETE FROM documents WHERE doc_id = ?').run(docId as string);
+    });
+    txn();
+  }
+
+  /**
+   * 0.8.1 — mark a row stale without re-materializing the doc. Used by the
+   * indexer when a previously indexed file grows past MAAD_MAX_DOC_BYTES: the
+   * row is retained (still queryable at its last indexed content), flagged
+   * partial so the staleness is visible, and its stored file_hash is
+   * invalidated so the doc re-indexes — and the flag clears — on the first
+   * pass where the file is readable again (even if it shrinks back to
+   * byte-identical content, which would otherwise hash-skip forever).
+   */
+  markDocumentStale(docId: DocId): void {
+    this.db.prepare("UPDATE documents SET partial = 1, file_hash = '' WHERE doc_id = ?")
+      .run(docId as string);
+  }
+
+  /**
+   * 0.8.1 — count live rows whose index state is partial/stale. Surfaced in
+   * summary() warnings alongside brokenRefs/validationErrors.
+   */
+  countPartialDocuments(): number {
+    const row = this.db.prepare(
+      'SELECT COUNT(*) AS n FROM documents WHERE partial = 1 AND deleted = 0',
+    ).get() as { n: number };
+    return row.n;
   }
 
   // 0.7.17 — refresh planner statistics after a full reindex. ANALYZE scans the
@@ -936,6 +996,7 @@ function rowToDocument(row: RawDocRow): DocumentRecord {
     updatedAt: row.updated_at,
     createdAt: row.created_at,
     valid: row.valid !== 0,
+    partial: row.partial === 1,
   };
 }
 
@@ -953,6 +1014,7 @@ interface RawDocRow {
   updated_at: string;
   created_at: string;
   valid: number;
+  partial: number;
 }
 
 interface RawObjectRow {

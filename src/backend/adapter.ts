@@ -66,6 +66,13 @@ export interface MaadBackend {
   // Maintenance
   removeDocument(docId: DocId): void;
   /**
+   * 0.8.1 — mark a row stale without re-materializing the doc: flags it
+   * partial and invalidates its stored file_hash so the doc re-indexes (and
+   * the flag clears) on the first pass where the file is indexable again.
+   * Used when a previously indexed file grows past MAAD_MAX_DOC_BYTES.
+   */
+  markDocumentStale(docId: DocId): void;
+  /**
    * 0.7.17 — refresh SQLite query-planner statistics (`ANALYZE`). Called after
    * a full reindex so the planner has up-to-date selectivity data for the
    * composite field_index indexes; without stats it can fall back to the
@@ -82,6 +89,12 @@ export interface MaadBackend {
    * and is uncapped (the prior inline scan silently stopped at 100k docs).
    */
   countInvalidDocuments(): number;
+  /**
+   * 0.8.1 — count live records flagged partial at index time (`partial = 1`):
+   * annotation-capped bodies or over-byte-cap stale rows. Backs summary()'s
+   * partialDocs warning.
+   */
+  countPartialDocuments(): number;
 
   /**
    * 0.7.10 — return soft-deleted records (`deleted = 1`) whose `updated_at`
