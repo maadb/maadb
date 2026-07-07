@@ -34,6 +34,21 @@ export interface IndexResult {
    * from a DOC_TOO_LARGE skip (which lands in `errors[]` and indexes nothing).
    */
   partial?: number;
+  /**
+   * 0.8.1 — count of index rows removed by the stale-row sweep because their
+   * file is gone from disk. Rows whose file still exists (outside any scanned
+   * registered path) are never pruned — they surface in `warnings` instead.
+   */
+  pruned?: number;
+  /**
+   * 0.8.1 — non-fatal operator signals from the scan and sweep: a registered
+   * type path missing on disk while the index holds rows of that type, index
+   * rows kept because their file exists outside every scanned path (registry
+   * path mismatch), or a glob-scan fallback engaging. Every entry here means
+   * the index and the registry disagree about where documents live — silent
+   * before 0.8.1, when a path mismatch let the sweep prune valid docs.
+   */
+  warnings?: string[];
 }
 
 /**
@@ -335,6 +350,11 @@ export interface SummaryResult {
   warnings: {
     brokenRefs: number;
     validationErrors: number;
+    /**
+     * 0.8.1 — live rows flagged partial at index time: annotation-capped
+     * bodies, or over-byte-cap files serving their last indexed content.
+     */
+    partialDocs: number;
   };
   emptyProject: boolean;
   bootstrapHint: string | null;

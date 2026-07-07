@@ -112,6 +112,18 @@ export async function cmdReindex(ctx: CliContext): Promise<void> {
 
   const r = result.value;
   console.log(`Scanned: ${r.scanned} | Indexed: ${r.indexed} | Skipped: ${r.skipped}`);
+  // 0.8.1 — surface the full IndexResult; rebuiltTypes/partial were previously
+  // dropped from human output and pruned/warnings didn't exist (the stale-row
+  // sweep deleted rows with zero representation in the output).
+  if (r.rebuiltTypes && r.rebuiltTypes.length > 0) {
+    console.log(`Rebuilt types (schema-index change): ${r.rebuiltTypes.join(', ')}`);
+  }
+  if (r.partial) console.log(`Partial (annotation-capped): ${r.partial}`);
+  if (r.pruned) console.log(`Pruned stale index rows: ${r.pruned}`);
+  if (r.warnings && r.warnings.length > 0) {
+    console.log(`Warnings: ${r.warnings.length}`);
+    for (const w of r.warnings) console.log(`  ${w}`);
+  }
   if (r.errors.length > 0) {
     console.log(`Errors: ${r.errors.length}`);
     for (const e of r.errors) console.log(`  ${e.code}: ${e.message}`);

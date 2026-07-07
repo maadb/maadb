@@ -1,10 +1,25 @@
 ---
 enabled: true
-current: 0.8.0
+current: 0.8.1
 dev_flow: formal
 ---
 
 # Version History
+
+## 0.8.1 — 2026-07-07
+
+Index integrity patch. A full audit of the indexing pipeline — prompted by a field incident where a routine `maad reindex --force` silently made hundreds of valid records invisible — closed a cluster of silent data-loss paths in `indexAll` and hardened the surrounding code.
+
+- **Stale-row sweep guard.** The sweep never removes an index row whose file still exists on disk. A stale row with a live file means the file sits outside every scanned registered path (registry path mismatch — e.g. a kebab-case directory registered under its underscore name — glob failure, or moved directory); pruning it silently orphaned valid data and broke every inbound reference. Such rows are now kept and warned about; only rows whose files are genuinely gone are pruned, and the count surfaces as `IndexResult.pruned`. Related mismatch shapes warn too: a registered path that scanned zero files while the index holds rows of that type, and a missing registered directory.
+- **Warnings surface end-to-end.** New `IndexResult.warnings` channel: the CLI prints warnings, prune counts, `rebuiltTypes`, and `partial` (previously dropped from human output), and `maad_reindex` attaches warnings to the standard `_meta.warnings` response channel.
+- **docId-collision guard on reindex.** Two live files sharing a `doc_id` previously collapsed silently — the backend's `INSERT OR REPLACE` resolved on either the `doc_id` primary key or the `file_path` unique constraint, so one incoming row could delete up to two other docs' rows with no error, scan order deciding the winner. The backend now uses a targeted upsert on `doc_id`, and the indexer rejects genuine collisions with a `DUPLICATE_DOC_ID` indexing error (matching the write path's long-standing guard) while still handling legitimate moves and in-place `doc_id` renames explicitly.
+- **Recursive scan fallback.** When `fs.promises.glob` is unavailable, the fallback directory walk was silently non-recursive — every doc in a subdirectory vanished from the scan and the sweep pruned its rows. The fallback now walks recursively and reports that it fired.
+- **Schema-fingerprint retry.** Per-type schema-index fingerprints no longer persist when docs of that type failed to index, so a forced rebuild that partially failed stays dirty and retries on the next pass instead of hash-skipping the failed docs forever.
+- **Persisted partial/stale state.** New `documents.partial` column (auto-migrated via `ALTER`, like `valid` in 0.7.17): annotation-capped docs persist their partial-body state, and a previously indexed file that grows past `MAAD_MAX_DOC_BYTES` keeps its row queryable but flagged stale, with its stored hash invalidated so it re-indexes the moment it's readable again. `maad_summary` warnings gain `partialDocs`.
+- **Numeric indexing fixes.** List items now index numeric values per the schema's `item_type` (previously hardcoded to string, so numeric range filters on list-of-number/amount fields never matched), and `amount` values tolerate currency markers (`"$100"`, `"€ 1,500"`, `"USD 25"` previously extracted null).
+- **Hot-path cleanups.** `indexAll` reads each file once (hash + parse shared one read; previously two full reads per changed file), takes a single `getAllFileHashes` snapshot per run (was two full-table scans), stats files asynchronously, and never reads a file already known to be over the byte cap. `removeDocument` is transaction-wrapped to match the write path's atomicity.
+
+1084 tests passing (+10). One additive `documents.partial` column (auto-migrated). No new dependencies, no new env vars. Behavior changes: duplicate doc_ids across files now surface `DUPLICATE_DOC_ID` errors on reindex instead of silent last-wins, and stale index rows whose files still exist are kept and warned about instead of silently pruned.
 
 ## 0.8.0 — 2026-06-29
 

@@ -23,7 +23,12 @@ CREATE TABLE IF NOT EXISTS documents (
   -- summary() COUNT invalid records instead of re-reading and re-validating
   -- every file per call. Existing rows pick it up via ALTER (default 1) and
   -- self-correct on next reindex.
-  valid        INTEGER NOT NULL DEFAULT 1
+  valid        INTEGER NOT NULL DEFAULT 1,
+  -- 0.8.1 — index row does not fully reflect the on-disk file (1 = partial):
+  -- annotation extraction hit the per-doc cap, or the file grew past
+  -- MAAD_MAX_DOC_BYTES and the row serves the last indexed content. Existing
+  -- rows pick it up via ALTER (default 0) and self-correct on next reindex.
+  partial      INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_documents_type ON documents(doc_type);
 CREATE INDEX IF NOT EXISTS idx_documents_path ON documents(file_path);

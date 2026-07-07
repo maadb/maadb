@@ -89,7 +89,10 @@ export function computeNumericValue(value: unknown, fieldType: string): number |
   }
 
   if (fieldType === 'amount') {
-    const match = /^([\d,.]+)/.exec(String(value));
+    // 0.8.1 — tolerate a leading currency marker ("$100", "€ 1,500", "USD 25").
+    // Amounts written with a symbol previously extracted null and silently
+    // dropped out of numeric filters/sorts.
+    const match = /^\s*(?:[^\d\s]{1,3}|[A-Za-z]{3})?\s*([\d,.]+)/.exec(String(value));
     if (match) {
       const num = parseFloat(match[1]!.replace(/,/g, ''));
       return isFinite(num) ? num : null;
@@ -100,7 +103,18 @@ export function computeNumericValue(value: unknown, fieldType: string): number |
   return null;
 }
 
-export async function collectMarkdownFiles(dirPath: string): Promise<string[]> {
+export interface CollectedMarkdownFiles {
+  files: string[];
+  /**
+   * 0.8.1 — true when fs.promises.glob threw and the manual walk ran instead.
+   * Surfaced so indexAll can warn: before 0.8.1 the fallback was silently
+   * NON-recursive, so on any runtime where glob failed, every nested doc
+   * vanished from the scan and the stale-row sweep pruned its index row.
+   */
+  usedFallback: boolean;
+}
+
+export async function collectMarkdownFiles(dirPath: string): Promise<CollectedMarkdownFiles> {
   const files: string[] = [];
   try {
     for await (const entry of glob('**/*.md', { cwd: dirPath })) {
@@ -108,14 +122,23 @@ export async function collectMarkdownFiles(dirPath: string): Promise<string[]> {
       if (basename.startsWith('_deleted_')) continue;
       files.push(path.join(dirPath, entry as string));
     }
+    return { files, usedFallback: false };
   } catch {
+    // Recursive manual walk — must match glob('**/*.md') coverage. The
+    // pre-0.8.1 fallback read only the top directory, which silently dropped
+    // every nested doc from the scan.
     const { readdir } = await import('node:fs/promises');
-    const entries = await readdir(dirPath, { withFileTypes: true });
-    for (const entry of entries) {
-      if (entry.isFile() && entry.name.endsWith('.md') && !entry.name.startsWith('_deleted_')) {
-        files.push(path.join(dirPath, entry.name));
+    const walk = async (dir: string): Promise<void> => {
+      const entries = await readdir(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isDirectory()) {
+          await walk(path.join(dir, entry.name));
+        } else if (entry.isFile() && entry.name.endsWith('.md') && !entry.name.startsWith('_deleted_')) {
+          files.push(path.join(dir, entry.name));
+        }
       }
-    }
+    };
+    await walk(dirPath);
+    return { files, usedFallback: true };
   }
-  return files;
 }
