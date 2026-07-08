@@ -1,10 +1,18 @@
 ---
 enabled: true
-current: 0.8.2
+current: 0.8.3
 dev_flow: formal
 ---
 
 # Version History
+
+## 0.8.3 — 2026-07-08
+
+CLI CI-gate exit codes. `maad validate` and `maad reindex` now fail closed: both commands report findings inside a *successful* engine result (validate returns a completed report with an `invalid` count; full reindex returns per-file failures in `errors[]`), so the previous exit-code check — which only failed on engine errors — printed the problem and still exited 0, greenlighting CI over invalid or partially indexed data.
+
+`maad validate` (whole-project and single-doc forms) exits nonzero when any document is structurally invalid, after printing the full report. Precision drift remains informational and never fails the gate. `maad reindex` exits nonzero when any per-file error occurred (parse failures, duplicate doc_ids, over-cap skips), after printing the report and regenerating MAAD.md/SCHEMA.md for the docs that did index; the 0.8.1 warnings channel stays advisory and does not affect exit status. Engine and MCP result semantics are unchanged — `maad_validate` / `maad_reindex` continue returning structured reports for callers to interpret.
+
+1095 tests passing (+5, first process-exit coverage for CLI commands). No dependency, schema, or API changes. Behavior change: scripts that relied on exit 0 while validation or reindex reported findings will now fail — that is the point.
 
 ## 0.8.2 — 2026-07-07
 
