@@ -94,6 +94,14 @@ export async function cmdValidate(ctx: CliContext): Promise<void> {
   }
 
   engine.close();
+  // 0.8.3 — fail closed as a CI gate: a completed audit that FOUND invalid
+  // records is a successful engine result (ok(report)) but a failing command.
+  // Previously this printed `Invalid: N` and exited 0 — a green light over
+  // corrupted data. Precision drift stays informational (never increments
+  // report.invalid, so it never fails the gate).
+  if (report.invalid > 0) {
+    process.exit(1);
+  }
 }
 
 export async function cmdReindex(ctx: CliContext): Promise<void> {
@@ -161,6 +169,15 @@ export async function cmdReindex(ctx: CliContext): Promise<void> {
   }
 
   engine.close();
+  // 0.8.3 — same fail-closed posture as cmdValidate: a full reindex reports
+  // per-file failures (parse errors, duplicate doc_ids, over-cap docs) inside
+  // a successful IndexResult, so `!result.ok` never fires for them and the
+  // command previously exited 0 with errors printed. Warnings stay advisory
+  // and do not fail the gate; errors do. MAAD.md/SCHEMA.md regeneration above
+  // still runs — the successfully indexed docs are real.
+  if (r.errors.length > 0) {
+    process.exit(1);
+  }
 }
 
 export async function cmdParse(ctx: CliContext): Promise<void> {
