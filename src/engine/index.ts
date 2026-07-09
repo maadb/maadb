@@ -30,6 +30,7 @@ import type {
 import { loadRegistry } from '../registry/index.js';
 import { loadSchemas } from '../schema/index.js';
 import { logSchemaCacheStale } from '../logging.js';
+import { collectMarkdownFiles } from './helpers.js';
 import { SqliteBackend } from '../backend/index.js';
 import type { MaadBackend } from '../backend/index.js';
 import { GitLayer } from '../git/index.js';
@@ -159,6 +160,16 @@ function dirSizeBytes(root: string): number {
   return total;
 }
 
+// 0.8.4 — opt-in blocking rebuild of a false-empty index at boot. Off by
+// default: the safe floor is to refuse to serve (see the INDEX_EMPTY guard in
+// init()), not to silently spend an unbounded reindex on the first request.
+// Operators who want the convenience set MAAD_BOOT_REINDEX=1; it is a behavior
+// flag, never a path, so it introduces no new write target.
+function bootReindexEnabled(): boolean {
+  const raw = process.env['MAAD_BOOT_REINDEX'];
+  return raw === '1' || raw === 'true';
+}
+
 export class MaadEngine {
   private projectRoot: string = '';
   private registry!: Registry;
@@ -267,6 +278,11 @@ export class MaadEngine {
       semantic?: boolean;
       // 0.8.0 — host-injected embedding provider (engine holds no API keys).
       embeddingProvider?: EmbeddingProvider;
+      // 0.8.4 — apply the false-empty index guard (see init() tail). Set by the
+      // serving paths (the project pool + single-project startup) so a lost
+      // index refuses to serve; left unset by the CLI, whose bootstrap is
+      // init() → reindex, and by tests that drive indexAll() themselves.
+      guardEmptyIndex?: boolean;
     },
   ): Promise<Result<void>> {
     this.projectRoot = path.resolve(projectRoot);
@@ -369,6 +385,51 @@ export class MaadEngine {
     // after init() sees consistent data, not a null → boolean transition.
     if (this.gitLayer) {
       await this.refreshGitClean();
+    }
+
+    // 0.8.4 — false-empty index guard. A persisted index reporting zero
+    // documents while registered paths
+    // hold markdown on disk is the "derived index was lost" state (fresh clone,
+    // volume-restore, wiped _backend) — NOT a genuinely empty architect-mode
+    // project, which has registered types but no markdown yet. Left alone, every
+    // list/search/query would silently return []. The index rebuilds from the
+    // markdown (the source of truth), so:
+    //   - read-only mode  → refuse to serve (cannot write the index); the
+    //     operator runs `maad reindex`.
+    //   - read-write mode → refuse to serve by default; MAAD_BOOT_REINDEX=1
+    //     rebuilds here instead. init() runs before the MCP request-timeout
+    //     race is armed, so a blocking rebuild here is not bound by the 30s cap.
+    if (opts?.guardEmptyIndex && this.registry.types.size > 0 && this.backend.getStats().totalDocuments === 0) {
+      const onDiskCount = await this.probeRegisteredMarkdownCount();
+      if (onDiskCount > 0) {
+        if (this._readOnly) {
+          return singleErr(
+            'INDEX_EMPTY',
+            `Index is empty but ${onDiskCount} markdown file(s) exist under registered paths — the derived index was not built (fresh clone, restore, or wiped _backend). The engine is read-only and cannot rebuild it; run 'maad reindex' against this project.`,
+            undefined,
+            { onDiskMarkdownFiles: onDiskCount, projectRoot: this.projectRoot },
+          );
+        }
+        if (!bootReindexEnabled()) {
+          return singleErr(
+            'INDEX_EMPTY',
+            `Index is empty but ${onDiskCount} markdown file(s) exist under registered paths — the derived index was not built (fresh clone, restore, or wiped _backend). Set MAAD_BOOT_REINDEX=1 to rebuild it at boot, or run 'maad reindex'.`,
+            undefined,
+            { onDiskMarkdownFiles: onDiskCount, projectRoot: this.projectRoot },
+          );
+        }
+        logger.degraded('engine', 'boot_index_rebuild',
+          `index empty with ${onDiskCount} markdown file(s) on disk — rebuilding at boot (MAAD_BOOT_REINDEX=1); embeddings, if enabled, drain asynchronously`,
+          { onDiskMarkdownFiles: onDiskCount, projectRoot: this.projectRoot });
+        const rebuild = this.kickIndexer(
+          await this.runExclusive('boot-reindex', () => indexing.indexAll(this.ctx(), { force: false })),
+        );
+        if (rebuild.errors.length > 0) {
+          logger.degraded('engine', 'boot_index_rebuild_errors',
+            `boot rebuild indexed ${rebuild.indexed} of ${onDiskCount} file(s) with ${rebuild.errors.length} error(s) — the index is populated for the docs that succeeded`,
+            { indexed: rebuild.indexed, errors: rebuild.errors.length, projectRoot: this.projectRoot });
+        }
+      }
     }
 
     return ok(undefined);
@@ -481,6 +542,22 @@ export class MaadEngine {
   }
 
   // ---- H8 probes ------------------------------------------------------------
+
+  /**
+   * 0.8.4 — count markdown files under every registered type path. Used only by
+   * the boot false-empty guard, which runs at init() only when the index reports
+   * zero documents, so this is never on a hot path. Uses the same collector as
+   * indexAll (glob '**\/*.md', skipping '_deleted_' tombstones).
+   */
+  private async probeRegisteredMarkdownCount(): Promise<number> {
+    let count = 0;
+    for (const [, regType] of this.registry.types) {
+      const dirPath = path.join(this.projectRoot, regType.path);
+      if (!existsSync(dirPath)) continue;
+      count += (await collectMarkdownFiles(dirPath)).files.length;
+    }
+    return count;
+  }
 
   /**
    * Size of the .git directory on disk, in bytes. Cached for 60s since a full

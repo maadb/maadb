@@ -109,7 +109,14 @@ export type ErrorCode =
   // exact | hybrid | semantic. SEMANTIC_DISABLED: the tool was called but
   // MAAD_SEMANTIC_ENABLE is off / the vector index never loaded.
   | 'INVALID_MODE'
-  | 'SEMANTIC_DISABLED';
+  | 'SEMANTIC_DISABLED'
+  // 0.8.4 — boot false-empty guard. A persisted index reporting zero documents
+  // while registered paths hold markdown on disk means the derived index was
+  // never built or was lost (fresh clone, volume-restore, wiped _backend), not
+  // a genuinely empty project. Serving it would silently return [] from every
+  // list/search/query, so the engine refuses to serve until the index is
+  // rebuilt (explicit reindex, or MAAD_BOOT_REINDEX=1 to rebuild at boot).
+  | 'INDEX_EMPTY';
 
 export interface MaadError {
   code: ErrorCode;

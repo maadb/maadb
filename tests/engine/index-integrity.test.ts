@@ -60,7 +60,7 @@ async function freshEngine(): Promise<MaadEngine> {
   return engine;
 }
 
-const ENV_KEYS = ['MAAD_MAX_DOC_BYTES', 'MAAD_MAX_DOC_ANNOTATIONS'] as const;
+const ENV_KEYS = ['MAAD_MAX_DOC_BYTES', 'MAAD_MAX_DOC_ANNOTATIONS', 'MAAD_BOOT_REINDEX'] as const;
 let savedEnv: Record<string, string | undefined> = {};
 
 beforeAll(() => {
@@ -96,7 +96,7 @@ describe('stale-row sweep guard', () => {
     expect((await engine.indexAll({ force: true })).indexed).toBe(2);
     engine.close();
 
-    // Re-point the registry at a nonexistent dir — the pnet-inc incident shape.
+    // Re-point the registry at a nonexistent dir — the registry-mismatch incident shape.
     writeFileSync(path.join(TEMP_ROOT, '_registry', 'object_types.yaml'), REGISTRY_MISMATCH, 'utf-8');
     engine = await freshEngine();
     const result = await engine.indexAll({ force: true });
@@ -275,5 +275,94 @@ describe('numeric indexing fixes', () => {
     expect(computeNumericValue('100', 'amount')).toBe(100);
     expect(computeNumericValue('1,234.56', 'amount')).toBe(1234.56);
     expect(computeNumericValue('n/a', 'amount')).toBeNull();
+  });
+});
+
+// ============================================================================
+// 0.8.4 — boot false-empty index guard.
+//
+// A persisted index reporting zero documents while registered paths hold
+// markdown on disk is the "derived index was lost" shape (fresh clone,
+// volume-restore, wiped _backend), NOT a genuinely empty project. The serving
+// paths (project pool + single-project startup) pass guardEmptyIndex:true so
+// the engine refuses to serve [] over real data; the CLI/test bootstrap path
+// (init → reindex) leaves it unset and is unaffected.
+// ============================================================================
+describe('boot false-empty index guard (0.8.4)', () => {
+  function newServingEngine(): MaadEngine {
+    const engine = new MaadEngine();
+    openEngines.push(engine);
+    return engine;
+  }
+
+  it('serving init refuses (INDEX_EMPTY) when the index is empty but markdown exists', async () => {
+    writeProject();
+    const engine = newServingEngine();
+    const r = await engine.init(TEMP_ROOT, { guardEmptyIndex: true });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.errors[0].code).toBe('INDEX_EMPTY');
+      // The count of on-disk markdown is surfaced so it's clear the data is
+      // present and the index — not the data — is what's missing.
+      expect(r.errors[0].details?.onDiskMarkdownFiles).toBe(2);
+      expect(r.errors[0].message).toContain('maad reindex');
+    }
+  });
+
+  it('read-only serving init refuses and points at reindex (cannot self-heal)', async () => {
+    writeProject();
+    // _backend/ exists (restored) but holds no populated db — the empty-index
+    // sub-case the earlier missing-_backend read-only guard does not cover.
+    mkdirSync(path.join(TEMP_ROOT, '_backend'), { recursive: true });
+    const engine = newServingEngine();
+    const r = await engine.init(TEMP_ROOT, { guardEmptyIndex: true, readOnly: true });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.errors[0].code).toBe('INDEX_EMPTY');
+      expect(r.errors[0].message).toContain('read-only');
+    }
+  });
+
+  it('MAAD_BOOT_REINDEX=1 rebuilds the index at boot and serves the docs', async () => {
+    writeProject();
+    process.env.MAAD_BOOT_REINDEX = '1';
+    const engine = newServingEngine();
+    const r = await engine.init(TEMP_ROOT, { guardEmptyIndex: true });
+    expect(r.ok).toBe(true);
+    expect(engine.health().totalDocuments).toBe(2);
+    expect((await engine.getDocument(docId('note-one'), 'hot')).ok).toBe(true);
+    expect((await engine.getDocument(docId('note-two'), 'hot')).ok).toBe(true);
+  });
+
+  it('a genuinely empty project (types registered, no markdown) serves fine — architect mode', async () => {
+    writeProject();
+    unlinkSync(path.join(TEMP_ROOT, 'notes', 'note-one.md'));
+    unlinkSync(path.join(TEMP_ROOT, 'notes', 'note-two.md'));
+    const engine = newServingEngine();
+    const r = await engine.init(TEMP_ROOT, { guardEmptyIndex: true });
+    expect(r.ok).toBe(true);
+    expect(engine.health().totalDocuments).toBe(0);
+  });
+
+  it('the guard is opt-in: init without it keeps the CLI/test bootstrap (init → reindex)', async () => {
+    writeProject();
+    const engine = newServingEngine();
+    const r = await engine.init(TEMP_ROOT);
+    expect(r.ok).toBe(true);
+    expect(engine.health().totalDocuments).toBe(0);
+    expect((await engine.indexAll({ force: true })).indexed).toBe(2);
+  });
+
+  it('a populated index passes the guard untouched', async () => {
+    writeProject();
+    let engine = newServingEngine();
+    expect((await engine.init(TEMP_ROOT)).ok).toBe(true);
+    expect((await engine.indexAll({ force: true })).indexed).toBe(2);
+    engine.close();
+
+    engine = newServingEngine();
+    const r = await engine.init(TEMP_ROOT, { guardEmptyIndex: true });
+    expect(r.ok).toBe(true);
+    expect(engine.health().totalDocuments).toBe(2);
   });
 });

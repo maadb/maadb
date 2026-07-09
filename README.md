@@ -17,8 +17,9 @@ MAADb stores records as markdown files with YAML frontmatter for structured fiel
 - **Git is the audit trail.** Every write is a commit. `maad_history` shows the full change history for any record.
 - **LLM-native.** Ships with 30+ MCP tools for discovery, read, write, maintenance, and auth. Designed for agent workflows from the start.
 - **Optional schemas.** Add YAML schemas when you want structure, skip them when you don't. Validation runs on writes, never on old records.
-- **The index is a speed layer.** SQLite stores pointers into your markdown files. Delete it and it rebuilds — your data never depends on the index surviving.
+- **The index is a speed layer.** SQLite stores pointers into your markdown files. Delete it and `maad reindex` rebuilds it from the markdown — your data never depends on the index surviving.
 - **Safe under concurrent writes.** Clean shutdown, lock recovery, rate limiting, retry-safe operations all built in.
+- **Headless and lightweight by design.** No UI, no web server, no admin console — just an engine and an MCP interface. Six production dependencies. The navigator is your text editor, `git`, and the host app you build on top; browsing lives one layer up, not in the engine.
 
 ## Where MAADb fits
 
@@ -113,7 +114,7 @@ Runtime layout, client to storage:
 
 **One engine, two interfaces.** The engine is the same whether you reach it over stdio (local subprocess, host user is the trust boundary) or HTTP/SSE (per-agent tokens, three-cap role composition).
 
-**Two sources of truth on disk.** Markdown files are canonical — open any record in a text editor and you see exactly what the engine sees. SQLite is a rebuildable pointer index; delete `_backend/` and it rebuilds from the markdown on next operation.
+**Two sources of truth on disk.** Markdown files are canonical — open any record in a text editor and you see exactly what the engine sees. SQLite is a rebuildable pointer index; delete `_backend/` and `maad reindex` rebuilds it from the markdown. A long-lived server can rebuild at boot with `MAAD_BOOT_REINDEX=1`; either way the engine refuses to serve an empty index over existing markdown rather than returning empty results.
 
 ## Quick start
 
