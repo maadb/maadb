@@ -23,9 +23,11 @@ export async function startupEngine(projectRoot: string): Promise<StartupResult>
     throw new Error(`Project directory not found: ${resolved}`);
   }
 
-  // Init engine — self-heals _registry, _schema, _backend on empty projects
+  // Init engine — self-heals _registry, _schema, _backend on empty projects.
+  // 0.8.4 — serving path: guard against a false-empty index (lost/unbuilt
+  // derived index over existing markdown) rather than silently serving [].
   const engine = new MaadEngine();
-  const initResult = await engine.init(resolved);
+  const initResult = await engine.init(resolved, { guardEmptyIndex: true });
   if (!initResult.ok) {
     const messages = initResult.errors.map(e => `${e.code}: ${e.message}`).join('; ');
     throw new Error(`Engine initialization failed: ${messages}`);

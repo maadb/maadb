@@ -1,10 +1,18 @@
 ---
 enabled: true
-current: 0.8.3
+current: 0.8.4
 dev_flow: formal
 ---
 
 # Version History
+
+## 0.8.4 — 2026-07-09
+
+Boot false-empty index guard. On the serving paths (the project pool and single-project startup), the engine now refuses to serve a persisted index that reports zero documents while registered paths hold markdown on disk — the "derived index was lost" shape (fresh clone, volume-restore, or a wiped `_backend/`). Previously `init()` succeeded with an empty index and every list/search/query silently returned `[]` (and the next single-file write left the index half-populated), so a routine restore could make live records invisible with no error.
+
+Detection is exact: the guard fires only when the index is empty AND registered types exist AND markdown is present under a registered path, so a genuinely empty architect-mode project (types defined, no docs yet) still boots normally. Read-only mode fails closed with `INDEX_EMPTY` (it cannot rebuild the index); read-write mode fails closed by default, or rebuilds from the markdown at boot when `MAAD_BOOT_REINDEX=1` is set — `init()` runs before the per-request timeout is armed, so a blocking boot rebuild is not bound by the 30s cap, and embeddings drain asynchronously. The guard is scoped to the serving paths: the CLI bootstrap (`init` → reindex) and direct `indexAll` callers are unchanged.
+
+New `INDEX_EMPTY` error code and `MAAD_BOOT_REINDEX` env flag (a behavior toggle, never a path). README's "delete `_backend/` and it rebuilds" note corrected to describe the explicit-reindex / boot-rebuild behavior. 1101 tests passing (+6). No dependency, schema, or API-shape changes.
 
 ## 0.8.3 — 2026-07-08
 

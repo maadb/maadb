@@ -175,7 +175,9 @@ export class EnginePool {
 
   private async initEngine(project: ProjectConfig): Promise<Result<MaadEngine>> {
     const engine = new MaadEngine();
-    const initResult = await engine.init(project.path);
+    // 0.8.4 — serving path: guard against a false-empty index (lost/unbuilt
+    // derived index over existing markdown) rather than silently serving [].
+    const initResult = await engine.init(project.path, { guardEmptyIndex: true });
     if (!initResult.ok) return initResult;
     ensureProjectSkills(project.path);
     return ok(engine);
