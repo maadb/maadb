@@ -9,6 +9,9 @@ export default defineConfig({
     // produced spurious timeouts on the first windows-latest run.
     testTimeout: 30_000,
     hookTimeout: 30_000,
+    // Git/SQLite integration workers are process- and handle-heavy. Bound the
+    // fork pool so high-core hosts do not terminate workers under peak load.
+    maxWorkers: 4,
     coverage: {
       provider: 'v8',
       include: ['src/**/*.ts'],

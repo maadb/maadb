@@ -4,7 +4,10 @@
 // ============================================================================
 
 import path from 'node:path';
-import { realpathSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
+
+const SAFE_SCHEMA_REF = /^[a-z][a-z0-9_]*\.v[1-9][0-9]*$/;
+const SAFE_PATH_SEGMENT = /^[A-Za-z0-9_-][A-Za-z0-9._-]*$/;
 
 /**
  * Check that a target path is contained within the root directory.
@@ -24,13 +27,51 @@ export function isContainedIn(targetPath: string, rootDir: string): boolean {
  */
 export function isReallyContainedIn(targetPath: string, rootDir: string): boolean {
   try {
-    const realRoot = realpathSync(rootDir) + path.sep;
+    const root = realpathSync(rootDir);
+    const realRoot = root + path.sep;
     const realTarget = realpathSync(targetPath);
-    return realTarget === realpathSync(rootDir) || realTarget.startsWith(realRoot);
+    return realTarget === root || realTarget.startsWith(realRoot);
   } catch {
-    // If realpath fails (file doesn't exist), fall back to resolve check
-    return isContainedIn(targetPath, rootDir);
+    return false;
   }
+}
+
+/**
+ * Check a path that may not exist yet without losing symlink protection.
+ * The nearest existing ancestor is resolved through the filesystem, then the
+ * missing suffix is reconstructed beneath that real path.
+ */
+export function isWritePathContainedIn(targetPath: string, rootDir: string): boolean {
+  if (!isContainedIn(targetPath, rootDir)) return false;
+
+  try {
+    const realRoot = realpathSync(rootDir);
+    let ancestor = path.resolve(targetPath);
+    while (!existsSync(ancestor)) {
+      const parent = path.dirname(ancestor);
+      if (parent === ancestor) return false;
+      ancestor = parent;
+    }
+
+    const realAncestor = realpathSync(ancestor);
+    if (!isContainedIn(realAncestor, realRoot)) return false;
+    const suffix = path.relative(ancestor, path.resolve(targetPath));
+    return isContainedIn(path.resolve(realAncestor, suffix), realRoot);
+  } catch {
+    return false;
+  }
+}
+
+export function isSafeSchemaRef(value: string): boolean {
+  return SAFE_SCHEMA_REF.test(value);
+}
+
+export function isSafeProjectRelativePath(value: string): boolean {
+  if (value.length === 0 || value.includes('\\') || value.includes('\0') || path.isAbsolute(value)) return false;
+  const trimmed = value.endsWith('/') ? value.slice(0, -1) : value;
+  if (trimmed.length === 0) return false;
+  return trimmed.split('/').every(segment =>
+    segment !== '.' && segment !== '..' && SAFE_PATH_SEGMENT.test(segment));
 }
 
 /**
