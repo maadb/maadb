@@ -5,7 +5,7 @@
 // MCP wrapper is a thin dispatch verified by kinds.test.ts.
 // ============================================================================
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import path from 'node:path';
 import { existsSync, rmSync, cpSync } from 'node:fs';
 import { simpleGit } from 'simple-git';
@@ -43,6 +43,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.useRealTimers();
   engine.close();
   await new Promise(r => setTimeout(r, 100));
   try {
@@ -96,6 +97,8 @@ describe('backupCreate', () => {
   });
 
   it('returns TAG_EXISTS on collision (no overwrite)', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-07-09T18:16:30Z'));
     const first = await engine.backupCreate({ label: 'same' });
     expect(first.ok).toBe(true);
     // Re-create with the same label within the same minute — name collides.
