@@ -1,10 +1,23 @@
 ---
 enabled: true
-current: 0.8.4
+current: 0.9.0
 dev_flow: formal
 ---
 
 # Version History
+
+## 0.9.0 — 2026-07-10
+
+Write-identity and filesystem-boundary enforcement. Every write path now fails closed on identity tampering and path escapes. Minor bump: this release changes caller-visible behavior in four ways.
+
+**Breaking changes:**
+
+- Caller-supplied `doc_id`, `doc_type`, or `schema` inside `fields` is rejected with `FRONTMATTER_GUARD` on create, update, and both bulk paths. Previously these keys were silently absorbed — and on create the caller value overrode the engine-owned identity, silently desyncing a document's stored identity from its filename and index row. Callers must strip identity keys from field payloads before writing.
+- Registry schema references must match `<name>.v<N>` (lowercase/snake-case name, positive integer version). A non-conforming ref fails `REGISTRY_INVALID` at load and the project refuses to boot. Migration: rename the schema file and registry ref to conform, then repair stored `schema:` fields with `maad_repair_where fix_schema_drift`.
+- Symlink escapes fail closed everywhere. Containment checks for not-yet-existing write paths now resolve the nearest existing ancestor through the real filesystem instead of falling back to a lexical check, and registry, schema, and template references are re-verified through realpath — a path that resolves outside the project root is rejected even if its text looks contained.
+- Document creation publishes via hard link and now requires a filesystem with hard-link support (NTFS, ext4; not exFAT or some network mounts). Creation is exclusive: an on-disk file absent from the index is no longer overwritten — it fails `DUPLICATE_DOC_ID`, and two concurrent creates of the same document admit exactly one publisher.
+
+Also in this release: update, delete, and repair validate a file's *stored* identity against the addressed record before touching it (mismatches fail `FRONTMATTER_GUARD`, or `REPAIR_REQUIRES_MIGRATION` on repair paths); atomic-write temp files carry pid + UUID so concurrent writers cannot collide on a shared temp name; and registry loading re-checks containment after directory creation. 1118 tests passing (+17: identity-guard coverage down to the MCP handler layer, symlink/junction escape rejection on both platforms, exclusive-create race). New dev dependency `@vitest/coverage-v8` for the coverage workflow; the vitest fork pool is bounded to 4 workers for deterministic runs on high-core hosts. No schema changes.
 
 ## 0.8.4 — 2026-07-09
 

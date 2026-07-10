@@ -52,6 +52,8 @@ import { generateDocument, extractBody } from '../writer/index.js';
 import { atomicWrite } from './journal.js';
 import { indexFile } from './indexing.js';
 import { readFile } from 'node:fs/promises';
+import { isWritePathContainedIn } from './pathguard.js';
+import { validateStoredIdentity } from './write-boundary.js';
 
 // ---- Per-strategy outcome --------------------------------------------------
 
@@ -321,6 +323,18 @@ export async function repairWhere(
       }
       continue;
     }
+    const storedIdentityViolation = validateStoredIdentity(frontmatter, doc);
+    if (storedIdentityViolation) {
+      for (const strategy of repairTypes) {
+        failed.push({
+          docId: docId as string,
+          strategy,
+          code: 'REPAIR_REQUIRES_MIGRATION',
+          message: storedIdentityViolation.message,
+        });
+      }
+      continue;
+    }
 
     let workingFrontmatter = frontmatter;
     const appliedRepairs: RepairWhereResult['succeeded'][number]['appliedRepairs'] = [];
@@ -338,6 +352,20 @@ export async function repairWhere(
         continue;
       }
       if (outcome.noop) continue;
+      const expectedSchema = strategyName === 'fix_schema_drift'
+        ? ctx.registry.types.get(doc.docType)?.schemaRef as string
+        : String(workingFrontmatter.schema);
+      const identityViolation = validateStoredIdentity(outcome.newFrontmatter, doc, expectedSchema);
+      if (identityViolation) {
+        failed.push({
+          docId: docId as string,
+          strategy: strategyName,
+          code: 'REPAIR_REQUIRES_MIGRATION',
+          message: identityViolation.message,
+        });
+        continue;
+      }
+
       workingFrontmatter = outcome.newFrontmatter;
       appliedRepairs.push({ strategy: strategyName, changedFields: outcome.changedFields });
     }
@@ -419,6 +447,10 @@ async function writeRepairedRecord(
   }
   const absPath = path.join(ctx.projectRoot, doc.filePath as string);
   let rawBody: string;
+  if (!isWritePathContainedIn(absPath, ctx.projectRoot)) {
+    return { ok: false, code: 'PATH_OUTSIDE_PROJECT', message: `document path "${absPath}" escapes the project root` };
+  }
+
   try {
     const raw = await readFile(absPath, 'utf-8');
     rawBody = extractBody(raw);

@@ -8,7 +8,12 @@ import { existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { parseMatter } from '../parser/matter.js';
 import { ok, err, singleErr, maadError, type Result } from '../errors.js';
-import { isContainedIn } from '../engine/pathguard.js';
+import {
+  isReallyContainedIn,
+  isSafeProjectRelativePath,
+  isSafeSchemaRef,
+  isWritePathContainedIn,
+} from '../engine/pathguard.js';
 import {
   docType,
   schemaRef,
@@ -29,6 +34,10 @@ export async function loadRegistry(projectRoot: string): Promise<Result<Registry
 
   if (!existsSync(registryPath)) {
     return singleErr('REGISTRY_NOT_FOUND', `Registry file not found: ${registryPath}`);
+  }
+
+  if (!isReallyContainedIn(registryPath, projectRoot)) {
+    return singleErr('REGISTRY_INVALID', `Registry path escapes project root through a symbolic link: ${registryPath}`);
   }
 
   let raw: string;
@@ -87,7 +96,7 @@ export async function loadRegistry(projectRoot: string): Promise<Result<Registry
     }
 
     const resolvedPath = path.join(projectRoot, typePath);
-    if (!isContainedIn(resolvedPath, projectRoot)) {
+    if (!isSafeProjectRelativePath(typePath) || !isWritePathContainedIn(resolvedPath, projectRoot)) {
       errors.push(maadError('REGISTRY_INVALID', `Type "${name}" path escapes project root: ${typePath}`));
       continue;
     }
@@ -95,6 +104,10 @@ export async function loadRegistry(projectRoot: string): Promise<Result<Registry
       mkdirSync(resolvedPath, { recursive: true });
     }
 
+    if (!isReallyContainedIn(resolvedPath, projectRoot)) {
+      errors.push(maadError('REGISTRY_INVALID', `Type "${name}" path escapes project root through a symbolic link: ${typePath}`));
+      continue;
+    }
     // Validate id_prefix
     const idPrefix = typeDef['id_prefix'];
     if (typeof idPrefix !== 'string' || !VALID_PREFIX_REGEX.test(idPrefix)) {
@@ -111,24 +124,28 @@ export async function loadRegistry(projectRoot: string): Promise<Result<Registry
 
     // Validate schema ref
     const schemaValue = typeDef['schema'];
-    if (typeof schemaValue !== 'string' || schemaValue.length === 0) {
-      errors.push(maadError('REGISTRY_INVALID', `Type "${name}" must have a "schema" string`));
+    if (typeof schemaValue !== 'string' || !isSafeSchemaRef(schemaValue)) {
+      errors.push(maadError('REGISTRY_INVALID', `Type "${name}" schema must match <type>.v<positive integer>`));
       continue;
     }
 
     const schemaFilePath = path.join(projectRoot, '_schema', `${schemaValue}.yaml`);
     if (!existsSync(schemaFilePath)) {
       errors.push(maadError('SCHEMA_NOT_FOUND', `Type "${name}" references schema "${schemaValue}" but file not found: ${schemaFilePath}`));
+    } else if (!isReallyContainedIn(schemaFilePath, projectRoot)) {
+      errors.push(maadError('REGISTRY_INVALID', `Type "${name}" schema escapes project root through a symbolic link: ${schemaValue}`));
     }
 
     // Optional template
     const template = typeof typeDef['template'] === 'string' ? typeDef['template'] : null;
     if (template !== null) {
       const templatePath = path.join(projectRoot, template);
-      if (!isContainedIn(templatePath, projectRoot)) {
+      if (!isSafeProjectRelativePath(template) || !isWritePathContainedIn(templatePath, projectRoot)) {
         errors.push(maadError('REGISTRY_INVALID', `Type "${name}" template escapes project root: ${template}`));
       } else if (!existsSync(templatePath)) {
         errors.push(maadError('FILE_NOT_FOUND', `Type "${name}" references template "${template}" but file not found`));
+      } else if (!isReallyContainedIn(templatePath, projectRoot)) {
+        errors.push(maadError('REGISTRY_INVALID', `Type "${name}" template escapes project root through a symbolic link: ${template}`));
       }
     }
 

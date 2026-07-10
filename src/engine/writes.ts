@@ -26,9 +26,14 @@ import type { CommitOutcome } from '../git/index.js';
 import type { ValidationWarning } from '../types.js';
 import { indexFile } from './indexing.js';
 import { generateDocId, readFrontmatter, toCanonicalRelPath } from './helpers.js';
-import { atomicWrite } from './journal.js';
+import { atomicCreate, atomicWrite } from './journal.js';
 import { checkDocIdSafe } from './docid-safe.js';
-import { isContainedIn } from './pathguard.js';
+import { isWritePathContainedIn } from './pathguard.js';
+import { validateCallerFields, validateStoredIdentity } from './write-boundary.js';
+
+function isAlreadyExistsError(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error && error.code === 'EEXIST';
+}
 
 export async function createDocument(
   ctx: EngineContext,
@@ -37,6 +42,10 @@ export async function createDocument(
   body?: string | undefined,
   customDocId?: string | undefined,
 ): Promise<Result<CreateResult>> {
+  const fieldsViolation = validateCallerFields(fields);
+  if (fieldsViolation) {
+    return singleErr(fieldsViolation.code, fieldsViolation.message);
+  }
   const regType = ctx.registry.types.get(dt);
   if (!regType) return singleErr('UNKNOWN_TYPE', `Type "${dt as string}" not in registry`);
 
@@ -64,10 +73,10 @@ export async function createDocument(
   }
 
   const frontmatter: Record<string, unknown> = {
+    ...fields,
     doc_id: id,
     doc_type: dt as string,
     schema: regType.schemaRef as string,
-    ...fields,
   };
 
   const validation = validateFrontmatter(frontmatter, schema, ctx.registry, undefined, { mode: 'write' });
@@ -78,7 +87,18 @@ export async function createDocument(
   const markdown = generateDocument(frontmatter, schema, body);
 
   const dirPath = path.join(ctx.projectRoot, regType.path);
-  if (!existsSync(dirPath)) mkdirSync(dirPath, { recursive: true });
+  if (!isWritePathContainedIn(dirPath, ctx.projectRoot)) {
+    return singleErr('PATH_OUTSIDE_PROJECT', `Write directory "${dirPath}" escapes the project root`);
+  }
+  try {
+    if (!existsSync(dirPath)) mkdirSync(dirPath, { recursive: true });
+  } catch (error) {
+    return singleErr('WRITE_ERROR', `Failed to create write directory: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (!isWritePathContainedIn(dirPath, ctx.projectRoot)) {
+    return singleErr('PATH_OUTSIDE_PROJECT',
+      `Write directory "${dirPath}" escapes the project root through a symbolic link`);
+  }
 
   const fp = path.join(dirPath, `${id}.md`);
 
@@ -86,11 +106,14 @@ export async function createDocument(
   // is contained within the project root. checkDocIdSafe above should have
   // already rejected any traversal attempt; this catches future regressions
   // (e.g., a new code path that bypasses validation) before disk touches.
-  if (!isContainedIn(fp, ctx.projectRoot)) {
+  if (!isWritePathContainedIn(fp, ctx.projectRoot)) {
     return singleErr('PATH_OUTSIDE_PROJECT',
       `resolved write path "${fp}" is outside project root "${ctx.projectRoot}"`);
   }
 
+  if (existsSync(fp)) {
+    return singleErr('DUPLICATE_DOC_ID', `Document "${id}" already exists on disk`);
+  }
   // Pre-flight parse: catches frontmatter / profile errors before any disk write,
   // so invalid writes never leave orphan files on disk.
   const preflight = parseDocumentFromContent(markdown, toFilePath(fp), ctx.registry.subtypeMap);
@@ -104,7 +127,16 @@ export async function createDocument(
   // Durable write: journal → atomic write → index → git → complete
   const journalId = ctx.journal.begin('create', id, fp);
 
-  await atomicWrite(fp, markdown);
+  try {
+    await atomicCreate(fp, markdown);
+  } catch (error) {
+    ctx.journal.complete(journalId);
+    if (isAlreadyExistsError(error)) {
+      return singleErr('DUPLICATE_DOC_ID', `Document "${id}" already exists on disk`);
+    }
+    return singleErr('WRITE_ERROR',
+      `Failed to create document "${id}": ${error instanceof Error ? error.message : String(error)}`);
+  }
   ctx.journal.advance(journalId, 'file_written');
 
   const indexResult = await indexFile(ctx, toFilePath(fp));
@@ -165,6 +197,10 @@ export async function updateDocument(
   if (!schema) return singleErr('SCHEMA_NOT_FOUND', `No schema for type "${doc.docType as string}"`);
 
   const absPath = path.join(ctx.projectRoot, doc.filePath as string);
+  if (!isWritePathContainedIn(absPath, ctx.projectRoot)) {
+    return singleErr('PATH_OUTSIDE_PROJECT', `Document path "${absPath}" escapes the project root`);
+  }
+
   let raw: string;
   try {
     raw = await readFile(absPath, 'utf-8');
@@ -172,13 +208,23 @@ export async function updateDocument(
     return singleErr('FILE_READ_ERROR', `Cannot read file: ${absPath}`);
   }
 
-  const currentFm = await readFrontmatter(ctx.projectRoot, doc);
+  let currentFm: Record<string, unknown>;
+  try {
+    currentFm = parseMatter(raw).data as Record<string, unknown>;
+  } catch (error) {
+    return singleErr('PARSE_ERROR',
+      `Cannot parse frontmatter for "${id as string}": ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const identityViolation = validateStoredIdentity(currentFm, doc);
+  if (identityViolation) {
+    return singleErr(identityViolation.code, identityViolation.message);
+  }
   const changedFields: string[] = [];
   const updatedFm = { ...currentFm };
-  if (fields) {
-    // Guard: reject non-object fields that survived past the MCP layer
-    if (typeof fields !== 'object' || Array.isArray(fields)) {
-      return singleErr('INVALID_FIELDS', 'fields must be a plain object, not a string or array');
+  if (fields !== undefined) {
+    const fieldsViolation = validateCallerFields(fields);
+    if (fieldsViolation) {
+      return singleErr(fieldsViolation.code, fieldsViolation.message);
     }
     for (const [key, value] of Object.entries(fields)) {
       if (updatedFm[key] !== value) {
@@ -293,6 +339,22 @@ export async function deleteDocument(
   if (!doc) return singleErr('FILE_NOT_FOUND', `Document "${id as string}" not found`);
 
   const absPath = path.join(ctx.projectRoot, doc.filePath as string);
+  if (!isWritePathContainedIn(absPath, ctx.projectRoot)) {
+    return singleErr('PATH_OUTSIDE_PROJECT', `Document path "${absPath}" escapes the project root`);
+  }
+
+  let currentFm: Record<string, unknown>;
+  try {
+    currentFm = await readFrontmatter(ctx.projectRoot, doc);
+  } catch (error) {
+    return singleErr('FILE_READ_ERROR',
+      `Cannot read frontmatter for "${id as string}": ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const identityViolation = validateStoredIdentity(currentFm, doc);
+  if (identityViolation) {
+    return singleErr(identityViolation.code, identityViolation.message);
+  }
+
   const journalId = ctx.journal.begin('delete', id as string, absPath);
 
   if (mode === 'hard') {
@@ -306,6 +368,10 @@ export async function deleteDocument(
     const dir = path.dirname(absPath);
     const base = path.basename(absPath);
     const deletedPath = path.join(dir, `_deleted_${base}`);
+    if (!isWritePathContainedIn(deletedPath, ctx.projectRoot)) {
+      return singleErr('PATH_OUTSIDE_PROJECT', `Deleted-document path "${deletedPath}" escapes the project root`);
+    }
+
     try {
       await rename(absPath, deletedPath);
     } catch {
@@ -473,6 +539,11 @@ export async function bulkCreate(
       failed.push({ index: i, docId: rec.docId ?? null, error: `No schema for type "${rec.docType}"` });
       continue;
     }
+    const fieldsViolation = validateCallerFields(rec.fields);
+    if (fieldsViolation) {
+      failed.push({ index: i, docId: rec.docId ?? null, error: `${fieldsViolation.code}: ${fieldsViolation.message}` });
+      continue;
+    }
 
     const existingIds = [
       ...ctx.backend.getSampleDocIds(dt, 10000).map(id => id as string),
@@ -493,10 +564,10 @@ export async function bulkCreate(
     }
 
     const frontmatter: Record<string, unknown> = {
+      ...rec.fields,
       doc_id: id,
       doc_type: rec.docType,
       schema: regType.schemaRef as string,
-      ...rec.fields,
     };
 
     const validation = validateFrontmatter(frontmatter, schema, ctx.registry, undefined, { mode: 'write' });
@@ -508,12 +579,29 @@ export async function bulkCreate(
 
     const markdown = generateDocument(frontmatter, schema, rec.body);
     const dirPath = path.join(ctx.projectRoot, regType.path);
-    if (!existsSync(dirPath)) mkdirSync(dirPath, { recursive: true });
+    if (!isWritePathContainedIn(dirPath, ctx.projectRoot)) {
+      failed.push({ index: i, docId: id, error: `PATH_OUTSIDE_PROJECT: write directory "${dirPath}" escapes the project root` });
+      continue;
+    }
+    try {
+      if (!existsSync(dirPath)) mkdirSync(dirPath, { recursive: true });
+    } catch (error) {
+      failed.push({ index: i, docId: id, error: `WRITE_ERROR: ${error instanceof Error ? error.message : String(error)}` });
+      continue;
+    }
+    if (!isWritePathContainedIn(dirPath, ctx.projectRoot)) {
+      failed.push({ index: i, docId: id, error: `PATH_OUTSIDE_PROJECT: write directory "${dirPath}" escapes through a symbolic link` });
+      continue;
+    }
     const fp = path.join(dirPath, `${id}.md`);
 
     // 0.7.6 — defense-in-depth path containment.
-    if (!isContainedIn(fp, ctx.projectRoot)) {
+    if (!isWritePathContainedIn(fp, ctx.projectRoot)) {
       failed.push({ index: i, docId: id, error: `PATH_OUTSIDE_PROJECT: resolved write path "${fp}" is outside project root` });
+      continue;
+    }
+    if (existsSync(fp)) {
+      failed.push({ index: i, docId: id, error: `DUPLICATE_DOC_ID: Document "${id}" already exists on disk` });
       continue;
     }
 
@@ -525,9 +613,12 @@ export async function bulkCreate(
     }
 
     try {
-      await atomicWrite(fp, markdown);
+      await atomicCreate(fp, markdown);
     } catch (e) {
-      failed.push({ index: i, docId: id, error: `File write failed: ${e instanceof Error ? e.message : String(e)}` });
+      const error = isAlreadyExistsError(e)
+        ? `DUPLICATE_DOC_ID: Document "${id}" already exists on disk`
+        : `WRITE_ERROR: ${e instanceof Error ? e.message : String(e)}`;
+      failed.push({ index: i, docId: id, error });
       continue;
     }
 
@@ -841,6 +932,13 @@ export async function purgeSoftDeleted(
 
   for (const doc of targets) {
     const absPath = path.join(ctx.projectRoot, doc.filePath as string);
+    if (!isWritePathContainedIn(absPath, ctx.projectRoot)) {
+      failed.push({
+        docId: doc.docId as string,
+        error: `PATH_OUTSIDE_PROJECT: document path "${absPath}" escapes the project root`,
+      });
+      continue;
+    }
     try {
       await unlink(absPath);
     } catch (e) {

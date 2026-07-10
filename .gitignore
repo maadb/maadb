@@ -26,6 +26,7 @@ Thumbs.db
 # Test temp directories
 tests/fixtures/_temp-*/
 
+coverage/
 # Internal dev log — local only, public release notes live in GitHub Releases
 CHANGELOG.md
 

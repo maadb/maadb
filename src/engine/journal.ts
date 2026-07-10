@@ -4,6 +4,7 @@
 // ============================================================================
 
 import { existsSync, readFileSync, writeFileSync, unlinkSync, renameSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 
 export interface JournalEntry {
@@ -115,17 +116,37 @@ export class OperationJournal {
  * On failure, temp file is cleaned up.
  */
 export function atomicWriteSync(targetPath: string, content: string): string {
-  const tempPath = targetPath + '.maad-tmp';
-  writeFileSync(tempPath, content, 'utf-8');
-  renameSync(tempPath, targetPath);
+  const tempPath = `${targetPath}.maad-tmp-${process.pid}-${randomUUID()}`;
+  try {
+    writeFileSync(tempPath, content, { encoding: 'utf-8', flag: 'wx' });
+    renameSync(tempPath, targetPath);
+  } finally {
+    if (existsSync(tempPath)) unlinkSync(tempPath);
+  }
   return targetPath;
 }
 
 export async function atomicWrite(targetPath: string, content: string): Promise<string> {
-  const { writeFile: fsWriteFile } = await import('node:fs/promises');
-  const { rename } = await import('node:fs/promises');
-  const tempPath = targetPath + '.maad-tmp';
-  await fsWriteFile(tempPath, content, 'utf-8');
-  await rename(tempPath, targetPath);
+  const { writeFile: fsWriteFile, rename, unlink: fsUnlink } = await import('node:fs/promises');
+  const tempPath = `${targetPath}.maad-tmp-${process.pid}-${randomUUID()}`;
+  try {
+    await fsWriteFile(tempPath, content, { encoding: 'utf-8', flag: 'wx' });
+    await rename(tempPath, targetPath);
+  } finally {
+    try { await fsUnlink(tempPath); } catch { /* renamed or already cleaned */ }
+  }
+  return targetPath;
+}
+
+/** Publish a complete file without ever replacing an existing target. */
+export async function atomicCreate(targetPath: string, content: string): Promise<string> {
+  const { writeFile: fsWriteFile, link, unlink: fsUnlink } = await import('node:fs/promises');
+  const tempPath = `${targetPath}.maad-tmp-${process.pid}-${randomUUID()}`;
+  try {
+    await fsWriteFile(tempPath, content, { encoding: 'utf-8', flag: 'wx' });
+    await link(tempPath, targetPath);
+  } finally {
+    try { await fsUnlink(tempPath); } catch { /* best-effort cleanup */ }
+  }
   return targetPath;
 }

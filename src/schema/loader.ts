@@ -9,6 +9,7 @@ import path from 'node:path';
 import { parseMatter } from '../parser/matter.js';
 import { ok, err, maadError, type Result, type MaadError } from '../errors.js';
 import { isPrecision, comparePrecision, type Precision } from './precision.js';
+import { isSafeSchemaRef, isWritePathContainedIn } from '../engine/pathguard.js';
 import {
   docType,
   schemaRef as toSchemaRef,
@@ -43,10 +44,19 @@ export async function loadSchemas(projectRoot: string, registry: Registry): Prom
   }
 
   for (const [, regType] of registry.types) {
+    if (!isSafeSchemaRef(regType.schemaRef as string)) {
+      errors.push(maadError('SCHEMA_INVALID', `Unsafe schema reference for type "${regType.name as string}": ${regType.schemaRef as string}`));
+      continue;
+    }
+
     const schemaFile = path.join(projectRoot, '_schema', `${regType.schemaRef}.yaml`);
     let raw: string;
 
     try {
+      if (!isWritePathContainedIn(schemaFile, projectRoot)) {
+        errors.push(maadError('SCHEMA_INVALID', `Schema path escapes project root: ${regType.schemaRef as string}`));
+        continue;
+      }
       raw = await readFile(schemaFile, 'utf-8');
       const st = await stat(schemaFile);
       cachedFiles.set(schemaFile, { mtimeMs: st.mtimeMs, size: st.size });
