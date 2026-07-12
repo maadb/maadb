@@ -144,6 +144,30 @@ describe('validateFrontmatter', () => {
     expect(tagsError).toBeDefined();
   });
 
+  it('enforces the declared type of every list item', () => {
+    const numberList = {
+      ...clientSchema,
+      fields: new Map(clientSchema.fields),
+    };
+    numberList.fields.set('scores', {
+      ...numberList.fields.get('tags')!,
+      name: 'scores',
+      itemType: 'number',
+    });
+
+    const result = validateFrontmatter({
+      doc_id: 'cli-test',
+      doc_type: 'client',
+      schema: 'client.v1',
+      name: 'Test Corp',
+      status: 'active',
+      scores: [1, '2', true, null],
+    }, numberList, registry);
+
+    expect(result.valid).toBe(false);
+    expect(result.errors.map(error => error.field)).toEqual(['scores[1]', 'scores[2]', 'scores[3]']);
+  });
+
   it('rejects bad date format', () => {
     const fm = {
       doc_id: 'cas-2026-001',

@@ -139,12 +139,23 @@ export async function atomicWrite(targetPath: string, content: string): Promise<
 }
 
 /** Publish a complete file without ever replacing an existing target. */
-export async function atomicCreate(targetPath: string, content: string): Promise<string> {
-  const { writeFile: fsWriteFile, link, unlink: fsUnlink } = await import('node:fs/promises');
+type AtomicCreateOps = Pick<typeof import('node:fs/promises'), 'writeFile' | 'link' | 'unlink'>;
+
+export async function atomicCreate(targetPath: string, content: string, injectedOps?: AtomicCreateOps): Promise<string> {
+  const { writeFile: fsWriteFile, link, unlink: fsUnlink } = injectedOps ?? await import('node:fs/promises');
   const tempPath = `${targetPath}.maad-tmp-${process.pid}-${randomUUID()}`;
   try {
     await fsWriteFile(tempPath, content, { encoding: 'utf-8', flag: 'wx' });
-    await link(tempPath, targetPath);
+    try {
+      await link(tempPath, targetPath);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== 'EPERM' && code !== 'ENOTSUP' && code !== 'EOPNOTSUPP') throw error;
+      // Some filesystems cannot publish via hard link. Preserve exclusive
+      // create semantics with wx; the tradeoff is that a concurrent reader
+      // may observe the direct write before it completes.
+      await fsWriteFile(targetPath, content, { encoding: 'utf-8', flag: 'wx' });
+    }
   } finally {
     try { await fsUnlink(tempPath); } catch { /* best-effort cleanup */ }
   }

@@ -116,6 +116,24 @@ describe('verifyIntegrity — finding categories', () => {
     if (!result.ok) return;
     expect(result.value.findings.broken_refs).toBeGreaterThanOrEqual(1);
   });
+
+  it('broken_refs distinguishes a soft-deleted target and ignores deleted sources', async () => {
+    const deletedTarget = await engine.deleteDocument(docId('con-jane-smith'), 'soft');
+    expect(deletedTarget.ok).toBe(true);
+
+    const result = await engine.verifyIntegrity({ categories: ['broken_refs'], verbose: true });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const detail = result.value.details?.find(row => row.docId === 'cli-acme' && row.finding === 'broken_refs');
+    expect(detail?.deletedTargets).toEqual({ primary_contact: ['con-jane-smith'] });
+
+    const deletedSource = await engine.deleteDocument(docId('cli-acme'), 'soft');
+    expect(deletedSource.ok).toBe(true);
+    const afterSourceDelete = await engine.verifyIntegrity({ categories: ['broken_refs'], verbose: true });
+    expect(afterSourceDelete.ok).toBe(true);
+    if (!afterSourceDelete.ok) return;
+    expect(afterSourceDelete.value.details?.some(row => row.docId === 'cli-acme')).toBe(false);
+  });
 });
 
 describe('verifyIntegrity — verbose mode', () => {

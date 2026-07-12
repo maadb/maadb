@@ -98,6 +98,41 @@ describe('T18 — all-digit string preserves type and value on round-trip', () =
   });
 });
 
+describe('T22 - list items preserve scalar type and obey item_type', () => {
+  it('string lookalikes in list<string> round-trip byte-for-byte', async () => {
+    const tags = ['true', '007', 'null', 'a: b'];
+    const created = await engine.createDocument(
+      docType('client'),
+      { name: 'List fidelity', status: 'active', tags },
+      undefined,
+      'cli-list-fidelity',
+    );
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+
+    const raw = readFileSync(path.join(TEMP_ROOT, created.value.filePath), 'utf-8');
+    expect(raw).toContain('tags: ["true", "007", "null", "a: b"]');
+
+    const fetched = await engine.getDocument(docId('cli-list-fidelity'));
+    expect(fetched.ok).toBe(true);
+    if (!fetched.ok) return;
+    expect(fetched.value.frontmatter.tags).toEqual(tags);
+    expect((fetched.value.frontmatter.tags as unknown[]).every(item => typeof item === 'string')).toBe(true);
+  });
+
+  it('rejects non-string items in list<string>', async () => {
+    const created = await engine.createDocument(
+      docType('client'),
+      { name: 'Bad list', status: 'active', tags: ['valid', true] },
+      undefined,
+      'cli-bad-list-type',
+    );
+    expect(created.ok).toBe(false);
+    if (created.ok) return;
+    expect(created.errors.some(error => error.message.includes('tags[1]'))).toBe(true);
+  });
+});
+
 describe('T19 — scientific-notation lookalike does not coerce to Infinity', () => {
   it('create with title="1e38892" → re-read returns string, not Infinity', async () => {
     const created = await engine.createDocument(

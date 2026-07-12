@@ -1,10 +1,21 @@
 ---
 enabled: true
-current: 0.9.0
+current: 0.10.0
 dev_flow: formal
 ---
 
 # Version History
+
+## 0.10.0 — 2026-07-12
+
+Data-correctness release across YAML storage, soft-delete visibility, list-field query semantics, and exclusive document creation.
+
+- **Type-faithful YAML lists.** List serialization preserves string lookalikes such as `"true"`, `"007"`, `"null"`, and `"a: b"` as strings while retaining actual booleans, numbers, and nulls. Validation now enforces every declared `item_type`, including default list-of-string behavior, and schema loading rejects invalid item types or enum lists without values.
+- **Tombstone isolation.** Objects, blocks, relationships, subtype inventory, summary statistics, composites, aggregates, joins, and semantic results exclude data owned by soft-deleted documents. Relationships also omit deleted endpoints. Integrity sweeps ignore deleted sources and identify broken refs whose targets are retained tombstones through the additive `deletedTargets` detail field.
+- **Correct list-field predicates.** `neq` now uses none-equal semantics for multi-valued fields, so `[x, y]` does not match `neq x`. Multiple positive range predicates on one field must be satisfied by the same indexed value rather than different list items.
+- **Portable exclusive creation.** Filesystems that reject hard-link publication with `EPERM`, `ENOTSUP`, or `EOPNOTSUPP` fall back to a direct `wx` write. Existing targets remain protected from replacement; the fallback only relaxes reader atomicity while the new file is being written.
+
+1127 tests passing (+9). No dependency changes or database migrations. Additive integrity response field: `details[].deletedTargets`. Behavior changes: malformed list items are rejected according to their declared schema type; soft-deleted child data is no longer visible through read surfaces; and list-field `neq`/multi-range filters now follow collection-correct semantics.
 
 ## 0.9.0 — 2026-07-10
 

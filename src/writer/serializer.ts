@@ -79,12 +79,10 @@ export function serializeField(key: string, value: unknown): string {
   if (typeof value === 'number') return `${key}: ${value}`;
 
   if (Array.isArray(value)) {
-    const items = value.map(v => {
-      const s = String(v);
-      // Quote items that contain commas or brackets
-      if (s.includes(',') || s.includes('[') || s.includes(']')) return `"${s.replace(/"/g, '\\"')}"`;
-      return s;
-    });
+    // Preserve each item's runtime type. Stringifying here is lossy in both
+    // directions: string lookalikes such as "true" and "007" are re-read as
+    // booleans/numbers, while actual null values become the string "null".
+    const items = value.map(serializeArrayItem);
     return `${key}: [${items.join(', ')}]`;
   }
 
@@ -123,4 +121,24 @@ export function serializeField(key: string, value: unknown): string {
   }
 
   return `${key}: ${str}`;
+}
+
+function serializeArrayItem(value: unknown): string {
+  if (value === null || value === undefined) return 'null';
+  if (typeof value === 'boolean' || typeof value === 'number') return String(value);
+  if (value instanceof Date) return `"${value.toISOString()}"`;
+  if (Array.isArray(value)) return `[${value.map(serializeArrayItem).join(', ')}]`;
+
+  if (typeof value === 'string') {
+    return serializeField('_', value).slice(3);
+  }
+
+  // Schema-governed lists reject object items, but extras still need valid
+  // YAML rather than the old lossy "[object Object]" representation.
+  return yaml.dump(value, {
+    schema: yaml.CORE_SCHEMA,
+    flowLevel: 0,
+    lineWidth: -1,
+    noRefs: true,
+  }).trim();
 }
