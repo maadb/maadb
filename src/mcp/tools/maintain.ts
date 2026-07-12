@@ -43,14 +43,20 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
   }));
 
   server.registerTool('maad_reindex', {
-    description: 'Rebuilds the SQLite index from markdown files. Use after external file changes or to recover from stale state. Auto-detects per-type schema-index changes and rebuilds affected types even when files are byte-identical (rebuiltTypes lists them in the response).',
+    description: 'Rebuilds the SQLite index from markdown files. In multi-project instance mode, this is the only tool allowed to recover a false-empty index; single-project servers must use MAAD_BOOT_REINDEX=1 or the CLI. Fleet CLI recovery: maad reindex --project <absolute path exactly as declared in instance.yaml>, in the server filesystem namespace. Avoid relative paths, inherited MAAD_PROJECT, and mismatched container mounts. Auto-detects per-type schema-index changes and rebuilds affected types even when files are byte-identical (rebuiltTypes lists them in the response).',
     inputSchema: z.object({
       force: z.boolean().optional().default(false).describe('Force full rebuild (skip both hash check and the schema-fingerprint shortcut). Rarely needed since 0.7.4 — the engine now auto-rebuilds types whose indexed-field set changed.'),
       embeddings: z.boolean().optional().default(false).describe('0.8.0 — rebuild the semantic index: force a full reindex (repopulating per-block text + FTS), re-enqueue every block, and drain the embed worker. Use after enabling MAAD_SEMANTIC_ENABLE on an existing project or after an embedding provider/model change. No-op when semantic is off.'),
       project: z.string().optional().describe('Project name (multi-project mode only)'),
     }),
-  }, async (args, extra) => withEngine(ctx, extra, 'maad_reindex', args, async ({ engine }) => {
+  }, async (args, extra) => withEngine(ctx, extra, 'maad_reindex', args, async ({ engine, projectName }) => {
     const result = await engine.reindex({ force: args.force, embeddings: args.embeddings });
+    const recovery = await ctx.pool.completeEmptyIndexRecovery(
+      projectName,
+      engine,
+      result.ok && result.value.errors.length === 0 && result.value.indexed > 0,
+    );
+    if (!recovery.ok) return resultToResponse(recovery);
     const response = resultToResponse(result);
     // 0.8.1 — scan/sweep warnings (registry path mismatch, kept-not-pruned
     // rows, glob fallback) ride the standard _meta.warnings channel so clients

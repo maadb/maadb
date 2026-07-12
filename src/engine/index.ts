@@ -591,6 +591,19 @@ export class MaadEngine {
     return count;
   }
 
+  async validateServingIndex(): Promise<Result<void>> {
+    this.assertInit();
+    if (this.registry.types.size === 0 || this.backend.getStats().totalDocuments > 0) return ok(undefined);
+    const onDiskCount = await this.probeRegisteredMarkdownCount();
+    if (onDiskCount === 0) return ok(undefined);
+    return singleErr(
+      'INDEX_EMPTY',
+      `Index is empty but ${onDiskCount} markdown file(s) exist under registered paths; recovery reindex did not produce a servable index.`,
+      undefined,
+      { onDiskMarkdownFiles: onDiskCount, projectRoot: this.projectRoot },
+    );
+  }
+
   /**
    * Size of the .git directory on disk, in bytes. Cached for 60s since a full
    * recursive walk is O(size) and maad_health may be polled frequently. Returns

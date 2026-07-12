@@ -4,17 +4,43 @@
 
 import { describe, it, expect, afterEach } from 'vitest';
 import path from 'node:path';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { EnginePool } from '../../src/instance/pool.js';
 import type { InstanceConfig } from '../../src/instance/config.js';
 
 const createdDirs: string[] = [];
+const FIXTURE = path.resolve(__dirname, '../fixtures/simple-crm');
 
 function makeTempDir(): string {
   const dir = mkdtempSync(path.join(tmpdir(), 'maad-pool-'));
   createdDirs.push(dir);
   return dir;
+}
+
+function makeFalseEmptyProject(): string {
+  const dir = makeTempDir();
+  cpSync(FIXTURE, dir, {
+    recursive: true,
+    filter: src => !src.includes(`${path.sep}_backend`) && !src.includes(`${path.sep}.git`),
+  });
+  return dir;
+}
+
+function snapshot(dir: string): Record<string, { size: number; mtimeMs: number }> {
+  const result: Record<string, { size: number; mtimeMs: number }> = {};
+  const walk = (current: string) => {
+    for (const entry of readdirSync(current, { withFileTypes: true })) {
+      const abs = path.join(current, entry.name);
+      if (entry.isDirectory()) walk(abs);
+      else {
+        const st = statSync(abs);
+        result[path.relative(dir, abs).replace(/\\/g, '/')] = { size: st.size, mtimeMs: st.mtimeMs };
+      }
+    }
+  };
+  walk(dir);
+  return result;
 }
 
 function makeInstance(projects: Array<{ name: string; path: string; role?: 'reader' | 'writer' | 'admin' }>): InstanceConfig {
@@ -34,6 +60,56 @@ afterEach(async () => {
 });
 
 describe('EnginePool', () => {
+  it('lets only a recovery get rebuild a false-empty project, then caches it', async () => {
+    const dir = makeFalseEmptyProject();
+    const pool = new EnginePool(makeInstance([{ name: 'alpha', path: dir }]));
+
+    const refused = await pool.get('alpha');
+    expect(refused.ok).toBe(false);
+    if (!refused.ok) expect(refused.errors[0]!.code).toBe('INDEX_EMPTY');
+
+    const recovery = await pool.get('alpha', { allowEmptyIndexRecovery: true });
+    expect(recovery.ok).toBe(true);
+    if (!recovery.ok) return;
+    expect(pool.has('alpha')).toBe(false);
+    const indexed = await recovery.value.reindex({ force: true });
+    expect(indexed.ok).toBe(true);
+    const completed = await pool.completeEmptyIndexRecovery(
+      'alpha', recovery.value, indexed.ok && indexed.value.errors.length === 0 && indexed.value.indexed > 0,
+    );
+    expect(completed.ok).toBe(true);
+    expect(pool.has('alpha')).toBe(true);
+    const served = await pool.get('alpha');
+    expect(served.ok && served.value === recovery.value).toBe(true);
+    await pool.closeAll();
+  });
+
+  it('does not cache a recovery engine when reindex fails to populate it', async () => {
+    const dir = makeFalseEmptyProject();
+    const pool = new EnginePool(makeInstance([{ name: 'alpha', path: dir }]));
+    const recovery = await pool.get('alpha', { allowEmptyIndexRecovery: true });
+    expect(recovery.ok).toBe(true);
+    if (!recovery.ok) return;
+
+    const completed = await pool.completeEmptyIndexRecovery('alpha', recovery.value, false);
+    expect(completed.ok).toBe(false);
+    expect(pool.has('alpha')).toBe(false);
+    const refused = await pool.get('alpha');
+    expect(refused.ok).toBe(false);
+    if (!refused.ok) expect(refused.errors[0]!.code).toBe('INDEX_EMPTY');
+    await pool.closeAll();
+  });
+
+  it('read-only pool recovery refuses without filesystem changes', async () => {
+    const dir = makeFalseEmptyProject();
+    const before = snapshot(dir);
+    const pool = new EnginePool(makeInstance([{ name: 'alpha', path: dir }]), { readOnly: true });
+    const result = await pool.get('alpha', { allowEmptyIndexRecovery: true });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.errors[0]!.code).toBe('READ_ONLY');
+    expect(snapshot(dir)).toEqual(before);
+    await pool.closeAll();
+  });
   it('lazy-inits an engine on first get and caches thereafter', async () => {
     const dir = makeTempDir();
     const pool = new EnginePool(makeInstance([{ name: 'alpha', path: dir }]));
