@@ -178,10 +178,14 @@ export async function withEngine(
   }
 
   let acquiredProject: string | null = null;
+  let recoveryEngine: import('../engine/index.js').MaadEngine | null = null;
   try {
     // Resolve engine
-    const poolResult = await ctx.pool.get(projectName);
+    const poolResult = await ctx.pool.get(projectName, {
+      allowEmptyIndexRecovery: toolName === 'maad_reindex',
+    });
     if (!poolResult.ok) return finalize(errorResponse(poolResult.errors));
+    if (ctx.pool.isEmptyIndexRecoveryEngine(poolResult.value)) recoveryEngine = poolResult.value;
 
     // 0.7.3 — refcount the engine for the duration of this handler so the
     // idle sweeper cannot evict mid-call. Released in finally below.
@@ -333,6 +337,7 @@ export async function withEngine(
     // 0.7.3 — release engine refcount. Paired with acquiredProject above;
     // null when pool.get failed and acquire was never called.
     if (acquiredProject !== null) ctx.pool.release(acquiredProject);
+    if (recoveryEngine) await ctx.pool.discardEmptyIndexRecovery(recoveryEngine);
   }
 }
 

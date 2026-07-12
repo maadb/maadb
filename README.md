@@ -212,6 +212,8 @@ node dist/cli.js --instance /path/to/instance.yaml serve
 
 **Declaring new projects:** add another entry to `projects[]` and reload the server (`SIGHUP` / `systemctl reload maad` / `docker compose kill -s SIGHUP maad`). Projects not declared in `instance.yaml` are unreachable through MCP — there is no runtime add-project path.
 
+**Recovering a false-empty index:** in multi-project instance mode, `maad_reindex` is the only MCP tool allowed to initialize a project whose registered paths contain Markdown while its index is empty. Every other tool continues to fail with `INDEX_EMPTY` until recovery succeeds. Single-project servers still recover with `MAAD_BOOT_REINDEX=1` or the CLI. For instance fleets, run `maad reindex --project <absolute-path-exactly-as-declared-in-instance.yaml>` in the same filesystem namespace as the server. Do not rely on a relative path (it resolves from the CLI working directory), an inherited `MAAD_PROJECT`, or a host path that differs from the container mount view.
+
 ### Session binding
 
 Before any data-tool call, a session must bind to a project via an instance-level tool (always visible pre-bind):

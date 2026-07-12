@@ -1,10 +1,18 @@
 ---
 enabled: true
-current: 0.11.0
+current: 0.11.1
 dev_flow: formal
 ---
 
 # Version History
+
+## 0.11.1 — 2026-07-12
+
+Pool-mode recovery for false-empty indexes. `maad_reindex` is now the only MCP tool allowed to initialize an uncached project without the empty-index serving guard. The recovery engine stays outside the normal cache while rebuilding; after reindex it is cached only when the run succeeded, indexed records, and a fresh guard check confirms the project is servable. Failed, empty, or still-invalid recovery closes the engine, so later non-reindex tools continue to fail with `INDEX_EMPTY` rather than serving an empty index.
+
+Read-only pools reject recovery with `READ_ONLY` before touching the filesystem. Single-project startup behavior is unchanged and continues to use `MAAD_BOOT_REINDEX=1` or CLI recovery. The README and `maad_reindex` tool description document the sanctioned instance-fleet CLI command and its absolute-path/filesystem-namespace requirements.
+
+1133 tests passing (+3). No dependency, schema, or database changes. Behavior change is limited to uncached multi-project `maad_reindex` calls that were previously blocked by `INDEX_EMPTY`.
 
 ## 0.11.0 — 2026-07-12
 

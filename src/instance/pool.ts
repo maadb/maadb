@@ -61,6 +61,9 @@ export interface IdleSweepConfig {
 export class EnginePool {
   private engines = new Map<string, MaadEngine>();
   private initPromises = new Map<string, Promise<Result<MaadEngine>>>();
+  private recoveryInitPromises = new Map<string, Promise<Result<MaadEngine>>>();
+  private recoveryEngines = new WeakSet<MaadEngine>();
+  private recoveryByName = new Map<string, MaadEngine>();
   private reloadInFlight = false;
   private stats: InstanceReloadStats = {
     lastReloadAt: null,
@@ -87,7 +90,7 @@ export class EnginePool {
   };
   private nowFn: () => number = Date.now;
 
-  constructor(private instance: InstanceConfig) {}
+  constructor(private instance: InstanceConfig, private opts: { readOnly?: boolean } = {}) {}
 
   /** Test seam — override the time source so sweeper logic is testable. */
   setNowFn(fn: () => number): void {
@@ -112,11 +115,41 @@ export class EnginePool {
 
   // Returns the cached engine or initializes it. Concurrent calls for the
   // same project await the same init promise so we don't double-init.
-  async get(name: string): Promise<Result<MaadEngine>> {
+  async get(name: string, opts: { allowEmptyIndexRecovery?: boolean } = {}): Promise<Result<MaadEngine>> {
     const cached = this.engines.get(name);
     if (cached) {
       this.lastTouchedAt.set(name, this.nowFn());
       return ok(cached);
+    }
+
+    const activeRecovery = this.recoveryByName.get(name);
+    if (activeRecovery) {
+      if (opts.allowEmptyIndexRecovery) return ok(activeRecovery);
+      return singleErr('INDEX_EMPTY', `Project "${name}" is undergoing an index recovery and is not yet servable`);
+    }
+
+    if (opts.allowEmptyIndexRecovery) {
+      if (this.opts.readOnly) {
+        return singleErr('READ_ONLY', 'Read-only instance cannot rebuild an empty index');
+      }
+      const existingRecovery = this.recoveryInitPromises.get(name);
+      if (existingRecovery) return existingRecovery;
+      const project = getProject(this.instance, name);
+      if (!project) {
+        return singleErr('PROJECT_UNKNOWN', `Project "${name}" is not declared in instance "${this.instance.name}"`);
+      }
+      const promise = this.initEngine(project, false);
+      this.recoveryInitPromises.set(name, promise);
+      try {
+        const result = await promise;
+        if (result.ok) {
+          this.recoveryEngines.add(result.value);
+          this.recoveryByName.set(name, result.value);
+        }
+        return result;
+      } finally {
+        this.recoveryInitPromises.delete(name);
+      }
     }
 
     const inFlight = this.initPromises.get(name);
@@ -173,17 +206,47 @@ export class EnginePool {
     return this.lastTouchedAt.get(name) ?? null;
   }
 
-  private async initEngine(project: ProjectConfig): Promise<Result<MaadEngine>> {
+  private async initEngine(project: ProjectConfig, guardEmptyIndex = true): Promise<Result<MaadEngine>> {
     const engine = new MaadEngine();
     // 0.8.4 — serving path: guard against a false-empty index (lost/unbuilt
     // derived index over existing markdown) rather than silently serving [].
-    const initResult = await engine.init(project.path, { guardEmptyIndex: true });
+    const initResult = await engine.init(project.path, {
+      guardEmptyIndex,
+      ...(this.opts.readOnly !== undefined ? { readOnly: this.opts.readOnly } : {}),
+    });
     if (!initResult.ok) {
       await engine.close();
       return initResult;
     }
     ensureProjectSkills(project.path);
     return ok(engine);
+  }
+
+  isEmptyIndexRecoveryEngine(engine: MaadEngine): boolean {
+    return this.recoveryEngines.has(engine);
+  }
+
+  async completeEmptyIndexRecovery(name: string, engine: MaadEngine, reindexSucceeded: boolean): Promise<Result<void>> {
+    if (!this.recoveryEngines.has(engine)) return ok(undefined);
+    this.recoveryEngines.delete(engine);
+    this.recoveryByName.delete(name);
+    const guard = reindexSucceeded ? await engine.validateServingIndex() : singleErr('INDEX_EMPTY', 'Recovery reindex failed; engine was not cached');
+    if (!guard.ok) {
+      await engine.close();
+      return guard;
+    }
+    this.engines.set(name, engine);
+    this.lastTouchedAt.set(name, this.nowFn());
+    return ok(undefined);
+  }
+
+  async discardEmptyIndexRecovery(engine: MaadEngine): Promise<void> {
+    if (!this.recoveryEngines.has(engine)) return;
+    this.recoveryEngines.delete(engine);
+    for (const [name, candidate] of this.recoveryByName) {
+      if (candidate === engine) this.recoveryByName.delete(name);
+    }
+    await engine.close();
   }
 
   // Public eviction seam. 0.7.3 — also called by the idle sweeper. Closes
