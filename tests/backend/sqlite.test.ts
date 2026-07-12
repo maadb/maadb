@@ -369,4 +369,59 @@ describe('SqliteBackend', () => {
       expect(caseIds).toHaveLength(1);
     });
   });
+
+  describe('soft-delete visibility boundary', () => {
+    it('hides child rows and relationships owned by deleted documents', () => {
+      const live = makeDoc('cli-live', 'client', 'clients/cli-live.md');
+      const deleted = { ...makeDoc('cas-deleted', 'case', 'cases/cas-deleted.md'), deleted: true };
+      backend.putDocument(live);
+      backend.putDocument(deleted);
+      backend.putObjects(docId('cas-deleted'), [makeObject('cas-deleted', 'entity', 'person', 'Hidden')]);
+      backend.putBlocks(docId('cas-deleted'), [{ id: blockId('hidden'), heading: 'Hidden', level: 1, startLine: 1, endLine: 2 }]);
+      backend.putRelationships(docId('cas-deleted'), [
+        { sourceDocId: docId('cas-deleted'), targetDocId: docId('cli-live'), field: 'client', relationType: 'ref' },
+      ]);
+
+      expect(backend.findObjects({})).toEqual([]);
+      expect(backend.countObjects({})).toBe(0);
+      expect(backend.getBlocks(docId('cas-deleted'))).toEqual([]);
+      expect(backend.getRelationships(docId('cli-live'), 'incoming')).toEqual([]);
+      expect(backend.getSubtypeInventory(10)).toEqual([]);
+      expect(backend.countBrokenRefs()).toBe(0);
+      expect(backend.getStats()).toMatchObject({ totalDocuments: 1, totalObjects: 0, totalRelationships: 0 });
+    });
+
+    it('applies list-field neq as none-equal and AND ranges to one item', () => {
+      backend.putDocument(makeDoc('cli-acme', 'client', 'clients/cli-acme.md'));
+      backend.putDocument(makeDoc('cli-beta', 'client', 'clients/cli-beta.md'));
+      backend.putFieldIndex(docId('cli-acme'), [
+        { name: 'scores', value: '1', numericValue: 1, type: 'number' },
+        { name: 'scores', value: '20', numericValue: 20, type: 'number' },
+      ]);
+      backend.putFieldIndex(docId('cli-beta'), [
+        { name: 'scores', value: '12', numericValue: 12, type: 'number' },
+      ]);
+
+      expect(backend.findDocuments({ filters: { scores: { op: 'neq', value: 20 } } }).map(d => d.docId))
+        .toEqual(['cli-beta']);
+      expect(backend.findDocuments({ filters: { scores: [
+        { op: 'gte', value: 10 }, { op: 'lte', value: 15 },
+      ] } }).map(d => d.docId)).toEqual(['cli-beta']);
+    });
+
+    it('omits relationships whose target is deleted', () => {
+      backend.putDocument(makeDoc('cas-live', 'case', 'cases/cas-live.md'));
+      backend.putDocument({ ...makeDoc('cli-deleted', 'client', 'clients/cli-deleted.md'), deleted: true });
+      backend.putRelationships(docId('cas-live'), [
+        { sourceDocId: docId('cas-live'), targetDocId: docId('cli-deleted'), field: 'client', relationType: 'ref' },
+      ]);
+
+      expect(backend.getRelationships(docId('cas-live'), 'outgoing')).toEqual([]);
+      expect(backend.getStats().totalRelationships).toBe(0);
+      expect(backend.countBrokenRefs()).toBe(1);
+      expect(backend.getBrokenRefs()).toEqual([expect.objectContaining({
+        sourceDocId: 'cas-live', targetDocId: 'cli-deleted', targetDeleted: true,
+      })]);
+    });
+  });
 });

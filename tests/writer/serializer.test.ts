@@ -83,6 +83,16 @@ describe('serializeField', () => {
     expect(serializeField('tags', ['a', 'b', 'c'])).toBe('tags: [a, b, c]');
   });
 
+  it('preserves scalar types inside arrays', async () => {
+    const original = ['true', '007', 'null', 'a: b', true, 7, null, 3.5];
+    const emitted = serializeField('items', original);
+    const yaml = (await import('js-yaml')).default;
+    const parsed = yaml.load(emitted, { schema: yaml.CORE_SCHEMA }) as { items: unknown[] };
+
+    expect(parsed.items).toEqual(original);
+    expect(emitted).toBe('items: ["true", "007", "null", "a: b", true, 7, null, 3.5]');
+  });
+
   it('quotes strings with special characters', () => {
     const result = serializeField('desc', 'value: with colon');
     expect(result).toBe('desc: "value: with colon"');

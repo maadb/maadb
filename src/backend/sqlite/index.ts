@@ -483,20 +483,21 @@ export class SqliteBackend implements MaadBackend {
     return result;
   }
 
-  private buildObjQuery(query: ObjectQuery): { where: string; params: unknown[] } {
+  private buildObjQuery(query: ObjectQuery, alias = ''): { where: string; params: unknown[] } {
     const conditions: string[] = [];
     const params: unknown[] = [];
+    const col = (name: string) => `${alias}${name}`;
 
-    if (query.primitive) { conditions.push('primitive = ?'); params.push(query.primitive); }
-    if (query.subtype) { conditions.push('subtype = ?'); params.push(query.subtype); }
-    if (query.value) { conditions.push('value = ?'); params.push(query.value); }
-    if (query.contains) { conditions.push('value LIKE ?'); params.push(`%${query.contains}%`); }
-    if (query.docId) { conditions.push('doc_id = ?'); params.push(query.docId as string); }
+    if (query.primitive) { conditions.push(`${col('primitive')} = ?`); params.push(query.primitive); }
+    if (query.subtype) { conditions.push(`${col('subtype')} = ?`); params.push(query.subtype); }
+    if (query.value) { conditions.push(`${col('value')} = ?`); params.push(query.value); }
+    if (query.contains) { conditions.push(`${col('value')} LIKE ?`); params.push(`%${query.contains}%`); }
+    if (query.docId) { conditions.push(`${col('doc_id')} = ?`); params.push(query.docId as string); }
     if (query.range) {
-      if (query.range.gte) { conditions.push('normalized_value >= ?'); params.push(query.range.gte); }
-      if (query.range.gt) { conditions.push('normalized_value > ?'); params.push(query.range.gt); }
-      if (query.range.lte) { conditions.push('normalized_value <= ?'); params.push(query.range.lte); }
-      if (query.range.lt) { conditions.push('normalized_value < ?'); params.push(query.range.lt); }
+      if (query.range.gte) { conditions.push(`${col('normalized_value')} >= ?`); params.push(query.range.gte); }
+      if (query.range.gt) { conditions.push(`${col('normalized_value')} > ?`); params.push(query.range.gt); }
+      if (query.range.lte) { conditions.push(`${col('normalized_value')} <= ?`); params.push(query.range.lte); }
+      if (query.range.lt) { conditions.push(`${col('normalized_value')} < ?`); params.push(query.range.lt); }
     }
 
     const w = conditions.length > 0 ? conditions.join(' AND ') : '1=1';
@@ -504,8 +505,10 @@ export class SqliteBackend implements MaadBackend {
   }
 
   findObjects(query: ObjectQuery): ObjectMatch[] {
-    const { where, params } = this.buildObjQuery(query);
-    const sql = `SELECT * FROM objects WHERE ${where} ORDER BY doc_id, source_line LIMIT ? OFFSET ?`;
+    const { where, params } = this.buildObjQuery(query, 'o.');
+    const sql = `SELECT o.* FROM objects o JOIN documents d ON d.doc_id = o.doc_id AND d.deleted = 0
+      WHERE ${where}
+      ORDER BY o.doc_id, o.source_line LIMIT ? OFFSET ?`;
     params.push(sanitizePageParam(query.limit, 50), sanitizePageParam(query.offset, 0));
 
     const rows = this.db.prepare(sql).all(...params) as RawObjectRow[];
@@ -523,8 +526,8 @@ export class SqliteBackend implements MaadBackend {
   }
 
   countObjects(query: ObjectQuery): number {
-    const { where, params } = this.buildObjQuery(query);
-    const row = this.db.prepare(`SELECT COUNT(*) as cnt FROM objects WHERE ${where}`).get(...params) as { cnt: number };
+    const { where, params } = this.buildObjQuery(query, 'o.');
+    const row = this.db.prepare(`SELECT COUNT(*) as cnt FROM objects o JOIN documents d ON d.doc_id = o.doc_id AND d.deleted = 0 WHERE ${where}`).get(...params) as { cnt: number };
     return row.cnt;
   }
 
@@ -534,7 +537,10 @@ export class SqliteBackend implements MaadBackend {
 
     if (direction === 'outgoing' || direction === 'both') {
       const rows = this.db.prepare(
-        'SELECT * FROM relationships WHERE source_doc_id = ?',
+        `SELECT r.* FROM relationships r
+         JOIN documents sd ON sd.doc_id = r.source_doc_id AND sd.deleted = 0
+         LEFT JOIN documents td ON td.doc_id = r.target_doc_id
+         WHERE r.source_doc_id = ? AND (td.doc_id IS NULL OR td.deleted = 0)`,
       ).all(id) as RawRelRow[];
 
       for (const row of rows) {
@@ -549,7 +555,10 @@ export class SqliteBackend implements MaadBackend {
 
     if (direction === 'incoming' || direction === 'both') {
       const rows = this.db.prepare(
-        'SELECT * FROM relationships WHERE target_doc_id = ?',
+        `SELECT r.* FROM relationships r
+         JOIN documents sd ON sd.doc_id = r.source_doc_id AND sd.deleted = 0
+         JOIN documents td ON td.doc_id = r.target_doc_id AND td.deleted = 0
+         WHERE r.target_doc_id = ?`,
       ).all(id) as RawRelRow[];
 
       for (const row of rows) {
@@ -567,7 +576,8 @@ export class SqliteBackend implements MaadBackend {
 
   getBlocks(docId: DocId): ParsedBlock[] {
     const rows = this.db.prepare(
-      'SELECT * FROM blocks WHERE doc_id = ? ORDER BY start_line',
+      `SELECT b.* FROM blocks b JOIN documents d ON d.doc_id = b.doc_id AND d.deleted = 0
+       WHERE b.doc_id = ? ORDER BY b.start_line`,
     ).all(docId as string) as RawBlockRow[];
 
     return rows.map((row): ParsedBlock => ({
@@ -584,7 +594,7 @@ export class SqliteBackend implements MaadBackend {
   getSubtypeInventory(limit: number): Array<{ primitive: string; subtype: string; count: number; topValues: string[] }> {
     const groups = this.db.prepare(`
       SELECT primitive, subtype, COUNT(*) as cnt
-      FROM objects
+      FROM objects o JOIN documents d ON d.doc_id = o.doc_id AND d.deleted = 0
       GROUP BY primitive, subtype
       ORDER BY cnt DESC
       LIMIT ?
@@ -593,7 +603,7 @@ export class SqliteBackend implements MaadBackend {
     return groups.map(g => {
       const topRows = this.db.prepare(`
         SELECT value, COUNT(*) as cnt
-        FROM objects
+        FROM objects o JOIN documents d ON d.doc_id = o.doc_id AND d.deleted = 0
         WHERE primitive = ? AND subtype = ?
         GROUP BY value
         ORDER BY cnt DESC
@@ -838,9 +848,12 @@ export class SqliteBackend implements MaadBackend {
 
   getStats(): BackendStats {
     const docCount = this.db.prepare('SELECT COUNT(*) as cnt FROM documents WHERE deleted = 0').get() as { cnt: number };
-    const objCount = this.db.prepare('SELECT COUNT(*) as cnt FROM objects').get() as { cnt: number };
-    const relCount = this.db.prepare('SELECT COUNT(*) as cnt FROM relationships').get() as { cnt: number };
-    const lastIndexed = this.db.prepare('SELECT MAX(indexed_at) as ts FROM documents').get() as { ts: string | null };
+    const objCount = this.db.prepare('SELECT COUNT(*) as cnt FROM objects o JOIN documents d ON d.doc_id = o.doc_id AND d.deleted = 0').get() as { cnt: number };
+    const relCount = this.db.prepare(`SELECT COUNT(*) as cnt FROM relationships r
+      JOIN documents sd ON sd.doc_id = r.source_doc_id AND sd.deleted = 0
+      LEFT JOIN documents td ON td.doc_id = r.target_doc_id
+      WHERE td.doc_id IS NULL OR td.deleted = 0`).get() as { cnt: number };
+    const lastIndexed = this.db.prepare('SELECT MAX(indexed_at) as ts FROM documents WHERE deleted = 0').get() as { ts: string | null };
 
     const byType = this.db.prepare(
       'SELECT doc_type, COUNT(*) as cnt FROM documents WHERE deleted = 0 GROUP BY doc_type',
@@ -876,27 +889,30 @@ export class SqliteBackend implements MaadBackend {
   countBrokenRefs(): number {
     const row = this.db.prepare(`
       SELECT COUNT(*) as cnt FROM relationships r
+      JOIN documents d ON d.doc_id = r.source_doc_id AND d.deleted = 0
       WHERE r.relation_type = 'ref'
         AND r.target_doc_id NOT IN (SELECT doc_id FROM documents WHERE deleted = 0)
     `).get() as { cnt: number };
     return row.cnt;
   }
 
-  getBrokenRefs(): Array<{ sourceDocId: string; sourceDocType: string; field: string; targetDocId: string }> {
+  getBrokenRefs(): Array<{ sourceDocId: string; sourceDocType: string; field: string; targetDocId: string; targetDeleted: boolean }> {
     const rows = this.db.prepare(`
       SELECT r.source_doc_id AS sourceDocId,
              d.doc_type      AS sourceDocType,
              r.field         AS field,
-             r.target_doc_id AS targetDocId
+             r.target_doc_id AS targetDocId,
+             CASE WHEN target.deleted = 1 THEN 1 ELSE 0 END AS targetDeleted
       FROM relationships r
       JOIN documents d
         ON r.source_doc_id = d.doc_id
        AND d.deleted = 0
+      LEFT JOIN documents target ON target.doc_id = r.target_doc_id
       WHERE r.relation_type = 'ref'
         AND r.target_doc_id NOT IN (SELECT doc_id FROM documents WHERE deleted = 0)
       ORDER BY r.source_doc_id, r.field, r.target_doc_id
-    `).all() as Array<{ sourceDocId: string; sourceDocType: string; field: string; targetDocId: string }>;
-    return rows;
+    `).all() as Array<{ sourceDocId: string; sourceDocType: string; field: string; targetDocId: string; targetDeleted: number }>;
+    return rows.map(row => ({ ...row, targetDeleted: row.targetDeleted === 1 }));
   }
 }
 
@@ -930,10 +946,28 @@ function applyFieldFilters(
   params: unknown[],
 ): void {
   const atomics: unknown[] = Array.isArray(raw) ? raw : [raw];
+  const positive: Array<{ sql: string; values: unknown[] }> = [];
   for (const c of atomics) {
+    const normalized = normalizeFilter(c);
+    if (normalized.op === 'neq') {
+      // Multi-valued fields use NONE semantics for neq. `EXISTS(value != x)`
+      // is wrong for [x, y] because y makes the document match even though x
+      // is present. Retain the historical requirement that the field exists.
+      conditions.push('d.doc_id IN (SELECT doc_id FROM field_index WHERE field_name = ?)');
+      params.push(field);
+      conditions.push('d.doc_id NOT IN (SELECT doc_id FROM field_index WHERE field_name = ? AND field_value = ?)');
+      params.push(field, String(normalized.value));
+      continue;
+    }
     const { sql, values } = buildFilterSQL(field, c);
-    conditions.push(`d.doc_id IN (SELECT doc_id FROM field_index WHERE ${sql})`);
-    params.push(...values);
+    positive.push({ sql, values });
+  }
+  if (positive.length > 0) {
+    // All operators on one field must be satisfied by the same indexed value.
+    // This matters for lists: [1, 20] must not satisfy gte 10 AND lte 5 by
+    // distributing the two predicates across different items.
+    conditions.push(`d.doc_id IN (SELECT doc_id FROM field_index WHERE ${positive.map(p => `(${p.sql})`).join(' AND ')})`);
+    params.push(...positive.flatMap(p => p.values));
   }
 }
 

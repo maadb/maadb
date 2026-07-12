@@ -250,10 +250,10 @@ function parseFieldDefinition(
 
   // Enum values
   let values: string[] | null = null;
-  if (fieldType === 'enum') {
+  if (fieldType === 'enum' || (fieldType === 'list' && fd['item_type'] === 'enum')) {
     const valuesRaw = fd['values'];
     if (!Array.isArray(valuesRaw) || valuesRaw.length === 0) {
-      errors.push(maadError('SCHEMA_INVALID', `Schema "${schemaRef}" field "${name}" is an enum but has no "values" array`));
+      errors.push(maadError('SCHEMA_INVALID', `Schema "${schemaRef}" field "${name}" has enum values but no "values" array`));
     } else {
       values = valuesRaw.map(String);
     }
@@ -265,6 +265,9 @@ function parseFieldDefinition(
     const itemTypeStr = fd['item_type'];
     if (typeof itemTypeStr === 'string' && VALID_FIELD_TYPES.includes(itemTypeStr as FieldType)) {
       itemType = itemTypeStr as FieldType;
+    } else if (itemTypeStr !== undefined) {
+      errors.push(maadError('SCHEMA_INVALID',
+        `Schema "${schemaRef}" field "${name}" has invalid item_type "${String(itemTypeStr)}". Valid: ${VALID_FIELD_TYPES.join(', ')}`));
     }
     // item_type is optional for lists — default to string items
   }

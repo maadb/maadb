@@ -969,7 +969,7 @@ export async function verifyIntegrity(
   // concern.
   if (enabled.has('broken_refs')) {
     const brokenRefRows = ctx.backend.getBrokenRefs();
-    const bySource = new Map<string, { docType: string; broken: Record<string, string[]> }>();
+    const bySource = new Map<string, { docType: string; broken: Record<string, string[]>; deleted: Record<string, string[]> }>();
     for (const r of brokenRefRows) {
       if (query.docType && r.sourceDocType !== (query.docType as string)) continue;
       if (query.docId && r.sourceDocId !== (query.docId as string)) continue;
@@ -977,12 +977,13 @@ export async function verifyIntegrity(
 
       let entry = bySource.get(r.sourceDocId);
       if (!entry) {
-        entry = { docType: r.sourceDocType, broken: {} };
+        entry = { docType: r.sourceDocType, broken: {}, deleted: {} };
         bySource.set(r.sourceDocId, entry);
       }
       (entry.broken[r.field] ??= []).push(r.targetDocId);
+      if (r.targetDeleted) (entry.deleted[r.field] ??= []).push(r.targetDocId);
     }
-    for (const [sourceDocId, { docType, broken }] of bySource) {
+    for (const [sourceDocId, { docType, broken, deleted }] of bySource) {
       findings.broken_refs++;
       unhealthyOnDisk.add(sourceDocId);
       if (verbose) {
@@ -991,6 +992,7 @@ export async function verifyIntegrity(
           docType,
           finding: 'broken_refs',
           actual: broken,
+          ...(Object.keys(deleted).length > 0 ? { deletedTargets: deleted } : {}),
         });
       }
     }

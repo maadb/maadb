@@ -172,6 +172,26 @@ describe('create publication is exclusive', () => {
     expect(settled.filter(result => result.status === 'rejected')).toHaveLength(1);
     expect(['first', 'second']).toContain(readFileSync(target, 'utf-8'));
   });
+
+  it('falls back to an exclusive direct write when hard links are unsupported', async () => {
+    const fs = await import('node:fs/promises');
+    const target = path.join(root, 'fallback.md');
+    const unsupported = Object.assign(new Error('links unsupported'), { code: 'ENOTSUP' });
+
+    await atomicCreate(target, 'fallback content', {
+      writeFile: fs.writeFile,
+      unlink: fs.unlink,
+      link: async () => { throw unsupported; },
+    });
+
+    expect(readFileSync(target, 'utf-8')).toBe('fallback content');
+    await expect(atomicCreate(target, 'must not replace', {
+      writeFile: fs.writeFile,
+      unlink: fs.unlink,
+      link: async () => { throw unsupported; },
+    })).rejects.toMatchObject({ code: 'EEXIST' });
+    expect(readFileSync(target, 'utf-8')).toBe('fallback content');
+  });
 });
 
 describe('realpath containment', () => {

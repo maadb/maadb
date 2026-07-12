@@ -408,6 +408,8 @@ export interface IntegrityFindingDetail {
   /** hash_drift: on-disk hash. schema_drift: stored schemaRef.
    *  broken_refs: { fieldName: [unresolved docIds] }. */
   actual?: string | Record<string, string[]>;
+  /** broken_refs only: targets that exist as soft-deleted tombstones, grouped by field. */
+  deletedTargets?: Record<string, string[]>;
 }
 
 export interface IntegrityResult {

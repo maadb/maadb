@@ -221,18 +221,10 @@ function validateField(
     case 'list':
       if (!Array.isArray(value)) {
         errors.push({ field: name, message: `Expected array of ${def.itemType ?? 'values'}, got ${typeof value}`, location: null });
-      } else if (def.itemType === 'ref' && def.target !== null) {
-        // Validate each item in a list-of-refs
-        const targetType = registry.types.get(def.target);
-        if (targetType) {
-          for (let i = 0; i < value.length; i++) {
-            const item = value[i];
-            if (typeof item !== 'string') {
-              errors.push({ field: `${name}[${i}]`, message: `Expected ref to ${def.target as string}, got ${typeof item}`, location: null });
-            } else if (!item.startsWith(targetType.idPrefix + '-')) {
-              errors.push({ field: `${name}[${i}]`, message: `Ref "${item}" must start with "${targetType.idPrefix}-" (references ${def.target as string})`, location: null });
-            }
-          }
+      } else {
+        const itemType = def.itemType ?? 'string';
+        for (let i = 0; i < value.length; i++) {
+          errors.push(...validateListItem(`${name}[${i}]`, value[i], itemType, def, registry));
         }
       }
       break;
@@ -247,6 +239,22 @@ function validateField(
   }
 
   return errors;
+}
+
+function validateListItem(
+  name: string,
+  value: unknown,
+  itemType: FieldDefinition['type'],
+  listDef: FieldDefinition,
+  registry: Registry,
+): ValidationError[] {
+  const itemDef: FieldDefinition = {
+    ...listDef,
+    name,
+    type: itemType,
+    itemType: null,
+  };
+  return validateField(name, value, itemDef, registry);
 }
 
 function describeFieldExpectation(def: FieldDefinition, registry: Registry): string {
