@@ -69,7 +69,7 @@ export function registerShutdownHooks(engine: MaadEngine | null, cleanup?: () =>
   // src/mcp/shutdown.ts with pool + rate limiter. Server.ts uses that path.
   const shutdown = async () => {
     logger.info('lifecycle', 'shutdown', 'Shutting down...');
-    if (engine) engine.close();
+    if (engine) await engine.close();
     if (cleanup) await cleanup();
     process.exit(0);
   };

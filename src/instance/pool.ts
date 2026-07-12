@@ -178,7 +178,10 @@ export class EnginePool {
     // 0.8.4 — serving path: guard against a false-empty index (lost/unbuilt
     // derived index over existing markdown) rather than silently serving [].
     const initResult = await engine.init(project.path, { guardEmptyIndex: true });
-    if (!initResult.ok) return initResult;
+    if (!initResult.ok) {
+      await engine.close();
+      return initResult;
+    }
     ensureProjectSkills(project.path);
     return ok(engine);
   }
@@ -189,7 +192,7 @@ export class EnginePool {
   async evict(name: string): Promise<void> {
     const engine = this.engines.get(name);
     if (!engine) return;
-    engine.close();
+    await engine.close();
     this.engines.delete(name);
     this.lastTouchedAt.delete(name);
     this.refcount.delete(name);
@@ -273,7 +276,7 @@ export class EnginePool {
     this.stopIdleSweeper();
     for (const [name, engine] of this.engines) {
       try {
-        engine.close();
+        await engine.close();
       } catch {
         // swallow — shutdown best-effort
       }

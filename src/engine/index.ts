@@ -193,6 +193,7 @@ export class MaadEngine {
   private semanticEnabled = false;
   private embeddingProvider: EmbeddingProvider | null = null;
   private semanticIndexer: SemanticIndexer | null = null;
+  private closePromise: Promise<void> | null = null;
   // Boot opts captured so reload() re-applies them (esp. an injected provider,
   // which env can't reconstruct).
   private bootOpts: {
@@ -329,14 +330,23 @@ export class MaadEngine {
     }
 
     const dbPath = path.join(backendDir, 'maad.db');
-    this.backend = new SqliteBackend(dbPath);
-    this.backend.init();
+    try {
+      this.backend = new SqliteBackend(dbPath, { readOnly: this._readOnly });
+      if (this._readOnly) this.backend.initReadOnly();
+      else this.backend.init();
+    } catch (error) {
+      try { this.backend?.close(); } catch { /* partially-open backend */ }
+      return singleErr(
+        this._readOnly ? 'READ_ONLY' : 'BACKEND_ERROR',
+        `Failed to open backend${this._readOnly ? ' in read-only mode' : ''}: ${(error as Error).message}`,
+      );
+    }
 
     // 0.8.0 — semantic retrieval bring-up. Off by default ⇒ no extension load,
     // no new tables, no worker (the engine behaves exactly as pre-0.8.0). When
     // on, load the vector/lexical index and, if a provider is available, start
     // the async embed worker (crash-resume drains any leftover queue).
-    this.semanticEnabled = opts?.semantic ?? isSemanticEnabled();
+    this.semanticEnabled = !this._readOnly && (opts?.semantic ?? isSemanticEnabled());
     if (this.semanticEnabled) {
       this.embeddingProvider = resolveEmbeddingProvider({ injected: opts?.embeddingProvider });
       this.backend.initSemantic({
@@ -355,13 +365,14 @@ export class MaadEngine {
 
     // Operation journal — tracks pending writes for crash recovery
     this.journal = new OperationJournal(backendDir);
-    this.startupRecovery = this.journal.reconcile();
+    this.startupRecovery = this._readOnly ? [] : this.journal.reconcile();
 
     this.gitLayer = new GitLayer(this.projectRoot);
     if (await this.gitLayer.isRepo()) {
       // Git is available — check for stale index.lock from a crashed prior process.
-      const lockResult = this.gitLayer.recoverStaleIndexLock();
+      const lockResult = this._readOnly ? { action: 'none' as const } : this.gitLayer.recoverStaleIndexLock();
       if (lockResult.action === 'conflict') {
+        await this.disposeResources();
         return singleErr(
           'GIT_ERROR',
           `Git index.lock exists and is recent (mtime ${lockResult.mtime.toISOString()}); refusing to start. Another engine process may be running on this project.`,
@@ -403,6 +414,7 @@ export class MaadEngine {
       const onDiskCount = await this.probeRegisteredMarkdownCount();
       if (onDiskCount > 0) {
         if (this._readOnly) {
+          await this.disposeResources();
           return singleErr(
             'INDEX_EMPTY',
             `Index is empty but ${onDiskCount} markdown file(s) exist under registered paths — the derived index was not built (fresh clone, restore, or wiped _backend). The engine is read-only and cannot rebuild it; run 'maad reindex' against this project.`,
@@ -411,6 +423,7 @@ export class MaadEngine {
           );
         }
         if (!bootReindexEnabled()) {
+          await this.disposeResources();
           return singleErr(
             'INDEX_EMPTY',
             `Index is empty but ${onDiskCount} markdown file(s) exist under registered paths — the derived index was not built (fresh clone, restore, or wiped _backend). Set MAAD_BOOT_REINDEX=1 to rebuild it at boot, or run 'maad reindex'.`,
@@ -441,10 +454,29 @@ export class MaadEngine {
 
   async reload(): Promise<Result<void>> {
     return this.runExclusive('reload', async () => {
-      if (this.semanticIndexer) { await this.semanticIndexer.stop(); this.semanticIndexer = null; }
-      if (this.backend) this.backend.close();
-      this.initialized = false;
-      return this.init(this.projectRoot, this.bootOpts);
+      const replacement = new MaadEngine();
+      const result = await replacement.init(this.projectRoot, this.bootOpts);
+      if (!result.ok) {
+        await replacement.close();
+        return result;
+      }
+
+      await this.disposeResources();
+      this.registry = replacement.registry;
+      this.schemaStore = replacement.schemaStore;
+      this.backend = replacement.backend;
+      this.gitLayer = replacement.gitLayer;
+      this.journal = replacement.journal;
+      this.startupRecovery = replacement.startupRecovery;
+      this.semanticEnabled = replacement.semanticEnabled;
+      this.embeddingProvider = replacement.embeddingProvider;
+      this.semanticIndexer = replacement.semanticIndexer;
+      this.initialized = true;
+      // Ownership moved to this instance; prevent replacement.close() from
+      // touching the adopted backend or worker.
+      replacement.semanticIndexer = null;
+      replacement.initialized = false;
+      return ok(undefined);
     });
   }
 
@@ -638,11 +670,20 @@ export class MaadEngine {
     return this.startupRecovery;
   }
 
-  close(): void {
-    // Signal the worker to stop (sets its stopped flag synchronously); any
-    // in-flight batch fails soft against the closing DB.
-    if (this.semanticIndexer) { void this.semanticIndexer.stop(); this.semanticIndexer = null; }
-    if (this.backend) this.backend.close();
+  close(): Promise<void> {
+    if (this.closePromise) return this.closePromise;
+    this.closePromise = this.disposeResources();
+    return this.closePromise;
+  }
+
+  private async disposeResources(): Promise<void> {
+    this.initialized = false;
+    const indexer = this.semanticIndexer;
+    this.semanticIndexer = null;
+    if (indexer) await indexer.stop();
+    if (this.backend) {
+      try { this.backend.close(); } catch { /* idempotent/best-effort teardown */ }
+    }
   }
 
   private ctx(): EngineContext {
@@ -694,6 +735,7 @@ export class MaadEngine {
   // first; these inner wraps are reentrant no-ops. Direct callers (CLI,
   // tests) get serialized via the first (outer) acquire.
   async indexAll(opts?: { force?: boolean }) {
+    if (this._readOnly) return singleErr('READ_ONLY', 'Engine is in read-only mode');
     return this.kickIndexer(await this.runExclusive('indexAll', () => indexing.indexAll(this.ctx(), opts)));
   }
   async indexFile(absolutePath: FilePath) {
@@ -772,9 +814,15 @@ export class MaadEngine {
   async verifyField(id: DocId, field: string, expected: unknown) { return reads.verifyField(this.ctx(), id, field, expected); }
   verifyCount(dt: DocType, expectedCount: number, filters?: Record<string, import('../types.js').FilterCondition>) { return reads.verifyCount(this.ctx(), dt, expectedCount, filters); }
   async verifyIntegrity(query?: import('./types.js').IntegrityQuery) { return reads.verifyIntegrity(this.ctx(), query); }
-  async backupCreate(opts?: import('./types.js').CreateBackupOptions) { return backup.createBackup(this.ctx(), opts); }
+  async backupCreate(opts?: import('./types.js').CreateBackupOptions) {
+    if (this._readOnly) return singleErr('READ_ONLY', 'Engine is in read-only mode');
+    return backup.createBackup(this.ctx(), opts);
+  }
   async backupList(opts?: import('./types.js').ListBackupsOptions) { return backup.listBackups(this.ctx(), opts); }
-  async backupDelete(tag: string) { return backup.deleteBackup(this.ctx(), tag); }
+  async backupDelete(tag: string) {
+    if (this._readOnly) return singleErr('READ_ONLY', 'Engine is in read-only mode');
+    return backup.deleteBackup(this.ctx(), tag);
+  }
   changesSince(query: import('./types.js').ChangesSinceQuery) { return reads.changesSince(this.ctx(), query); }
   // 0.8.0 — semantic retrieval (async: embeds the query for semantic/hybrid).
   async semanticSearch(query: import('./semantic/types.js').SemanticSearchQuery) { return semanticSearchOps.semanticSearch(this.ctx(), query); }
