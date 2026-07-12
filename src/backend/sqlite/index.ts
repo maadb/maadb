@@ -4,6 +4,7 @@
 // ============================================================================
 
 import Database from 'better-sqlite3';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import type { Database as DatabaseType } from 'better-sqlite3';
 import { SCHEMA_SQL } from './schema.js';
 import type { MaadBackend } from '../adapter.js';
@@ -42,8 +43,38 @@ export class SqliteBackend implements MaadBackend {
   // out from under it, instead of throwing a raw "database is not open" error.
   private closed = false;
 
-  constructor(dbPath: string) {
-    this.db = new Database(dbPath);
+  constructor(dbPath: string, opts?: { readOnly?: boolean }) {
+    // better-sqlite3's filesystem readonly open still participates in WAL and
+    // can create -shm/-wal companions. Deserialize a byte snapshot in memory
+    // instead: representative reads touch no project file or SQLite page.
+    if (opts?.readOnly) {
+      const walPath = `${dbPath}-wal`;
+      if (existsSync(walPath) && statSync(walPath).size > 0) {
+        throw new Error('Database has an uncheckpointed WAL; open it read-write once to recover before read-only use');
+      }
+      const snapshot = Buffer.from(readFileSync(dbPath));
+      if (snapshot.length < 20 || snapshot.subarray(0, 16).toString('ascii') !== 'SQLite format 3\0') {
+        throw new Error('Backend is not a valid SQLite database');
+      }
+      // A clean WAL database still carries WAL read/write version bytes in its
+      // header, which makes a standalone buffer try to open filesystem WAL
+      // companions. Modify only the private snapshot header to rollback mode.
+      snapshot[18] = 1;
+      snapshot[19] = 1;
+      this.db = new Database(snapshot);
+    } else {
+      this.db = new Database(dbPath);
+    }
+  }
+
+  /** Validate an existing database without executing pragmas, DDL, or migrations. */
+  initReadOnly(): void {
+    const required = new Set(['doc_id', 'doc_type', 'schema_ref', 'file_path', 'file_hash', 'version', 'deleted', 'indexed_at', 'updated_at', 'created_at', 'valid', 'partial']);
+    const cols = this.db.pragma('table_info(documents)') as Array<{ name: string }>;
+    for (const col of cols) required.delete(col.name);
+    if (required.size > 0) {
+      throw new Error(`Database requires migration before read-only use; missing columns: ${[...required].join(', ')}`);
+    }
   }
 
   init(): void {

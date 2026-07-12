@@ -1,10 +1,21 @@
 ---
 enabled: true
-current: 0.10.0
+current: 0.11.0
 dev_flow: formal
 ---
 
 # Version History
+
+## 0.11.0 — 2026-07-12
+
+Transactional engine lifecycle and literal zero-write read-only operation.
+
+- **Transactional reload.** Reload initializes a complete replacement engine before swapping resources. A failed replacement is closed and the prior ready engine remains usable instead of being torn down into a half-live state.
+- **Awaitable shutdown.** `close()` is idempotent and awaitable. Semantic workers stop before SQLite closes, and project-pool eviction, pool shutdown, and MCP shutdown now await teardown. Failed pool initialization also closes every acquired resource before returning the error.
+- **Zero-write read-only mode.** Read-only initialization validates an existing database from a private in-memory snapshot, runs no SQLite pragmas, DDL, migrations, journal reconciliation, Git lock recovery, or semantic worker, and creates no WAL/SHM companions. A nonempty WAL fails with an actionable recovery message rather than mutating it.
+- **Complete mutation guards.** Direct indexing, backup creation/deletion, document writes, bulk operations, repairs, and cleanup return `READ_ONLY`. Integrity verification remains available but no longer writes advisory metadata, while backup listing and all normal read surfaces remain side-effect free.
+
+1130 tests passing (+3). No dependency changes or persistent database migrations. Behavior changes: `MaadEngine.close()` now returns `Promise<void>`; callers that require completed teardown should await it. Read-only mode now fails closed when the database is missing, structurally stale, or has an uncheckpointed WAL.
 
 ## 0.10.0 — 2026-07-12
 

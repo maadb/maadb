@@ -318,7 +318,7 @@ describe('boot false-empty index guard (0.8.4)', () => {
     const r = await engine.init(TEMP_ROOT, { guardEmptyIndex: true, readOnly: true });
     expect(r.ok).toBe(false);
     if (!r.ok) {
-      expect(r.errors[0].code).toBe('INDEX_EMPTY');
+      expect(r.errors[0].code).toBe('READ_ONLY');
       expect(r.errors[0].message).toContain('read-only');
     }
   });

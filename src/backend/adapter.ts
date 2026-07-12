@@ -22,6 +22,7 @@ import type { SemanticIndex } from '../engine/semantic/types.js';
 export interface MaadBackend {
   // Lifecycle
   init(): void;
+  initReadOnly(): void;
   close(): void;
 
   // Write operations (called during materialize stage)
