@@ -3,9 +3,9 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/node-%E2%89%A524-brightgreen.svg)](package.json)
 [![TypeScript](https://img.shields.io/badge/typescript-strict-blue.svg)](tsconfig.json)
-[![Tests](https://img.shields.io/badge/tests-993%20passing-brightgreen.svg)](tests)
+[![Tests](https://img.shields.io/badge/tests-1133%20passing-brightgreen.svg)](tests)
 [![npm](https://img.shields.io/npm/v/@maadb/core.svg)](https://www.npmjs.com/package/@maadb/core)
-[![Version](https://img.shields.io/badge/version-0.7.17-purple.svg)](Version.md)
+[![Version](https://img.shields.io/badge/version-0.11.1-purple.svg)](Version.md)
 
 > **Markdown is the database. The engine makes it queryable.**
 
@@ -367,18 +367,17 @@ The vector store is `sqlite-vec` (in the same SQLite file); the lexical leg is F
 
 ## Current state
 
-**Current:** v0.7.17 — read-path performance + validation correctness: covering indexes and a sort-index-driven query path keep filtered + sorted queries fast as the corpus grows, and per-document validity makes `maad_summary` / `maad_validate` an uncapped SQL count instead of a per-call file scan.
+**Current:** v0.11.1 — pool-mode recovery for false-empty indexes: `maad_reindex` is the one MCP tool allowed to initialize a guarded project so it can rebuild the index, while every other tool keeps failing closed with `INDEX_EMPTY` until recovery succeeds.
 
 Recent shipped scope:
-- **0.7.16** — Dependency security wave: simple-git 3.36.0 (high-severity advisory) with engine-side env hardening, js-yaml 4.2.0 version-independent serializer quoting, better-sqlite3 12.10.0; zero `npm audit` findings
-- **0.7.15** — `maad version` command, CI on every push/PR (Ubuntu + Windows), LF line-ending enforcement, MAADb brand sweep, packaging hardening
-- **0.7.14** — Correctness patch from a full engine audit: CRLF/BOM-tolerant writes, merged git child environment, numeric sort ordering, composite filters on join/verify, pagination guards, pathspec-scoped audit commits
-- **0.7.13** — Per-document index-time memory guards (annotation cap + byte backstop) so one pathological document can't exhaust the engine process
-- **0.7.12** — `maad_query` sort contract (`UNSUPPORTED_SORT_FIELD` instead of silent NULL ordering), engine-stamped `createdAt`, file-path canonicalization
-- **0.7.11** — `maad_search` rejects unknown primitives up front (`INVALID_PRIMITIVE`)
-- **0.7.10** — Integrity & cleanup: `maad_verify mode: 'integrity'`, `maad_backup` snapshots, destructive cleanup primitives under the confirm contract, memory-pressure observability, pino write-body redaction
-- **0.7.5–0.7.8** — Unix socket transport, schema-cache coherence, write-path security hardening, Node 24 baseline
-- **0.7.0–0.7.4** — Scoped auth & identity, agent-first aggregates, reindex schema-change detection
+- **0.11.0** — Transactional engine lifecycle: reload swaps in a fully-initialized replacement or keeps the prior engine, `close()` is awaitable and idempotent, and read-only mode is a literal zero-write contract (no pragmas, migrations, WAL, journal, or git mutation)
+- **0.10.0** — Data-correctness wave: type-faithful YAML list round-trips with full `item_type` validation, soft-delete tombstone isolation across every read surface, collection-correct list-field predicates, portable exclusive creation (`wx` fallback where hard links are unsupported)
+- **0.9.0** — Write-identity + filesystem-boundary enforcement: caller identity tampering fails `FRONTMATTER_GUARD`, symlink/path escapes fail closed via realpath containment, creation is exclusive and race-safe
+- **0.8.4** — Boot false-empty index guard: the engine refuses to serve an empty index over existing markdown (`INDEX_EMPTY`; `MAAD_BOOT_REINDEX=1` rebuilds at boot)
+- **0.8.1–0.8.3** — Index-integrity pass (stale-row sweep guard, docId-collision guard, persisted partial state), per-block re-embed gating, CLI fail-closed exit codes for `maad validate` / `maad reindex`
+- **0.8.0** — Semantic Retrieval: `maad_semantic_search` with an exact/semantic/hybrid mode dial (FTS5 + `sqlite-vec`), opt-in and fully additive
+- **0.7.18** — Heavy-op load-shedding self-defense: admission gate, single-flight coalescing, concurrency cap, and circuit breaker behind the retryable `OVERLOADED` code
+- **0.7.x** — Scoped auth & identity, covering-index read path, integrity & cleanup primitives, transport and write-path hardening
 
 See [Version.md](Version.md) for the full release history and forward plan.
 
@@ -386,7 +385,7 @@ See [Version.md](Version.md) for the full release history and forward plan.
 
 - TypeScript strict, Node.js 24+ (current Active LTS)
 - 6 production dependencies: `better-sqlite3`, `gray-matter`, `js-yaml`, `simple-git`, `@modelcontextprotocol/sdk`, `pino`. Plus one **optional** dependency `sqlite-vec` (semantic retrieval) — lazily loaded only when `MAAD_SEMANTIC_ENABLE` is on; absent or failed to load ⇒ semantic disabled, engine unaffected
-- 1063 tests, Vitest — run on every push/PR across Ubuntu and Windows
+- 1133 tests, Vitest — run on every push/PR across Ubuntu and Windows
 - MIT license, pre-1.0, actively developed
 
 ## License
