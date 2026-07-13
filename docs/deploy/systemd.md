@@ -72,6 +72,11 @@ MAAD_INSTANCE=/opt/maad/instance.yaml
 # Optional — defaults are sensible, tune for your environment
 MAAD_SESSION_IDLE_MS=1800000
 MAAD_SESSION_MAX=128
+# Browser origins allowed on /mcp (MCP Origin validation, DNS-rebinding
+# defense). Leave unset unless a web page calls /mcp directly — non-browser
+# clients send no Origin header and always pass. Comma-separated exact
+# origins, no wildcards, e.g. https://app.example.com
+#MAAD_HTTP_ALLOWED_ORIGINS=
 MAAD_HTTP_MAX_BODY=1048576
 MAAD_HTTP_HEADERS_TIMEOUT_MS=10000
 MAAD_HTTP_REQUEST_TIMEOUT_MS=60000

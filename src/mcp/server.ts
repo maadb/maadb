@@ -56,6 +56,12 @@ export interface HttpServeOptions {
   idleMs: number;
   /** Maximum simultaneously retained HTTP sessions. Oldest activity is evicted at capacity. */
   maxSessions?: number | undefined;
+  /**
+   * 0.12.0 — Exact browser origins allowed on /mcp (MCP Origin validation).
+   * Empty/omitted denies any request that presents an Origin header; requests
+   * without one (non-browser MCP clients) always pass. No wildcards.
+   */
+  allowedOrigins?: readonly string[] | undefined;
   authToken?: string | undefined;
   /**
    * 0.7.5 (fup-2026-148) — Unix domain socket path. When set with
@@ -263,6 +269,7 @@ export async function startServer(opts: ServeOptions): Promise<void> {
       trustProxy: opts.http.trustProxy,
       idleMs: opts.http.idleMs,
       maxSessions: opts.http.maxSessions,
+      allowedOrigins: opts.http.allowedOrigins,
       tokens: tokens!,
       sessions: ctx.sessions,
       instance,

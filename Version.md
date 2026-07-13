@@ -569,6 +569,8 @@ Initial engine build. Parser, registry, schema, extractor (11 primitives), SQLit
 
 ## Planned
 
+- **0.12.0 (next minor)** — folds in HTTP `/mcp` Origin validation (MCP Streamable HTTP conformance, DNS-rebinding defense; merged unreleased) alongside the concurrency/durability work.
+
 Cascade renumbered after 0.7.13–0.7.16 (index-memory guards, audit correctness patch, housekeeping + CI, dependency security wave) consumed the planned slots. 0.8.0 shipped as Semantic Retrieval (the priority line; FTS5 moved up into it); the prior hygiene/imports → remote-hardening → query-power track sits +0.5 below it. (The 0.7.17/0.7.18 bullets below predate the shipped 0.7.17/0.7.18 — read-path performance + heavy-op self-defense — and describe displaced scope still pending a re-slot.)
 
 - **0.7.17** — Durability & hot-path (from the 2026-06-09 engine audit). fsync'd atomic writes (unique temp suffix, failure cleanup), `maad_summary` rework (index-time validation state instead of full-corpus sync scan), journal reconcile that repairs `file_written` divergence and survives failed commits, prepared-statement caching, `documents(updated_at, doc_id)` index, pathspec-limited per-write `git status`, engine-owned `git gc --auto` hook, `indexAll` mtime+size precheck.

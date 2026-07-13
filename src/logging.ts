@@ -189,6 +189,21 @@ export function logPinRejected(fields: PinRejectedFields): void {
   opsLog.info(fields, 'pin_rejected');
 }
 
+// ---- Origin rejection event (ops) ------------------------------------------
+// 0.12.0 — emitted when a request presents an Origin header that fails the
+// /mcp allowlist check (MCP Streamable HTTP DNS-rebinding defense). A burst
+// of these from a workstation address is the rebinding-attack signature;
+// a steady stream from one origin is a misconfigured browser client.
+
+export interface OriginRejectedFields {
+  remote_addr: string;
+  origin: string | null;
+}
+
+export function logOriginRejected(fields: OriginRejectedFields): void {
+  opsLog.info(fields, 'origin_rejected');
+}
+
 // ---- Validation warning event (ops) ---------------------------------------
 // 0.6.7 — one `warn`-level line per ValidationWarning emitted on a write.
 // Operators see patterns across agents without having to scrape response
