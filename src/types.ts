@@ -261,6 +261,12 @@ export interface FieldDefinition {
   storePrecision: import('./schema/precision.js').Precision | null;
   onCoarser: 'warn' | 'error' | null;
   displayPrecision: import('./schema/precision.js').Precision | null;
+  // 0.12.0 structural constraints — only meaningful on `type: string` fields.
+  // Null when unset (pre-constraint behavior). Lengths measure Unicode code
+  // points; values are validated as stored, no normalization.
+  maxLength: number | null;
+  softMaxLength: number | null;
+  multiline: boolean | null;
 }
 
 export interface TemplateHeading {
@@ -353,6 +359,13 @@ export interface ValidationResult {
 export interface ValidationError {
   field: string;
   message: string;
+  /**
+   * 0.12.0 — stable machine-readable code for structural-constraint failures
+   * (e.g. FIELD_MAX_LENGTH_EXCEEDED, FIELD_MULTILINE_NOT_ALLOWED). Additive:
+   * absent on pre-constraint error shapes; clients reading only `message`
+   * are unaffected.
+   */
+  code?: string;
   location: SourceLocation | null;
 }
 

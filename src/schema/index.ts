@@ -1,2 +1,2 @@
 export { loadSchemas } from './loader.js';
-export { validateFrontmatter } from './validator.js';
+export { validateFrontmatter, codePointLength } from './validator.js';

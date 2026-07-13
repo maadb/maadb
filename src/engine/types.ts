@@ -500,4 +500,19 @@ export interface ValidationReport {
     declared: string;
     actual: string;
   }>;
+  /**
+   * 0.12.0 — populated only when the caller passes `includeConstraints: true`.
+   * Informational; never counted as invalid. Each entry reports a string
+   * field whose stored value would fail (or warn under) the schema's
+   * structural constraints if written today. This is the preflight scan for
+   * introducing max_length / soft_max_length / multiline on existing data.
+   */
+  constraintViolations?: Array<{
+    docId: DocId;
+    field: string;
+    code: string;
+    actual: number | null;
+    limit: number | null;
+    severity: 'error' | 'warning';
+  }>;
 }

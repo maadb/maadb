@@ -213,6 +213,18 @@ function parseSchemaDefinition(
   });
 }
 
+// 0.12.0 capability gate — the complete field-definition key vocabulary.
+// Unknown keys FAIL schema activation (SCHEMA_INVALID) instead of being
+// silently ignored: a schema requesting a constraint this engine doesn't
+// implement must refuse to load rather than run with unenforced policy.
+// Every future constraint key added here is automatically version-gated —
+// engines older than the key (but carrying this gate) reject it by name.
+const KNOWN_FIELD_KEYS: ReadonlySet<string> = new Set([
+  'type', 'index', 'role', 'format', 'target', 'values', 'item_type', 'default',
+  'store_precision', 'on_coarser', 'display_precision',
+  'max_length', 'soft_max_length', 'multiline',
+]);
+
 function parseFieldDefinition(
   name: string,
   fd: Record<string, unknown>,
@@ -220,6 +232,15 @@ function parseFieldDefinition(
   registry: Registry,
 ): Result<FieldDefinition> {
   const errors: MaadError[] = [];
+
+  for (const key of Object.keys(fd)) {
+    if (!KNOWN_FIELD_KEYS.has(key)) {
+      errors.push(maadError('SCHEMA_INVALID',
+        `Schema "${schemaRef}" field "${name}" declares unknown key "${key}". ` +
+        `This engine cannot enforce it, so the schema is refused rather than loaded with unenforced policy. ` +
+        `Known keys: ${[...KNOWN_FIELD_KEYS].join(', ')}. If "${key}" is from a newer MAADb, upgrade this engine before activating the schema.`));
+    }
+  }
 
   const typeStr = fd['type'];
   if (typeof typeStr !== 'string' || !VALID_FIELD_TYPES.includes(typeStr as FieldType)) {
@@ -337,6 +358,50 @@ function parseFieldDefinition(
     }
   }
 
+  // --- 0.12.0 structural constraints (only meaningful on string fields) ----
+  let maxLength: number | null = null;
+  let softMaxLength: number | null = null;
+  let multiline: boolean | null = null;
+
+  if (fieldType === 'string') {
+    const parseLimit = (key: 'max_length' | 'soft_max_length'): number | null => {
+      const raw = fd[key];
+      if (raw === undefined) return null;
+      if (typeof raw !== 'number' || !Number.isInteger(raw) || raw < 1) {
+        errors.push(maadError('SCHEMA_INVALID',
+          `Schema "${schemaRef}" field "${name}" has invalid ${key} "${String(raw)}" — must be a positive integer (Unicode code points)`));
+        return null;
+      }
+      return raw;
+    };
+    maxLength = parseLimit('max_length');
+    softMaxLength = parseLimit('soft_max_length');
+
+    const mlRaw = fd['multiline'];
+    if (mlRaw !== undefined) {
+      if (typeof mlRaw !== 'boolean') {
+        errors.push(maadError('SCHEMA_INVALID',
+          `Schema "${schemaRef}" field "${name}" has invalid multiline "${String(mlRaw)}" — must be true or false`));
+      } else {
+        multiline = mlRaw;
+      }
+    }
+
+    if (maxLength !== null && softMaxLength !== null && softMaxLength > maxLength) {
+      errors.push(maadError('SCHEMA_INVALID',
+        `Schema "${schemaRef}" field "${name}" has soft_max_length ${softMaxLength} > max_length ${maxLength} — the advisory limit must not exceed the hard limit`));
+    }
+  } else {
+    // Constraint keys on non-string fields are configuration errors — same
+    // posture as precision keys on non-date fields.
+    for (const k of ['max_length', 'soft_max_length', 'multiline']) {
+      if (fd[k] !== undefined) {
+        errors.push(maadError('SCHEMA_INVALID',
+          `Schema "${schemaRef}" field "${name}" of type "${fieldType}" cannot declare "${k}" — only valid on string fields`));
+      }
+    }
+  }
+
   if (errors.length > 0) return err(errors);
 
   return ok({
@@ -352,6 +417,9 @@ function parseFieldDefinition(
     storePrecision,
     onCoarser,
     displayPrecision,
+    maxLength,
+    softMaxLength,
+    multiline,
   });
 }
 
