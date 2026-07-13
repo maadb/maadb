@@ -122,6 +122,7 @@ services:
       MAAD_HTTP_PORT: 7733
       MAAD_INSTANCE: /data/instance.yaml
       MAAD_SESSION_IDLE_MS: 1800000
+      MAAD_SESSION_MAX: 128
       MAAD_HTTP_MAX_BODY: 1048576
       MAAD_SHUTDOWN_TIMEOUT_MS: 10000
       MAAD_TRUST_PROXY: "true"     # trust X-Forwarded-For from traefik

@@ -52,6 +52,8 @@ export interface HttpTransportOptions {
    * activity != client activity.
    */
   idleMs: number;
+  /** Hard bound on retained per-session transports and MCP server graphs. */
+  maxSessions?: number | undefined;
   /**
    * 0.7.0 — Token registry for scoped auth. Production HTTP mode requires a
    * non-null store with ≥1 active token (server.ts enforces via
@@ -119,6 +121,16 @@ function applyResponseHardening(res: ServerResponse, kind: 'json' | 'sse'): void
 
 export async function startHttpTransport(opts: HttpTransportOptions): Promise<HttpTransportHandle> {
   const entries = new Map<string, TransportEntry>();
+  const maxSessions = Math.max(1, opts.maxSessions ?? 128);
+
+  const discardEntry = (sid: string, reason: 'idle' | 'capacity' | 'shutdown'): TransportEntry | undefined => {
+    const entry = entries.get(sid);
+    if (!entry) return undefined;
+    entries.delete(sid);
+    unregisterNotifier(sid);
+    opts.sessions.destroy(sid, reason);
+    return entry;
+  };
   // Fire `pin_ignored_legacy` at most once per process so operators see the
   // signal without getting log spam when a legacy deployment is being probed.
   let legacyPinWarned = false;
@@ -252,6 +264,20 @@ export async function startHttpTransport(opts: HttpTransportOptions): Promise<Ht
         sessionIdGenerator: () => randomBytes(16).toString('base64url'),
         onsessioninitialized: (sid: string) => {
           const now = Date.now();
+          if (entries.size >= maxSessions) {
+            let oldestSid: string | undefined;
+            let oldestActivity = Number.POSITIVE_INFINITY;
+            for (const [candidateSid, candidate] of entries) {
+              if (candidate.lastActivityAt < oldestActivity) {
+                oldestSid = candidateSid;
+                oldestActivity = candidate.lastActivityAt;
+              }
+            }
+            if (oldestSid !== undefined) {
+              const oldest = discardEntry(oldestSid, 'capacity');
+              if (oldest) void oldest.transport.close().catch(() => { /* best-effort */ });
+            }
+          }
           entries.set(sid, { transport, createdAt: now, lastActivityAt: now, remoteAddr });
           // Register protocol-level state so registry.destroy(sid) has
           // something to destroy — otherwise the fan-out chain (rate-limit
@@ -392,8 +418,7 @@ export async function startHttpTransport(opts: HttpTransportOptions): Promise<Ht
         // Mark the registry first so the fan-out reason reflects WHY it
         // closed. The transport.onclose below would otherwise fire with
         // reason=transport. Destroy is idempotent so calling it twice is safe.
-        opts.sessions.destroy(sid, 'idle');
-        entries.delete(sid);
+        discardEntry(sid, 'idle');
         // Close the SSE transport — frees sockets and triggers SDK cleanup.
         void entry.transport.close().catch(() => { /* best-effort */ });
         swept += 1;
@@ -412,8 +437,8 @@ export async function startHttpTransport(opts: HttpTransportOptions): Promise<Ht
       clearInterval(idleSweeper);
       await new Promise<void>((resolve) => httpServer.close(() => resolve()));
       for (const [sid, entry] of entries) {
+        discardEntry(sid, 'shutdown');
         try { await entry.transport.close(); } catch { /* best-effort */ }
-        opts.sessions.destroy(sid, 'shutdown');
       }
       entries.clear();
       // 0.7.5 — UDS cleanup. Best-effort: if a fast SIGKILL beat us here,

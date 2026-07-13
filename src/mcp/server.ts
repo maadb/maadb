@@ -54,6 +54,8 @@ export interface HttpServeOptions {
   keepAliveTimeoutMs: number;
   trustProxy: boolean;
   idleMs: number;
+  /** Maximum simultaneously retained HTTP sessions. Oldest activity is evicted at capacity. */
+  maxSessions?: number | undefined;
   authToken?: string | undefined;
   /**
    * 0.7.5 (fup-2026-148) — Unix domain socket path. When set with
@@ -260,6 +262,7 @@ export async function startServer(opts: ServeOptions): Promise<void> {
       keepAliveTimeoutMs: opts.http.keepAliveTimeoutMs,
       trustProxy: opts.http.trustProxy,
       idleMs: opts.http.idleMs,
+      maxSessions: opts.http.maxSessions,
       tokens: tokens!,
       sessions: ctx.sessions,
       instance,

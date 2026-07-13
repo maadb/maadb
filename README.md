@@ -286,6 +286,13 @@ node dist/cli.js --instance /path/to/instance.yaml serve \
   --transport http --http-host 127.0.0.1 --http-port 7733
 ```
 
+HTTP sessions retain their MCP tool registry until they close. To keep clients
+that create a fresh session per call from exhausting the process heap, MAADb
+retains at most 128 sessions by default and evicts the least recently active
+session when the limit is reached. Tune the bound with `MAAD_SESSION_MAX` or
+`--session-max`; evicted session IDs receive `SESSION_NOT_FOUND` and must
+initialize again.
+
 Hot-reload tokens + instance config on edits: `sudo systemctl reload maad` (or `docker compose kill -s SIGHUP maad`). Rotate tokens via `maad auth rotate-token --id=tok-<id>`; revoke via `maad auth revoke-token --id=tok-<id>`. Full auth primitives: [`docs/archive/0.7.0-scoped-auth.md`](docs/archive/0.7.0-scoped-auth.md).
 
 Deployment guides:
