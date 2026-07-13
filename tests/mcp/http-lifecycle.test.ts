@@ -249,6 +249,64 @@ describe('R3 HTTP transport — close fan-out', () => {
   });
 });
 
+describe('HTTP transport session-cap soak', () => {
+  let handle: HttpTransportHandle | undefined;
+
+  afterEach(async () => {
+    if (handle) await handle.close();
+  });
+
+  it('bounds retained sessions during sustained initialize churn', async () => {
+    const sessions = makeSessions();
+    const events: Array<{ sid: string; reason: SessionCloseReason }> = [];
+    sessions.registerCloseHandler((sid, reason) => events.push({ sid, reason }));
+
+    const maxSessions = 16;
+    const totalSessions = 512;
+    handle = await startHttpTransport({
+      host: '127.0.0.1', port: 0, maxBodyBytes: 4096,
+      headersTimeoutMs: 10_000, requestTimeoutMs: 60_000, keepAliveTimeoutMs: 5_000,
+      trustProxy: false, idleMs: 1_800_000, maxSessions, sessions,
+      instance: { name: 'test', source: 'file', projects: [] },
+      serverFactory: makeFactory(),
+    });
+    const addr = handle.httpServer.address();
+    if (typeof addr !== 'object' || addr === null) throw new Error('no address');
+
+    let firstSid = '';
+    let latestSid = '';
+    for (let i = 0; i < totalSessions; i++) {
+      const res = await fetch(`http://127.0.0.1:${addr.port}/mcp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json, text/event-stream' },
+        body: JSON.stringify({ ...INIT_BODY, id: i + 1 }),
+      });
+      latestSid = res.headers.get('mcp-session-id')!;
+      if (i === 0) firstSid = latestSid;
+      await res.text();
+      expect(handle.activeSessionCount()).toBeLessThanOrEqual(maxSessions);
+      expect(sessions.size()).toBeLessThanOrEqual(maxSessions);
+    }
+
+    expect(events.filter(event => event.reason === 'capacity')).toHaveLength(totalSessions - maxSessions);
+    const evicted = await fetch(`http://127.0.0.1:${addr.port}/mcp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json, text/event-stream', 'mcp-session-id': firstSid },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 9001, method: 'tools/list' }),
+    });
+    expect(evicted.status).toBe(404);
+    await evicted.text();
+
+    const retained = await fetch(`http://127.0.0.1:${addr.port}/mcp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json, text/event-stream', 'mcp-session-id': latestSid },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 9002, method: 'tools/list' }),
+    });
+    expect(retained.status).toBe(200);
+    await retained.text();
+  }, 30_000);
+});
+
 // ---- Idle sweeper integration ----------------------------------------------
 
 describe('R3 HTTP transport — idle sweeper', () => {

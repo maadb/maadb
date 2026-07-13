@@ -1,10 +1,18 @@
 ---
 enabled: true
-current: 0.11.1
+current: 0.11.2
 dev_flow: formal
 ---
 
 # Version History
+
+## 0.11.2 — 2026-07-12
+
+Bounded HTTP and Unix-socket session retention prevents clients that repeatedly initialize fresh sessions from exhausting the process heap. The transport now retains at most 128 sessions by default and evicts the least recently active session at capacity, closing its transport and clearing notifier, registry, rate-limit, and telemetry state.
+
+Operators can tune the bound with `MAAD_SESSION_MAX` or `--session-max`. A 512-session churn soak verifies that transport and protocol state remain bounded, evicted IDs are refused, and the newest retained session remains usable.
+
+1134 tests passing (+1). No dependency, schema, or database changes. Behavior change: deployments exceeding the active-session bound will require evicted clients to initialize a new session.
 
 ## 0.11.1 — 2026-07-12
 

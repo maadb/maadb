@@ -115,6 +115,7 @@ async function cmdServe(): Promise<void> {
   let requestTimeoutMs: number = parseIntEnv(process.env['MAAD_HTTP_REQUEST_TIMEOUT_MS'], 60_000);
   let keepAliveTimeoutMs: number = parseIntEnv(process.env['MAAD_HTTP_KEEPALIVE_TIMEOUT_MS'], 5_000);
   let idleMs: number = parseIntEnv(process.env['MAAD_SESSION_IDLE_MS'], 1_800_000);
+  let maxSessions: number = parseIntEnv(process.env['MAAD_SESSION_MAX'], 128);
   let trustProxy: boolean = process.env['MAAD_TRUST_PROXY'] === '1' || process.env['MAAD_TRUST_PROXY'] === 'true';
   let authToken: string | undefined = process.env['MAAD_AUTH_TOKEN'];
   // 0.7.5 (fup-2026-148) — Unix-socket transport
@@ -140,6 +141,7 @@ async function cmdServe(): Promise<void> {
     else if (a === '--http-request-timeout' && next) requestTimeoutMs = parseIntEnv(next, requestTimeoutMs);
     else if (a === '--http-keepalive-timeout' && next) keepAliveTimeoutMs = parseIntEnv(next, keepAliveTimeoutMs);
     else if (a === '--session-idle-ms' && next) idleMs = parseIntEnv(next, idleMs);
+    else if (a === '--session-max' && next) maxSessions = parseIntEnv(next, maxSessions);
     else if (a === '--trust-proxy') trustProxy = true;
     else if (a === '--auth-token' && next) authToken = next;
     else if (a === '--unix-socket' && next) socketPath = next;
@@ -177,6 +179,7 @@ async function cmdServe(): Promise<void> {
         keepAliveTimeoutMs,
         trustProxy,
         idleMs,
+        maxSessions,
         authToken,
         ...(transport === 'unix' ? { socketPath, socketMode } : {}),
       },
@@ -251,6 +254,7 @@ serve HTTP options (when --transport http or --transport unix):
   --http-request-timeout <ms>       node:http requestTimeout (default: 60000)
   --http-keepalive-timeout <ms>     node:http keepAliveTimeout (default: 5000)
   --session-idle-ms <ms>            Per-session idle eviction threshold (default: 1800000 = 30 min)
+  --session-max <count>              Maximum retained HTTP sessions (default: 128)
   --trust-proxy                     Use X-Forwarded-For first hop for remote IP in logs (http only)
 
 Environment Variables:
@@ -265,6 +269,7 @@ Environment Variables:
   MAAD_UNIX_SOCKET_MODE             Socket file mode in octal (default: 660)
   MAAD_AUTH_TOKEN                   Bearer token for HTTP/UDS transport (required)
   MAAD_SESSION_IDLE_MS              Per-session idle eviction threshold (default: 1800000)
+  MAAD_SESSION_MAX                  Maximum retained HTTP sessions (default: 128)
   MAAD_HTTP_MAX_BODY                HTTP max body bytes (default: 1048576)
   MAAD_HTTP_HEADERS_TIMEOUT_MS      headersTimeout ms (default: 10000)
   MAAD_HTTP_REQUEST_TIMEOUT_MS      requestTimeout ms (default: 60000)
