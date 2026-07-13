@@ -10,6 +10,7 @@ import { successResponse, errorResponse, getProvenanceMode } from '../response.j
 import { isContainedIn } from '../../engine/pathguard.js';
 import type { InstanceCtx } from '../ctx.js';
 import { withEngine } from '../with-session.js';
+import { checkProject } from '../../instructions/manifest.js';
 
 export function register(server: McpServer, ctx: InstanceCtx): number {
   server.registerTool('maad_scan', {
@@ -45,7 +46,16 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
       project: z.string().optional().describe('Project name (multi-project mode only)'),
     }),
   }, async (args, extra) => withEngine(ctx, extra, 'maad_summary', args, ({ engine }) => {
-    const summary = engine.summary();
+    const baseSummary = engine.summary();
+    // 0.12.0 — managed-instruction staleness flag: agents working in the
+    // project see drift in their normal boot call; refresh stays
+    // operator-pulled (maad_instructions / CLI).
+    const staleInstructions = checkProject(engine.getProjectRoot())
+      .filter(s => s.state !== 'current')
+      .map(s => ({ file: s.relPath, state: s.state }));
+    const summary = staleInstructions.length > 0
+      ? { ...baseSummary, instructionsStale: staleInstructions }
+      : baseSummary;
     const provMode = getProvenanceMode();
 
     if (provMode === 'off') {

@@ -11,7 +11,10 @@ export function generateArchitectSkill(): string {
 
 You are the MAADb Architect. Your job is to design, deploy, and maintain MAADb database instances. You receive requirements — from another agent, a system spec, or a human — and produce a working database.
 
-You use MAADb MCP tools for all operations. You do not use shell commands.
+**Channel boundary (important):**
+- **Project data records** — MAADb MCP tools only, always.
+- **Schema/config authoring** (\`_registry/object_types.yaml\`, \`_schema/*.yaml\`) — MAADb exposes no MCP primitive for these. Use the deployment's approved channel: direct filesystem access when you legitimately have it (local dev, CLI operator), or the host application's schema-installation mechanism in hosted deployments. After any registry/schema change, call \`maad_reload\`.
+- **No approved channel available?** Stop and hand the schema files to the operator or host application to install. Do not improvise writes through tools not meant for it, and do not promise autonomous schema deployment you cannot perform.
 
 ## Operating Modes
 
@@ -46,51 +49,15 @@ When you need more information, ask about the business — not about databases. 
 
 Stop asking when you have enough to design. Three rounds maximum.
 
-## Domain Knowledge
+## Design Rules
 
-Use these patterns to fill gaps without asking. When the requester says a business type, you already know the common structure.
+Use your own domain knowledge to fill structural gaps without asking — you
+already know what a CRM, case-management, or clinical structure looks like.
+Apply these MAADb-specific constraints on top:
 
-### Service businesses (plumbing, HVAC, electrical, landscaping, cleaning)
-- **Customers**: name, address, phone, email, type (residential/commercial), since date. Master.
-- **Technicians/Staff**: name, phone, certifications, hire date, specialties. Master.
-- **Jobs/Work Orders**: customer ref, technician ref, service type, scheduled date, status, location, amount. Master (individually tracked).
-- **Job Notes/Updates**: append to job file. Dispatch updates, technician field notes, completion notes. Transaction.
-- **Invoices**: customer ref, job ref, amount, status, due date, paid date. Master if <5K/yr, transaction if more.
-- **Service Types/Catalog**: name, base rate, category, duration estimate. Master (small, stable).
-- **Parts/Inventory**: name, SKU, cost, supplier, quantity. Master.
-- Typical: 500-2000 customers, 2000-10000 jobs/yr, 5-50 staff.
-
-### Professional services (legal, consulting, accounting, agencies)
-- **Clients**: company name, industry, primary contact, since date, status. Master.
-- **Contacts**: name, email, phone, role, client ref. Master.
-- **Cases/Projects/Engagements**: client ref, type, status, assigned staff, opened/closed dates. Master.
-- **Notes/Activity Log**: append to case/project file. Meetings, calls, filings, research. Transaction.
-- **Billing/Time Entries**: append to case file or separate. Hours, rate, description, date. Transaction.
-- **Documents/Filings**: per case, tracked as records with metadata. Master if individually referenced.
-- Typical: 50-500 clients, 100-2000 cases/yr, 5-50 staff.
-
-### Retail / E-commerce
-- **Customers**: name, email, phone, address, tier, since date. Master.
-- **Products**: name, SKU, price, category, supplier, stock. Master.
-- **Orders**: customer ref, date, status, total, items. Master (individually tracked).
-- **Order Items**: append to order or separate line items. Transaction if high volume.
-- **Inventory Log**: append to product file. Stock changes, restocks, adjustments. Transaction.
-- Typical: 1000-100000 customers, 5000-500000 orders/yr.
-
-### Healthcare / Clinical
-- **Patients**: name, DOB, contact, insurance, primary provider. Master.
-- **Providers/Staff**: name, credentials, specialty, department. Master.
-- **Visits/Encounters**: patient ref, provider ref, date, type, notes. Master if individually tracked.
-- **Clinical Notes**: append to patient file or visit file. Transaction.
-- **Prescriptions**: patient ref, medication, dosage, provider, date. Master or transaction depending on volume.
-- **Billing**: patient ref, visit ref, codes, amount, status. Master.
-- Typical: 500-50000 patients, 2000-100000 visits/yr.
-
-### General rules (apply to all domains)
 - Entities with names/identities = master (customers, staff, products, cases)
 - Entries that accumulate over time under a parent = transaction (notes, logs, events)
-- If >1000 records/year → transaction pattern (append to parent file)
-- If <1000 records/year → master pattern (one file per record)
+- **Master vs transaction is a design checkpoint, not a numeric cutoff.** Blocks appended to a parent file give up independent frontmatter, schema validation, filtering, refs, lifecycle, and deletion/retention handling. Decide per type using expected volume, queryability needs, mutation patterns, retention/audit requirements, and git behavior — very high-volume individually-queryable records may still warrant master files; low-volume never-queried log lines may still suit blocks.
 - Status fields are almost always enums
 - Date fields: declare \`store_precision\` for the minimum precision the schema expects (\`year\` / \`month\` / \`day\` / \`hour\` / \`minute\` / \`second\` / \`millisecond\`). Default \`on_coarser: warn\` surfaces drift without blocking the write; \`error\` opts into strict rejection. \`display_precision\` is a consumer-side rendering hint; the engine never enforces it. Pick per field meaning: identity dates (birthdays, since_date) = \`day\`; event timestamps (opened_at, logged_at) = \`second\` or \`millisecond\`. See \`_skills/schema-guide.md\` for the full contract.
 - Money fields use amount type ("1250.00 USD")
@@ -148,7 +115,7 @@ Only declare precision hints on date fields where the contract actually matters.
 Once you have enough information:
 
 ### 1. Classify types
-For each entity, determine: master or transaction. Use the >1K/year rule.
+For each entity, determine: master or transaction. Use the design checkpoint from Design Rules — volume, queryability, mutation, retention, audit, git behavior.
 
 ### 2. Map relationships
 Draw the refs: what points to what. A job refs a customer and a technician. A note appends to a job.
@@ -186,34 +153,16 @@ If operating with partial spec or interactively: present and wait for confirmati
 
 After design is confirmed (or in autonomous mode):
 
-1. Write \`_registry/object_types.yaml\` with all types
-2. Write \`_schema/<type>.v1.yaml\` for each type
+1. Write \`_registry/object_types.yaml\` with all types — via the approved schema channel (see Channel boundary above)
+2. Write \`_schema/<type>.v1.yaml\` for each type — same channel
 3. Call \`maad_reload\` to pick up new config
 4. Call \`maad_summary\` to verify engine loaded the types
 5. Optionally create 1-2 sample records per type to validate the schema
 6. Inspect \`_meta.warnings[]\` on sample-record responses — if intended-coarse values trip precision warnings, tighten the schema or adjust the sample input before proceeding
 7. Call \`maad_reindex\` if sample records were created
 8. Report: "Database deployed. X types, Y fields. Ready for data."
-9. **Register your own identity** as an agent record. Use the existence-check-then-create pattern — do **not** call \`maad_create\` blindly, it will collide on re-runs against an already-bootstrapped project:
 
-   \`\`\`
-   maad_get agt-architect
-     → if not found:
-       maad_create agent {
-         docId: "agt-architect",
-         name: "architect",
-         role: "MAADb Architect — bootstrapped this project's schema",
-         description: "Designed registry + schemas on <ISO date>",
-         status: "active",
-         created_at: <now ISO>
-       }
-     → if already exists:
-       You're re-running against a bootstrapped project. Skip the
-       create; optionally \`maad_update\` to refresh \`description\`
-       if you're reorganizing schemas.
-   \`\`\`
-
-   This persists provenance — queryable later as "which agent bootstrapped this project." Load-bearing once multiple architect instances operate (e.g., hosted deployments where each tenant brain gets its own bootstrap) or when compliance audits need design-time attribution.
+**Agent provenance:** design-time attribution already flows through transport, session, and audit metadata — do not create an agent record by default. Create a domain agent record only when the live schema defines an \`agent\` type AND the project's own model calls for one; use the existence-check-then-create pattern (\`maad_get\` first) so re-runs don't collide.
 
 ## Bulk Data Import
 

@@ -7,7 +7,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { MaadEngine } from '../engine.js';
 import { logger } from '../engine/logger.js';
-import { ensureProjectSkills } from '../skills-scaffold.js';
+import { ensureProjectSkills, emitInstructionsAdvisory } from '../skills-scaffold.js';
 
 export interface StartupResult {
   engine: MaadEngine;
@@ -46,6 +46,10 @@ export async function startupEngine(projectRoot: string): Promise<StartupResult>
       warnings.push(`skills scaffold: ${e.file} — ${e.message}`);
     }
   }
+
+  // Advisory only — boot never mutates existing instruction files. Refresh
+  // is operator-pulled via `maad instructions refresh`.
+  emitInstructionsAdvisory(resolved);
 
   // Check for recovery actions
   const recovery = engine.getStartupRecovery();

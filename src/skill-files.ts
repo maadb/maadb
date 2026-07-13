@@ -46,11 +46,16 @@ Day-long mediation with Judge Vasquez. No resolution. Opposing at $950K.
 
 The engine indexes each block with line pointers. Individual notes are addressable via \`get warm <doc_id> <block_id>\`.
 
-### Decision rule
+### Decision checkpoint
 
-Ask: **Will this type generate more than 1,000 records per year?**
-- No → Master pattern (one file per record, use \`maad_create\`)
-- Yes → Transaction pattern (append to parent file, use \`maad_update --append\`)
+Volume is the starting signal, not the rule. Blocks appended to a parent file
+give up capabilities that standalone records keep: independent frontmatter and
+schema validation, query filtering, ref fields, per-record lifecycle, deletion
+and retention handling. Decide per type:
+
+- **High volume + rarely queried individually + parent-scoped** → Transaction pattern (append to parent file, \`maad_update --append\`)
+- **Needs filtering, refs, per-record status, or independent deletion/retention** → Master pattern (one file per record, \`maad_create\`) even at higher volume
+- Also weigh mutation patterns, audit requirements, and git behavior (thousands of files per year strain diffs and reindex)
 
 ## Registry entry
 
@@ -189,9 +194,15 @@ template:
       text: Notes
 \`\`\`
 
-## Schema versioning
+## Schema versioning and evolution
 
-Schema refs use \`<type>.v<number>\` format. When changing a schema, create a new version file and update the registry reference.
+Schema refs use \`<type>.v<number>\` format (lowercase/snake-case name, positive integer version — non-conforming refs fail \`REGISTRY_INVALID\` at load).
+
+Evolving a schema is more than incrementing the number:
+
+1. **Additive change** (new optional field): edit the existing version file, \`maad_reload\`. Existing records stay valid.
+2. **Breaking change** (rename/retype/require a field, change enum values): create \`<type>.v<N+1>.yaml\`, update the registry ref, \`maad_reload\`. Existing records still carry the old \`schema:\` ref — repair stored refs with \`maad_repair_where\` (\`fix_schema_drift\`) after verifying the plan with its dry-run output.
+3. **After any evolution**: run \`maad_validate\` to see which records now fail, and \`maad_verify mode=integrity\` if files were edited outside the engine. Migrate or grandfather violations deliberately — don't leave the project half-conformant.
 
 ## After creating schemas
 
@@ -224,7 +235,7 @@ Use \`maad_scan\` on the source directory for structural patterns if helpful.
 
 ## Step 2 — Classify master vs transaction
 
-For each type, ask: **Will it generate more than 1,000 records per year?**
+For each type, run the decision checkpoint from schema-guide.md — volume, queryability, mutation, retention, audit, git behavior. Typical outcomes:
 
 | Type | Volume | Pattern | File strategy |
 |------|--------|---------|---------------|
@@ -233,7 +244,7 @@ For each type, ask: **Will it generate more than 1,000 records per year?**
 | Contacts | Low (hundreds) | Master | One file per contact |
 | Case notes | **High (thousands+)** | **Transaction** | One file per case, notes appended as blocks |
 | Activity logs | **High (tens of thousands)** | **Transaction** | One file per entity, entries appended |
-| Invoices | Medium to high | Master if <1K/yr, Transaction if more | Depends on volume |
+| Invoices | Medium to high | Master if individually queried/lifecycled | Checkpoint call — volume vs per-record needs |
 
 ## Step 3 — Design registry and schemas
 

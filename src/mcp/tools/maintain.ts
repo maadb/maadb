@@ -14,6 +14,10 @@ import { withEngine } from '../with-session.js';
 import { getTransportSnapshot, isInitialized as telemetryInitialized } from '../transport/telemetry.js';
 import { getMemoryPressureSnapshot } from '../memory-pressure.js';
 import { getHeavyOpGuard } from '../heavy-ops.js';
+import { roleSatisfies, parseRole } from '../roles.js';
+import { maadError } from '../../errors.js';
+import { errorResponse } from '../response.js';
+import { engineVersion, checkProject, planRefresh, applyRefresh } from '../../instructions/manifest.js';
 
 export function register(server: McpServer, ctx: InstanceCtx): number {
   server.registerTool('maad_delete', {
@@ -153,5 +157,65 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
     return successResponse(payload, 'maad_health');
   }));
 
-  return 4;
+  server.registerTool('maad_instructions', {
+    description: 'Managed-instruction lifecycle for the bound project. action=check (any role): per-file state — current | outdated (pristine but stale; safe to refresh) | modified (user-edited) | unmanaged (pre-lifecycle vintage) | missing. action=refresh (admin, dryRun defaults true): updates outdated/missing files to the current engine templates; force=true also replaces modified/unmanaged (git history is the undo path). Boot and reindex never refresh — this tool and the CLI are the only mutation paths.',
+    inputSchema: z.object({
+      action: z.enum(['check', 'refresh']).default('check').describe('check = read-only status; refresh = update managed files'),
+      dryRun: z.boolean().optional().default(true).describe('refresh only: report the plan without writing (default true)'),
+      force: z.boolean().optional().default(false).describe('refresh only: also replace modified/unmanaged files'),
+      project: z.string().optional().describe('Project name (multi-project mode only)'),
+    }),
+  }, async (args, extra) => withEngine(ctx, extra, 'maad_instructions', args, async ({ engine, role }) => {
+    const projectRoot = engine.getProjectRoot();
+
+    if (args.action === 'check') {
+      return successResponse({
+        engineVersion: engineVersion(),
+        files: checkProject(projectRoot),
+      }, 'maad_instructions');
+    }
+
+    // refresh — admin-gated, blocked on read-only deployments, dry-run first.
+    if (!roleSatisfies(parseRole(role), 'admin')) {
+      return errorResponse([maadError('INSUFFICIENT_ROLE',
+        `maad_instructions action=refresh requires admin; session has "${role}" on this project.`)]);
+    }
+    if (engine.isReadOnly()) {
+      return errorResponse([maadError('READ_ONLY',
+        'This deployment is read-only; managed instructions cannot be refreshed here.')]);
+    }
+    auditToolCall('maad_instructions', args);
+    if (isDryRun()) return dryRunResponse('maad_instructions', args);
+
+    const plan = planRefresh(projectRoot, { force: args.force });
+    const planView = {
+      engineVersion: engineVersion(),
+      refresh: plan.refresh,
+      skippedModified: plan.skippedModified,
+      skippedUnmanaged: plan.skippedUnmanaged,
+      current: plan.current.map(s => s.relPath),
+    };
+    if (args.dryRun) {
+      return successResponse({ ...planView, dryRun: true, written: [] }, 'maad_instructions');
+    }
+    const written = applyRefresh(projectRoot, plan);
+    // Land the refresh as its own commit — auditable, revertible. Best-effort:
+    // a non-git project still gets the files.
+    let committed = false;
+    if (written.length > 0) {
+      try {
+        const { GitLayer } = await import('../../git/index.js');
+        const git = new GitLayer(projectRoot);
+        if (await git.isRepo()) {
+          const sg = git.getSimpleGit();
+          await sg.add(written);
+          await sg.commit(`maad:instructions — refresh managed instructions to ${engineVersion()}`);
+          committed = true;
+        }
+      } catch { /* best-effort */ }
+    }
+    return successResponse({ ...planView, dryRun: false, written, committed }, 'maad_instructions');
+  }));
+
+  return 5;
 }
