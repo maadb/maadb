@@ -1,20 +1,24 @@
 // ============================================================================
-// Skills Scaffold — ensures _skills/ guide files exist in a project
+// Skills Scaffold — ensures managed instruction files exist in a project
 //
 // Called by:
 //   - MCP lifecycle after engine.init() succeeds (per-session bootstrap)
 //   - `maad init` CLI (full project scaffold)
-//   - Future EnginePool (0.4.0) on first per-project bind
+//   - EnginePool on per-project bind
 //
-// Never overwrites existing files — protects user customizations. Failure is
-// non-fatal to the caller; log and continue so an unwritable _skills/ never
-// blocks the engine from starting.
+// STRICTLY create-if-absent — never overwrites, so an engine upgrade alone
+// modifies zero files in an existing project. Updating existing files is the
+// job of `maad instructions refresh` (operator-pulled). New files are written
+// stamped via the instructions manifest so their vintage is detectable.
+// Failure is non-fatal to the caller; log and continue so an unwritable
+// project dir never blocks the engine from starting.
 // ============================================================================
 
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { generateSchemaGuide, generateImportGuide } from './skill-files.js';
-import { generateArchitectSkill } from './architect.js';
+import { MANAGED_ARTIFACTS, stampContent, checkProject } from './instructions/manifest.js';
+import { logInstructionsOutdated } from './logging.js';
+import { logger } from './engine/logger.js';
 
 export interface SkillsScaffoldResult {
   created: string[];
@@ -22,44 +26,44 @@ export interface SkillsScaffoldResult {
   errors: Array<{ file: string; message: string }>;
 }
 
-interface SkillFile {
-  name: string;
-  generator: () => string;
-}
-
-const SKILL_FILES: SkillFile[] = [
-  { name: 'architect-core.md', generator: generateArchitectSkill },
-  { name: 'schema-guide.md', generator: generateSchemaGuide },
-  { name: 'import-guide.md', generator: generateImportGuide },
-];
-
 export function ensureProjectSkills(projectRoot: string): SkillsScaffoldResult {
   const result: SkillsScaffoldResult = { created: [], skipped: [], errors: [] };
-  const skillDir = path.join(projectRoot, '_skills');
 
-  try {
-    if (!existsSync(skillDir)) mkdirSync(skillDir, { recursive: true });
-  } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    result.errors.push({ file: '_skills/', message });
-    return result;
-  }
-
-  for (const skill of SKILL_FILES) {
-    const filePath = path.join(skillDir, skill.name);
-    const relPath = path.join('_skills', skill.name);
+  for (const artifact of MANAGED_ARTIFACTS) {
+    const filePath = path.join(projectRoot, artifact.relPath);
     if (existsSync(filePath)) {
-      result.skipped.push(relPath);
+      result.skipped.push(artifact.relPath);
       continue;
     }
     try {
-      writeFileSync(filePath, skill.generator(), 'utf-8');
-      result.created.push(relPath);
+      mkdirSync(path.dirname(filePath), { recursive: true });
+      writeFileSync(filePath, stampContent(artifact.name, artifact.generate()), 'utf-8');
+      result.created.push(artifact.relPath);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      result.errors.push({ file: relPath, message });
+      result.errors.push({ file: artifact.relPath, message });
     }
   }
 
   return result;
+}
+
+/**
+ * Advisory-only staleness signal, emitted once per project bind. Never
+ * writes: stale files are reported to the ops log so operators (and the
+ * daily walkthrough) see them; refresh stays operator-pulled.
+ */
+export function emitInstructionsAdvisory(projectRoot: string): void {
+  try {
+    const stale = checkProject(projectRoot).filter(s => s.state !== 'current');
+    if (stale.length === 0) return;
+    logInstructionsOutdated({
+      project_root: projectRoot,
+      stale: stale.map(s => ({ file: s.relPath, state: s.state })),
+    });
+    logger.info('lifecycle', 'instructions',
+      `Managed instructions not current (${stale.map(s => `${s.relPath}:${s.state}`).join(', ')}) — run \`maad instructions check\``);
+  } catch {
+    // Best-effort: an unreadable project dir must never block startup.
+  }
 }

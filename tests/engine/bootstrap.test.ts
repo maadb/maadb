@@ -143,19 +143,25 @@ describe('engine bootstrap — empty project', () => {
 });
 
 describe('ensureProjectSkills', () => {
-  it('creates all three guide files in an empty directory', () => {
+  it('creates all managed instruction files in an empty directory', () => {
     const dir = makeTempDir('skills-fresh');
     const result = ensureProjectSkills(dir);
 
-    expect(result.created).toHaveLength(3);
-    expect(result.created).toContain(path.join('_skills', 'architect-core.md'));
-    expect(result.created).toContain(path.join('_skills', 'schema-guide.md'));
-    expect(result.created).toContain(path.join('_skills', 'import-guide.md'));
+    expect(result.created).toHaveLength(4);
+    expect(result.created).toContain('MAAD.md');
+    expect(result.created).toContain('_skills/architect-core.md');
+    expect(result.created).toContain('_skills/schema-guide.md');
+    expect(result.created).toContain('_skills/import-guide.md');
     expect(result.errors).toEqual([]);
 
+    expect(existsSync(path.join(dir, 'MAAD.md'))).toBe(true);
     expect(existsSync(path.join(dir, '_skills', 'architect-core.md'))).toBe(true);
     expect(existsSync(path.join(dir, '_skills', 'schema-guide.md'))).toBe(true);
     expect(existsSync(path.join(dir, '_skills', 'import-guide.md'))).toBe(true);
+
+    // Lifecycle rework: every scaffolded file carries the managed stamp.
+    const maadMd = readFileSync(path.join(dir, 'MAAD.md'), 'utf-8');
+    expect(maadMd.startsWith('<!-- maadb:managed name=maad-md engine=')).toBe(true);
   });
 
   it('does not overwrite existing customized skill files', () => {
@@ -167,10 +173,10 @@ describe('ensureProjectSkills', () => {
 
     const result = ensureProjectSkills(dir);
 
-    // architect-core.md was skipped, the other two were created
-    expect(result.skipped).toContain(path.join('_skills', 'architect-core.md'));
-    expect(result.created).toContain(path.join('_skills', 'schema-guide.md'));
-    expect(result.created).toContain(path.join('_skills', 'import-guide.md'));
+    // architect-core.md was skipped, the others were created
+    expect(result.skipped).toContain('_skills/architect-core.md');
+    expect(result.created).toContain('_skills/schema-guide.md');
+    expect(result.created).toContain('_skills/import-guide.md');
 
     // Custom content is preserved
     const actual = readFileSync(path.join(skillDir, 'architect-core.md'), 'utf-8');
@@ -180,11 +186,11 @@ describe('ensureProjectSkills', () => {
   it('is idempotent — second call creates nothing new', () => {
     const dir = makeTempDir('skills-idempotent');
     const first = ensureProjectSkills(dir);
-    expect(first.created).toHaveLength(3);
+    expect(first.created).toHaveLength(4);
 
     const second = ensureProjectSkills(dir);
     expect(second.created).toHaveLength(0);
-    expect(second.skipped).toHaveLength(3);
+    expect(second.skipped).toHaveLength(4);
     expect(second.errors).toEqual([]);
   });
 });

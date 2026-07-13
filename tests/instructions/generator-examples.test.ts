@@ -182,13 +182,7 @@ describe('generator schema examples load through the real schema loader', () => 
 // ---- Prose regression guards ------------------------------------------------
 
 describe('generator prose does not contradict engine behavior', () => {
-  const maadMd = generateMaadMd({
-    projectRoot: '/tmp/example-project',
-    enginePath: '/tmp/engine/cli.js',
-    registry: { types: new Map() } as unknown as Registry,
-    schemaStore: { getSchemaForType: () => undefined } as unknown as SchemaStore,
-    stats: null,
-  });
+  const maadMd = generateMaadMd();
   const allGenerated = { ...GUIDES, 'MAAD.md': maadMd };
 
   it('no guide teaches the itemType key (loader reads item_type)', () => {
@@ -227,5 +221,24 @@ describe('generator prose does not contradict engine behavior', () => {
 
   it('MAAD.md does not teach a read-depth escalation ladder', () => {
     expect(/escalate to .?full.?, .?warm.?, then .?cold.?/i.test(maadMd)).toBe(false);
+  });
+
+  it('MAAD.md is fully static: no machine paths, no test/eval scaffolding', () => {
+    expect(/[A-Za-z]:\\|\/tmp\/|\/home\/|\/Users\//.test(maadMd), 'machine path leaked').toBe(false);
+    expect(/node .*cli\.js/.test(maadMd), 'engine invocation path leaked').toBe(false);
+    expect(maadMd.toLowerCase().includes('test/evaluation')).toBe(false);
+    expect(maadMd.includes('feedback-')).toBe(false);
+  });
+
+  it('architect guide does not mandate agt-architect self-registration or ship the domain cookbook', () => {
+    const text = GUIDES['architect-core']!;
+    expect(text.includes('agt-architect')).toBe(false);
+    expect(text.includes('plumbing, HVAC')).toBe(false);
+  });
+
+  it('no guide states the flat 1,000-records-per-year cutoff as a rule', () => {
+    for (const [guide, text] of Object.entries(allGenerated)) {
+      expect(/more than 1,000 records per year\?/.test(text), `${guide} still teaches the flat cutoff`).toBe(false);
+    }
   });
 });

@@ -55,6 +55,9 @@ export const WRITE_TOOLS: ReadonlySet<string> = new Set([
   'maad_delete_where',
   'maad_purge_soft_deleted',
   'maad_repair_where',
+  // 0.12.0 — managed-instruction lifecycle. Refresh writes project files, so
+  // the tool is classified write and serializes behind the project write mutex.
+  'maad_instructions',
 ]);
 
 // Tools that do not flow through withEngine — they operate on session /

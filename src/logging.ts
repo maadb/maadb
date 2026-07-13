@@ -204,6 +204,20 @@ export function logOriginRejected(fields: OriginRejectedFields): void {
   opsLog.info(fields, 'origin_rejected');
 }
 
+// ---- Instructions-outdated advisory (ops) ----------------------------------
+// 0.12.0 — one advisory line per project bind when managed instruction files
+// are stale (outdated/modified/unmanaged/missing). NEVER accompanied by an
+// automatic write: refresh is operator-pulled (`maad instructions refresh`).
+
+export interface InstructionsOutdatedFields {
+  project_root: string;
+  stale: Array<{ file: string; state: string }>;
+}
+
+export function logInstructionsOutdated(fields: InstructionsOutdatedFields): void {
+  opsLog.info(fields, 'instructions_outdated');
+}
+
 // ---- Validation warning event (ops) ---------------------------------------
 // 0.6.7 — one `warn`-level line per ValidationWarning emitted on a write.
 // Operators see patterns across agents without having to scrape response

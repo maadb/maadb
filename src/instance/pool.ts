@@ -14,7 +14,7 @@
 // ============================================================================
 
 import { MaadEngine } from '../engine/index.js';
-import { ensureProjectSkills } from '../skills-scaffold.js';
+import { ensureProjectSkills, emitInstructionsAdvisory } from '../skills-scaffold.js';
 import { ok, singleErr, type Result } from '../errors.js';
 import type { InstanceConfig, ProjectConfig } from './config.js';
 import { getProject } from './config.js';
@@ -218,7 +218,11 @@ export class EnginePool {
       await engine.close();
       return initResult;
     }
-    ensureProjectSkills(project.path);
+    if (this.opts.readOnly !== true) {
+      ensureProjectSkills(project.path);
+    }
+    // Advisory only — bind never mutates existing instruction files.
+    emitInstructionsAdvisory(project.path);
     return ok(engine);
   }
 

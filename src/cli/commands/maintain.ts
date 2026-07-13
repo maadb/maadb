@@ -6,10 +6,10 @@ import path from 'node:path';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { docId } from '../../types.js';
 import { GitLayer } from '../../git/index.js';
-import { generateMaadMd, generateStubMaadMd } from '../../maad-md.js';
 import { generateSchemaMd } from '../../schema-md.js';
-import { generateClaudeMd } from '../../claude-md.js';
+import { generateClaudeMd, generateAgentsMd } from '../../claude-md.js';
 import { ensureProjectSkills } from '../../skills-scaffold.js';
+import { engineVersion, checkProject, planRefresh, applyRefresh } from '../../instructions/manifest.js';
 import type { CliContext } from '../helpers.js';
 import { initEngine } from '../helpers.js';
 
@@ -40,22 +40,20 @@ export async function cmdInit(ctx: CliContext): Promise<void> {
     console.log('  Created .gitignore');
   }
 
-  const maadMdPath = path.join(root, 'MAAD.md');
-  if (!existsSync(maadMdPath)) {
-    const enginePath = path.resolve(ctx.__dirname, 'cli.js');
-    writeFileSync(maadMdPath, generateStubMaadMd(enginePath, root), 'utf-8');
-    console.log('  Created MAAD.md');
-  }
-
-  // CLAUDE.md — agent instructions for MCP-first workflow
+  // Provider pointers — created once at init, user-owned afterward.
   const claudeMdPath = path.join(root, 'CLAUDE.md');
   if (!existsSync(claudeMdPath)) {
     writeFileSync(claudeMdPath, generateClaudeMd(), 'utf-8');
     console.log('  Created CLAUDE.md');
   }
+  const agentsMdPath = path.join(root, 'AGENTS.md');
+  if (!existsSync(agentsMdPath)) {
+    writeFileSync(agentsMdPath, generateAgentsMd(), 'utf-8');
+    console.log('  Created AGENTS.md');
+  }
 
-  // Skill files — detailed workflow guides (delegated to shared scaffold
-  // helper so lifecycle, CLI init, and future EnginePool share one code path)
+  // Managed instruction files (MAAD.md + _skills/) — stamped, create-if-absent
+  // (shared scaffold so lifecycle, CLI init, and EnginePool use one code path)
   const skillsResult = ensureProjectSkills(root);
   for (const f of skillsResult.created) console.log(`  Created ${f}`);
   for (const e of skillsResult.errors) console.warn(`  Failed ${e.file}: ${e.message}`);
@@ -137,25 +135,16 @@ export async function cmdReindex(ctx: CliContext): Promise<void> {
     for (const e of r.errors) console.log(`  ${e.code}: ${e.message}`);
   }
 
+  // Instruction-lifecycle rework: reindex no longer writes MAAD.md — it is a
+  // static managed file, created via scaffold and updated only through
+  // `maad instructions refresh`. SCHEMA.md remains a data-derived artifact
+  // and keeps refreshing here.
   try {
     const { loadSchemas } = await import('../../schema/index.js');
     const registry = engine.getRegistry();
     const schemaResult = await loadSchemas(engine.getProjectRoot(), registry);
     if (schemaResult.ok) {
       const stats = engine.getBackend().getStats();
-      const enginePath = path.resolve(ctx.__dirname, 'cli.js');
-
-      const maadMdPath = path.join(engine.getProjectRoot(), 'MAAD.md');
-      const maadMd = generateMaadMd({
-        projectRoot: engine.getProjectRoot(),
-        enginePath,
-        registry,
-        schemaStore: schemaResult.value,
-        stats,
-      });
-      writeFileSync(maadMdPath, maadMd, 'utf-8');
-      console.log('Updated MAAD.md');
-
       const schemaMd = generateSchemaMd({
         registry,
         schemaStore: schemaResult.value,
@@ -164,8 +153,14 @@ export async function cmdReindex(ctx: CliContext): Promise<void> {
       writeFileSync(path.join(engine.getProjectRoot(), 'SCHEMA.md'), schemaMd, 'utf-8');
       console.log('Updated SCHEMA.md');
     }
+    const scaffolded = ensureProjectSkills(engine.getProjectRoot());
+    for (const f of scaffolded.created) console.log(`Created ${f}`);
+    const stale = checkProject(engine.getProjectRoot()).filter(s => s.state !== 'current');
+    if (stale.length > 0) {
+      console.log(`Instructions not current (${stale.map(s => `${s.relPath}:${s.state}`).join(', ')}) — run \`maad instructions check\`.`);
+    }
   } catch (e) {
-    console.warn(`MAAD.md generation failed: ${e instanceof Error ? e.message : String(e)}`);
+    console.warn(`SCHEMA.md generation failed: ${e instanceof Error ? e.message : String(e)}`);
   }
 
   engine.close();
@@ -178,6 +173,68 @@ export async function cmdReindex(ctx: CliContext): Promise<void> {
   if (r.errors.length > 0) {
     process.exit(1);
   }
+}
+
+export async function cmdInstructions(ctx: CliContext): Promise<void> {
+  const sub = ctx.args[1];
+  const root = path.resolve(ctx.projectRoot);
+
+  if (sub === 'check') {
+    const statuses = checkProject(root);
+    console.log(`Managed instructions in ${root} (engine ${engineVersion()}):`);
+    for (const s of statuses) {
+      const vintage = s.stampedEngine ? ` (stamped ${s.stampedEngine})` : '';
+      console.log(`  ${s.state.padEnd(9)} ${s.relPath}${vintage}`);
+    }
+    const actionable = statuses.filter(s => s.state !== 'current');
+    if (actionable.length === 0) {
+      console.log('All managed instructions are current.');
+    } else {
+      console.log(`\n${actionable.length} file(s) not current. \`maad instructions refresh\` updates outdated/missing; add --force to also replace modified/unmanaged files (git history is the undo path).`);
+      process.exit(1);
+    }
+    return;
+  }
+
+  if (sub === 'refresh') {
+    const apply = ctx.args.includes('--apply');
+    const force = ctx.args.includes('--force');
+    const plan = planRefresh(root, { force });
+
+    for (const s of plan.current) console.log(`  current   ${s.relPath}`);
+    for (const s of plan.refresh) console.log(`  ${apply ? 'refresh' : 'would refresh'}  ${s.relPath} (${s.state})`);
+    for (const s of plan.skippedModified) console.log(`  SKIP modified   ${s.relPath} — user-edited; --force to replace`);
+    for (const s of plan.skippedUnmanaged) console.log(`  SKIP unmanaged  ${s.relPath} — pre-lifecycle vintage; --force to adopt`);
+
+    if (plan.refresh.length === 0) {
+      console.log('Nothing to refresh.');
+      return;
+    }
+    if (!apply) {
+      console.log(`\nDry run — ${plan.refresh.length} file(s) would be refreshed to engine ${engineVersion()}. Re-run with --apply to write.`);
+      return;
+    }
+
+    const written = applyRefresh(root, plan);
+    console.log(`Refreshed ${written.length} file(s) to engine ${engineVersion()}.`);
+
+    // Land the refresh as its own commit so it is auditable and revertible.
+    try {
+      const git = new GitLayer(root);
+      if (await git.isRepo()) {
+        const sg = git.getSimpleGit();
+        await sg.add(written);
+        await sg.commit(`maad:instructions — refresh managed instructions to ${engineVersion()}`);
+        console.log('Committed refresh to git.');
+      }
+    } catch (e) {
+      console.warn(`Git commit failed (files written): ${e instanceof Error ? e.message : String(e)}`);
+    }
+    return;
+  }
+
+  console.error('Usage: maad instructions <check|refresh> [--apply] [--force]');
+  process.exit(1);
 }
 
 export async function cmdParse(ctx: CliContext): Promise<void> {

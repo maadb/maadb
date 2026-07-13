@@ -10,7 +10,7 @@ import type { CliContext } from './helpers.js';
 import { cmdScan, cmdSummary, cmdDescribe } from './commands/discover.js';
 import { cmdGet, cmdQuery, cmdSearch, cmdRelated, cmdSchema, cmdSemanticSearch } from './commands/read.js';
 import { cmdCreate, cmdUpdate } from './commands/write.js';
-import { cmdInit, cmdValidate, cmdReindex, cmdParse } from './commands/maintain.js';
+import { cmdInit, cmdValidate, cmdReindex, cmdParse, cmdInstructions } from './commands/maintain.js';
 import { cmdHistory, cmdAudit } from './commands/audit.js';
 import { cmdAuth } from './commands/auth.js';
 import { startServer } from '../mcp/server.js';
@@ -70,6 +70,7 @@ async function main(): Promise<void> {
     case 'init':      await cmdInit(ctx); break;
     case 'validate':  await cmdValidate(ctx); break;
     case 'reindex':   await cmdReindex(ctx); break;
+    case 'instructions': await cmdInstructions(ctx); break;
     case 'parse':     await cmdParse(ctx); break;
     // Audit
     case 'history':   await cmdHistory(ctx); break;
@@ -245,6 +246,8 @@ Commands:
   update <doc_id> --field k=v [...] Update a document's fields or body
   validate [doc_id]                 Validate one or all documents
   reindex [--force] [--embeddings]  Rebuild the index from markdown (--embeddings rebuilds the semantic index)
+  instructions check                Report managed-instruction state (current/outdated/modified/unmanaged/missing)
+  instructions refresh [--apply] [--force]  Refresh managed instructions (dry-run without --apply; --force replaces modified/unmanaged)
   parse <file.md>                   Parse a file and print the result
   history <doc_id>                  Show git history for a document
   audit [--since date]              Show project-wide activity

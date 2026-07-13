@@ -334,14 +334,16 @@ my-project/
   _backend/                       # SQLite index — gitignored, rebuildable
     maad.db
   _import/                        # Drop zone for raw markdown imports
-  _skills/                        # Agent skill files (architect, import, etc.)
-  MAAD.md                         # Generated: stable agent operating instructions
-  CLAUDE.md                       # Generated: MCP-first agent workflow guide
+  _skills/                        # Agent skill files (architect, import, etc.) — engine-managed
+  MAAD.md                         # Managed: canonical agent operating instructions (static, stamped)
+  CLAUDE.md / AGENTS.md           # Created once at init: thin pointers to MAAD.md, user-owned after
   <type-dirs>/                    # Record files — one directory per type
     cas-2026-001.md
 ```
 
 **Convention:** `_` prefix = engine-managed (don't hand-edit unless you know what you're doing). Every other directory holds records.
+
+**Managed instructions have a lifecycle.** `MAAD.md` and the `_skills/` guides carry a `maadb:managed` stamp (generator version + content hash). `maad instructions check` classifies each file — `current`, `outdated` (pristine but stale), `modified` (user-edited), `unmanaged` (pre-stamp vintage) — and `maad instructions refresh` (dry-run by default, `--apply` to write, `--force` to also replace modified/unmanaged) updates them as a dedicated git commit. Engine upgrades never rewrite instruction files on their own: boot and reindex only emit an `instructions_outdated` advisory, and `maad_summary` flags staleness. The MCP surface mirrors this via the `maad_instructions` tool (check for any role; refresh is admin-gated).
 
 **Record directories are type-declared, not hardcoded.** Each type in `_registry/object_types.yaml` declares its own `path:` — e.g. `cases/`, `clients/`, `data/cases/`, whatever you prefer. The architect skill picks a layout that fits the data shape.
 
@@ -352,7 +354,7 @@ All tools return `{ ok: true, data: {...} }` or `{ ok: false, errors: [...] }`. 
 **Discover:** `maad_scan`, `maad_summary`, `maad_describe`, `maad_schema`
 **Read:** `maad_get`, `maad_query`, `maad_search`, `maad_related`, `maad_aggregate`, `maad_join`, `maad_verify`, `maad_find_orphans`, `maad_changes_since`, `maad_semantic_search`
 **Write:** `maad_create`, `maad_update`, `maad_bulk_create`, `maad_bulk_update`, `maad_validate`
-**Maintain:** `maad_delete`, `maad_reindex`, `maad_reload`, `maad_health`, `maad_history`, `maad_audit`
+**Maintain:** `maad_delete`, `maad_reindex`, `maad_reload`, `maad_health`, `maad_history`, `maad_audit`, `maad_instructions`
 **Recovery anchors (0.7.10+):** `maad_backup` — annotated git tags as snapshot points.
 **Cleanup (0.7.10+ admin, confirm-contract governed):** `maad_bulk_delete`, `maad_delete_where`, `maad_repair_where`, `maad_purge_soft_deleted` — destructive ops are dry-run by default; pass `confirm: true` to mutate. `maxRecords` cap default 100 / ceiling 1000.
 **Live updates (0.6.11+):** `maad_subscribe`, `maad_unsubscribe` — push notifications on durable writes.
