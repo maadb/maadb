@@ -160,6 +160,40 @@ birthday:
 - **Audit with \`maad_validate includePrecision: true\`** to plan migrations. Returns \`precisionDrift[]\` — informational, never counted as invalid.
 - Absent keys = pre-0.6.7 lenient behavior. Fully backward compatible.
 
+## Structural string constraints (0.12.0+)
+
+String fields accept three optional constraint keys. Older engines refuse to
+activate a schema that declares keys they cannot enforce (\`SCHEMA_INVALID\`)
+— upgrade every serving engine before adding constraints to a live schema,
+and preflight existing data with \`maad_validate includeConstraints: true\`.
+
+| Key | Type | Effect on write |
+|-----|------|-----------------|
+| \`max_length\` | positive int | Hard limit — write fails \`FIELD_MAX_LENGTH_EXCEEDED\` |
+| \`soft_max_length\` | positive int | Advisory — write succeeds with a \`FIELD_SOFT_MAX_LENGTH_EXCEEDED\` entry in \`_meta.warnings[]\` |
+| \`multiline: false\` | boolean | Rejects CR/LF in the value — \`FIELD_MULTILINE_NOT_ALLOWED\` |
+
+Lengths measure **Unicode code points** (what Python \`len()\` sees), with no
+normalization. Enforcement is write-time only — existing records stay
+readable, and updates that don't touch a constrained field are never blocked
+by a pre-existing violation. \`soft_max_length\` must not exceed \`max_length\`.
+
+\`\`\`yaml
+type: ticket
+version: 1
+required: [doc_id, subject]
+fields:
+  subject:
+    type: string
+    index: true
+    multiline: false
+    max_length: 200
+    soft_max_length: 120
+  detail:
+    type: string
+    index: false
+\`\`\`
+
 ## Required fields
 
 Every schema must require \`doc_id\`. Add other required fields that every record of this type must have.

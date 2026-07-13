@@ -94,6 +94,22 @@ export function validateFrontmatter(
       if (precEntry?.kind === 'error') errors.push(precEntry.entry);
       else if (precEntry?.kind === 'warn') warnings.push(precEntry.entry);
     }
+
+    // 0.12.0 structural constraints — write-mode only, same contract as
+    // precision: never on read / index / audit, update-neighbor safe via
+    // changedFields, skipped when structural validation already failed.
+    // Hard and advisory limits are evaluated independently.
+    if (
+      mode === 'write' &&
+      fieldErrors.length === 0 &&
+      fieldDef.type === 'string' &&
+      typeof value === 'string' &&
+      (changedFields === undefined || changedFields.has(fieldName))
+    ) {
+      const found = checkConstraints(fieldName, value, fieldDef, loc);
+      errors.push(...found.errors);
+      warnings.push(...found.warnings);
+    }
   }
 
   return {
@@ -158,6 +174,62 @@ function checkPrecision(
       location: loc,
     },
   };
+}
+
+/**
+ * Length in Unicode code points — the constraint contract's measurement unit
+ * (language-neutral; what Python len() sees). NOT UTF-16 units, NOT grapheme
+ * clusters. Values are measured as stored; no normalization.
+ */
+export function codePointLength(value: string): number {
+  let n = 0;
+  for (const _ of value) n++;
+  return n;
+}
+
+/**
+ * 0.12.0 structural constraints for a string field. Caller is responsible
+ * for the write-mode / changedFields / structurally-valid gates.
+ */
+function checkConstraints(
+  fieldName: string,
+  value: string,
+  fieldDef: FieldDefinition,
+  loc: { file: FilePath; line: number; col: number } | null,
+): { errors: ValidationError[]; warnings: ValidationWarning[] } {
+  const errors: ValidationError[] = [];
+  const warnings: ValidationWarning[] = [];
+
+  if (fieldDef.multiline === false && /[\r\n]/.test(value)) {
+    errors.push({
+      field: fieldName,
+      message: `Value contains line breaks but schema declares multiline: false`,
+      code: 'FIELD_MULTILINE_NOT_ALLOWED',
+      location: loc,
+    });
+  }
+
+  if (fieldDef.maxLength !== null || fieldDef.softMaxLength !== null) {
+    const actual = codePointLength(value);
+    if (fieldDef.maxLength !== null && actual > fieldDef.maxLength) {
+      errors.push({
+        field: fieldName,
+        message: `Value is ${actual} code points but schema declares max_length ${fieldDef.maxLength}`,
+        code: 'FIELD_MAX_LENGTH_EXCEEDED',
+        location: loc,
+      });
+    }
+    if (fieldDef.softMaxLength !== null && actual > fieldDef.softMaxLength) {
+      warnings.push({
+        field: fieldName,
+        message: `Value is ${actual} code points, over the advisory soft_max_length ${fieldDef.softMaxLength}`,
+        code: 'FIELD_SOFT_MAX_LENGTH_EXCEEDED',
+        location: loc,
+      });
+    }
+  }
+
+  return { errors, warnings };
 }
 
 function validateField(
