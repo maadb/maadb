@@ -14,6 +14,7 @@ import { cmdInit, cmdValidate, cmdReindex, cmdParse } from './commands/maintain.
 import { cmdHistory, cmdAudit } from './commands/audit.js';
 import { cmdAuth } from './commands/auth.js';
 import { startServer } from '../mcp/server.js';
+import { parseAllowedOrigins, splitOriginList } from '../mcp/transport/origin.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -116,6 +117,10 @@ async function cmdServe(): Promise<void> {
   let keepAliveTimeoutMs: number = parseIntEnv(process.env['MAAD_HTTP_KEEPALIVE_TIMEOUT_MS'], 5_000);
   let idleMs: number = parseIntEnv(process.env['MAAD_SESSION_IDLE_MS'], 1_800_000);
   let maxSessions: number = parseIntEnv(process.env['MAAD_SESSION_MAX'], 128);
+  // 0.12.0 — Origin allowlist for /mcp. Env is comma-separated; repeatable
+  // --http-allowed-origin flags, when present, replace the env list.
+  const envAllowedOrigins: string[] = splitOriginList(process.env['MAAD_HTTP_ALLOWED_ORIGINS'] ?? '');
+  const cliAllowedOrigins: string[] = [];
   let trustProxy: boolean = process.env['MAAD_TRUST_PROXY'] === '1' || process.env['MAAD_TRUST_PROXY'] === 'true';
   let authToken: string | undefined = process.env['MAAD_AUTH_TOKEN'];
   // 0.7.5 (fup-2026-148) — Unix-socket transport
@@ -142,6 +147,7 @@ async function cmdServe(): Promise<void> {
     else if (a === '--http-keepalive-timeout' && next) keepAliveTimeoutMs = parseIntEnv(next, keepAliveTimeoutMs);
     else if (a === '--session-idle-ms' && next) idleMs = parseIntEnv(next, idleMs);
     else if (a === '--session-max' && next) maxSessions = parseIntEnv(next, maxSessions);
+    else if (a === '--http-allowed-origin' && next) cliAllowedOrigins.push(next);
     else if (a === '--trust-proxy') trustProxy = true;
     else if (a === '--auth-token' && next) authToken = next;
     else if (a === '--unix-socket' && next) socketPath = next;
@@ -158,6 +164,15 @@ async function cmdServe(): Promise<void> {
 
   if (transport === 'unix' && (!socketPath || socketPath.length === 0)) {
     console.error("Error: --transport unix requires --unix-socket=<path> or MAAD_UNIX_SOCKET env");
+    process.exit(1);
+  }
+
+  // 0.12.0 — validate the Origin allowlist up front so a typo fails boot
+  // with an actionable message instead of a stack trace from the transport.
+  const allowedOrigins = cliAllowedOrigins.length > 0 ? cliAllowedOrigins : envAllowedOrigins;
+  const originCheck = parseAllowedOrigins(allowedOrigins);
+  if (!originCheck.ok) {
+    console.error(`Error: invalid allowed-origin configuration:\n  ${originCheck.errors.join('\n  ')}`);
     process.exit(1);
   }
 
@@ -180,6 +195,7 @@ async function cmdServe(): Promise<void> {
         trustProxy,
         idleMs,
         maxSessions,
+        allowedOrigins,
         authToken,
         ...(transport === 'unix' ? { socketPath, socketMode } : {}),
       },
@@ -255,6 +271,10 @@ serve HTTP options (when --transport http or --transport unix):
   --http-keepalive-timeout <ms>     node:http keepAliveTimeout (default: 5000)
   --session-idle-ms <ms>            Per-session idle eviction threshold (default: 1800000 = 30 min)
   --session-max <count>              Maximum retained HTTP sessions (default: 128)
+  --http-allowed-origin <origin>     Exact browser origin allowed on /mcp (repeatable;
+                                     default: none — any request presenting an Origin
+                                     header is rejected 403. Non-browser clients are
+                                     unaffected; they send no Origin header.)
   --trust-proxy                     Use X-Forwarded-For first hop for remote IP in logs (http only)
 
 Environment Variables:
@@ -270,6 +290,8 @@ Environment Variables:
   MAAD_AUTH_TOKEN                   Bearer token for HTTP/UDS transport (required)
   MAAD_SESSION_IDLE_MS              Per-session idle eviction threshold (default: 1800000)
   MAAD_SESSION_MAX                  Maximum retained HTTP sessions (default: 128)
+  MAAD_HTTP_ALLOWED_ORIGINS         Comma-separated exact origins allowed on /mcp
+                                    (CLI --http-allowed-origin flags override this)
   MAAD_HTTP_MAX_BODY                HTTP max body bytes (default: 1048576)
   MAAD_HTTP_HEADERS_TIMEOUT_MS      headersTimeout ms (default: 10000)
   MAAD_HTTP_REQUEST_TIMEOUT_MS      requestTimeout ms (default: 60000)

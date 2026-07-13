@@ -126,6 +126,8 @@ services:
       MAAD_HTTP_MAX_BODY: 1048576
       MAAD_SHUTDOWN_TIMEOUT_MS: 10000
       MAAD_TRUST_PROXY: "true"     # trust X-Forwarded-For from traefik
+      # MAAD_HTTP_ALLOWED_ORIGINS: https://app.example.com   # only if a web
+      # page calls /mcp directly; non-browser clients send no Origin and pass
       MAAD_LOG_LEVEL: info
       MAAD_AUDIT_PATH: /data/logs/audit.log
     # Docker secrets materialize at /run/secrets/<name>. Read the token from

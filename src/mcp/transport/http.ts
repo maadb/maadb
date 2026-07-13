@@ -14,11 +14,12 @@ import { randomBytes } from 'node:crypto';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { logger } from '../../engine/logger.js';
-import { logAuthFailure, logPinRejected } from '../../logging.js';
+import { logAuthFailure, logOriginRejected, logPinRejected } from '../../logging.js';
 import { resolveToken } from './auth.js';
 import type { TokenStore } from '../../auth/token-store.js';
 import type { TokenRecord } from '../../auth/types.js';
 import { validatePinHeader } from './pin.js';
+import { parseAllowedOrigins, checkOrigin } from './origin.js';
 import type { SessionRegistry } from '../../instance/session.js';
 import type { InstanceConfig } from '../../instance/config.js';
 import { recordIdleSweep, recordSessionOpen } from './telemetry.js';
@@ -54,6 +55,16 @@ export interface HttpTransportOptions {
   idleMs: number;
   /** Hard bound on retained per-session transports and MCP server graphs. */
   maxSessions?: number | undefined;
+  /**
+   * 0.12.0 — Exact browser origins allowed to call /mcp (MCP Streamable HTTP
+   * Origin validation, DNS-rebinding defense). Requests WITHOUT an Origin
+   * header always pass (non-browser MCP clients don't send one). A present
+   * Origin not in this list is rejected 403 ORIGIN_FORBIDDEN before auth,
+   * pin, or session handling. Empty/omitted = deny every browser-originated
+   * request — the secure default; only deployments where a browser calls
+   * /mcp directly need entries. No wildcards, no implicit localhost.
+   */
+  allowedOrigins?: readonly string[] | undefined;
   /**
    * 0.7.0 — Token registry for scoped auth. Production HTTP mode requires a
    * non-null store with ≥1 active token (server.ts enforces via
@@ -123,6 +134,15 @@ export async function startHttpTransport(opts: HttpTransportOptions): Promise<Ht
   const entries = new Map<string, TransportEntry>();
   const maxSessions = Math.max(1, opts.maxSessions ?? 128);
 
+  // 0.12.0 — canonicalize the Origin allowlist once at startup. A bad entry
+  // is an operator configuration error: fail boot loudly rather than run
+  // with a silently narrower (or unintentionally empty) allowlist.
+  const originCfg = parseAllowedOrigins(opts.allowedOrigins ?? []);
+  if (!originCfg.ok) {
+    throw new Error(`invalid allowed-origin configuration: ${originCfg.errors.join('; ')}`);
+  }
+  const allowedOrigins = originCfg.origins;
+
   const discardEntry = (sid: string, reason: 'idle' | 'capacity' | 'shutdown'): TransportEntry | undefined => {
     const entry = entries.get(sid);
     if (!entry) return undefined;
@@ -137,16 +157,6 @@ export async function startHttpTransport(opts: HttpTransportOptions): Promise<Ht
 
   const httpServer = createHttpServer(async (req, res) => {
     try {
-      // Body-size pre-check via Content-Length. Streaming bypass is possible but
-      // stretches the threat model — clients that chunk around this cap are
-      // already hostile, and 0.5.0's rate limiter catches sustained abuse.
-      const contentLength = Number.parseInt(req.headers['content-length'] ?? '0', 10);
-      if (Number.isFinite(contentLength) && contentLength > opts.maxBodyBytes) {
-        writeJsonError(res, 413, 'PAYLOAD_TOO_LARGE',
-          `Request body exceeds ${opts.maxBodyBytes} bytes`);
-        return;
-      }
-
       const url = new URL(req.url ?? '/', `http://${opts.host}`);
 
       // Liveness probe — unauthenticated, minimal, no state leak. Routed
@@ -170,6 +180,33 @@ export async function startHttpTransport(opts: HttpTransportOptions): Promise<Ht
 
       if (url.pathname !== '/mcp') {
         writeJsonError(res, 404, 'NOT_FOUND', 'Unknown path');
+        return;
+      }
+
+      // Middleware step 0: Origin validation (0.12.0) — MCP Streamable HTTP
+      // DNS-rebinding defense. Scoped to /mcp only; runs before body-size,
+      // auth, pin, and session handling so a rejected browser request can
+      // never create or touch session state, and never learns whether a
+      // session ID exists. Requests without an Origin header pass — Origin
+      // is browser-attached; MCP SDK clients, CLIs, and backends omit it.
+      const originVerdict = checkOrigin(req.headers['origin'], allowedOrigins);
+      if (originVerdict === 'forbidden') {
+        const rawOrigin = req.headers['origin'];
+        logOriginRejected({
+          remote_addr: remoteAddrFor(req, opts.trustProxy),
+          origin: typeof rawOrigin === 'string' ? rawOrigin : null,
+        });
+        writeJsonError(res, 403, 'ORIGIN_FORBIDDEN', 'Origin not allowed');
+        return;
+      }
+
+      // Body-size pre-check via Content-Length. Streaming bypass is possible but
+      // stretches the threat model — clients that chunk around this cap are
+      // already hostile, and 0.5.0's rate limiter catches sustained abuse.
+      const contentLength = Number.parseInt(req.headers['content-length'] ?? '0', 10);
+      if (Number.isFinite(contentLength) && contentLength > opts.maxBodyBytes) {
+        writeJsonError(res, 413, 'PAYLOAD_TOO_LARGE',
+          `Request body exceeds ${opts.maxBodyBytes} bytes`);
         return;
       }
 

@@ -293,6 +293,16 @@ session when the limit is reached. Tune the bound with `MAAD_SESSION_MAX` or
 `--session-max`; evicted session IDs receive `SESSION_NOT_FOUND` and must
 initialize again.
 
+Per the MCP Streamable HTTP spec, `/mcp` validates the `Origin` header as a
+DNS-rebinding defense. Requests without an `Origin` header — every normal MCP
+client, SDK, or backend service — pass unaffected. A request that presents an
+`Origin` is rejected `403 ORIGIN_FORBIDDEN` unless that exact origin is
+allowlisted via `MAAD_HTTP_ALLOWED_ORIGINS` (comma-separated) or repeatable
+`--http-allowed-origin` flags. The default (empty allowlist) rejects all
+browser-originated requests; no wildcards, no implicit localhost. Only
+deployments where a web page calls `/mcp` directly need entries — a browser
+talking to your app's backend, which then calls MAADb, does not.
+
 Hot-reload tokens + instance config on edits: `sudo systemctl reload maad` (or `docker compose kill -s SIGHUP maad`). Rotate tokens via `maad auth rotate-token --id=tok-<id>`; revoke via `maad auth revoke-token --id=tok-<id>`. Full auth primitives: [`docs/archive/0.7.0-scoped-auth.md`](docs/archive/0.7.0-scoped-auth.md).
 
 Deployment guides:
