@@ -75,11 +75,13 @@ Returns: types + counts, sample doc_ids, extracted object inventory.
 
 That's it. You're oriented. Now use the commands below as needed.
 
-### Reading data
-- \`get <doc_id> hot\` — frontmatter only (cheapest)
-- \`get <doc_id> full\` — resolved record: refs, objects, related docs
-- \`get <doc_id> warm <block_id>\` — frontmatter + one section
-- \`get <doc_id> cold\` — full file (expensive, use sparingly)
+### Reading data — pick the shape that matches what you need
+- \`get <doc_id> hot\` — frontmatter fields only
+- \`get <doc_id> warm <block_id>\` — frontmatter + one named section
+- \`get <doc_id> cold\` — the raw markdown body
+- \`get <doc_id> full\` — resolved refs, extracted objects, relationships
+
+These are different shapes, not an escalation ladder. Need a field value → \`hot\`. Need one section's text → \`warm\`. Need the whole narrative → \`cold\`. Need the record's graph context → \`full\`.
 
 ### Before writing
 - \`schema <type>\` — field definitions, required fields, enum values
@@ -183,13 +185,13 @@ function generateRules(): string {
   return `## Rules
 
 1. **Run \`summary\` first** in every new session — one call to orient
-2. **Use \`hot\` reads by default** — escalate to \`full\`, \`warm\`, then \`cold\` only when needed
+2. **Pick read shape by information need** — \`hot\` for fields, \`warm\` for one section, \`cold\` for the raw body, \`full\` for resolved refs/objects/relationships. Default \`hot\` when fields suffice; there is no escalation ladder
 3. **Use \`schema <type>\` before writes** — know what fields are required
 4. **Use MAADb MCP tools for writes** — never edit markdown files directly; CLI forms above are for operator debugging only
-5. **Use \`search\` for cross-document queries** — don't open files to find people/dates/amounts
+5. **Route lookups by kind** — \`query\` filters structured frontmatter fields; \`search\` finds extracted objects (people, dates, amounts annotated in text); \`semantic_search\` retrieves by meaning. Don't open files to scan for any of these
 6. **Use \`related\` for graph traversal** — don't manually search for connected docs
 7. **Cite \`doc_id\` and \`block_id\`** in answers for traceability
-8. **\`reindex --force\`** recovers from any stale state
+8. **Recover deliberately** — \`verify mode=integrity\` diagnoses index/document divergence and reports the specific recovery path. \`reindex --force\` rebuilds derived index state only; it does not repair malformed markdown, invalid schemas, broken refs, or git/filesystem problems
 9. **Inspect \`_meta.warnings[]\` on write responses** — the engine surfaces soft-validation signals (precision drift, deprecation hints) alongside successful writes. Agents self-correct on warnings, not just on errors
 10. **Use \`aggregate\` for group-by totals** — don't iterate records to compute counts, sums, averages, mins, or maxes. One \`aggregate\` call with \`metric\` + \`groupBy\` returns the answer; use the \`a->b->c\` ref-chain form for cross-doctype groupings.
 11. **Use \`join\` to follow refs in one call** — don't chain \`query\` → \`get\` → \`get\` to collect related fields. \`join\` projects fields from both sides of a ref in one pass.

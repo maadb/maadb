@@ -100,7 +100,7 @@ fields:
   tags:
     type: list
     index: false
-    itemType: string
+    item_type: string
 \`\`\`
 
 ## Field types
@@ -113,7 +113,7 @@ fields:
 | \`enum\` | Constrained values | Exact match. Requires \`values\` list. |
 | \`ref\` | Reference to another record | Exact match. Requires \`target\` type. Creates relationship edges. |
 | \`boolean\` | true/false | Exact match |
-| \`list\` | Array of values | Requires \`itemType\`. Use \`target\` for list-of-ref. |
+| \`list\` | Array of values | Requires \`item_type\`. Use \`target\` for list-of-ref. |
 | \`amount\` | Currency value (e.g. "1250000 USD") | Numeric range on extracted value |
 
 ## Date precision (0.6.7+)
@@ -180,12 +180,13 @@ Add heading structure that \`maad_create\` will generate for new records:
 
 \`\`\`yaml
 template:
-  - level: 1
-    text: "{{title}}"
-  - level: 2
-    text: Background
-  - level: 2
-    text: Notes
+  headings:
+    - level: 1
+      text: "{{title}}"
+    - level: 2
+      text: Background
+    - level: 2
+      text: Notes
 \`\`\`
 
 ## Schema versioning
@@ -299,10 +300,12 @@ First create the parent file, then append entries:
 maad_create({
   docType: "case_note",
   docId: "notes-cas-001",
-  fields: { case: "cas-001", doc_type: "case_note" },
+  fields: { case: "cas-001" },
   body: "## 2024-03-05 — Mediation Session {#note-010}\\n\\nDay-long mediation. No resolution."
 })
 \`\`\`
+
+**The engine stamps identity fields itself.** Never include \`doc_id\`, \`doc_type\`, or \`schema\` inside \`fields\` — the write is rejected with \`FRONTMATTER_GUARD\`. Identity comes from the top-level \`docType\`/\`docId\` arguments.
 
 For subsequent notes, append to the same file:
 
