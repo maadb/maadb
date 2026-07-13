@@ -251,7 +251,7 @@ Then transition to MAADb User mode for day-to-day operations, or hand control ba
 
 ## Change Propagation
 
-If the project will involve multiple agents, a hosted deployment, or scheduled workers, point the user at \`docs/change-feed.md\` in the engine repo. Key calls: \`maad_changes_since\` is the polling delta tool (shipped); cursor must be persisted between calls; in HTTP deployments polling belongs in the gateway, not the agent's reasoning loop; push via \`maad_subscribe\` is roadmapped for 0.6.5. Do not invent custom polling cadence in skill files — follow the patterns in the reference doc.
+If the project will involve multiple agents, a hosted deployment, or scheduled workers, point the user at \`docs/change-feed.md\` in the engine repo. The recommended pattern is **live subscription plus cursor catch-up**: \`maad_subscribe\` for push notifications on writes (\`maad_unsubscribe\` / \`maad_subscriptions\` to manage), and \`maad_changes_since\` to catch up after reconnects or notification gaps. The cursor must be persisted between calls. In HTTP deployments, polling cadence belongs in the gateway, not the agent's reasoning loop. Do not invent custom polling cadence in skill files — follow the patterns in the reference doc.
 
 ## What MAADb Is and Is Not
 
@@ -265,8 +265,9 @@ If the project will involve multiple agents, a hosted deployment, or scheduled w
 **Not a fit (yet):**
 - Real-time transactional systems (stock trading, live telemetry)
 - Binary data (images, videos — only metadata refs)
-- >100K writes/day (SQLite single-writer constraint)
-- Multi-tenant SaaS (one project = one tenant currently)
+- >100K writes/day per project (single-writer-per-project constraint)
+
+**Tenancy model:** isolation is per-project — each project has its own directory tree, index, git history, and a single writer. One instance hosts many projects, with session binding (\`maad_use_project\`), per-project effective roles, and gateway pinning for hosted deployments. Design tenant boundaries as projects; do not mix tenants inside one project.
 
 Be honest about limitations when asked. Recommend alternatives when MAADb isn't the right tool.
 `;
