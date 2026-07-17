@@ -1,10 +1,21 @@
 ---
 enabled: true
-current: 0.11.2
+current: 0.12.0
 dev_flow: formal
 ---
 
 # Version History
+
+## 0.12.0 — 2026-07-17
+
+Instruction lifecycle, schema data-quality constraints, and HTTP origin hardening.
+
+- **Origin validation on `/mcp`.** Requests presenting an `Origin` header not on the configured allowlist are rejected 403 before auth, pin, or session handling (DNS-rebinding defense per the MCP Streamable HTTP spec). Clients without an `Origin` header pass unchanged. New `MAAD_HTTP_ALLOWED_ORIGINS` env / repeatable `--http-allowed-origin` flag; the default denies all browser origins; invalid entries fail boot.
+- **Managed-instruction lifecycle.** Generated instruction files (`MAAD.md`, `_skills/*.md`) now open with a managed stamp whose hash classifies each file as current / outdated / modified / unmanaged / missing. New `maad instructions check` / `refresh` CLI (dry-run by default, `--force` to adopt edited files) and an admin-gated `maad_instructions` MCP tool; upgrades stay inert — boot emits an advisory and `maad_summary` gains `instructionsStale`. Behavior change: reindex no longer rewrites `MAAD.md`, which is now fully static; `SCHEMA.md` keeps refreshing.
+- **Corrected generated instructions.** Generators shipped examples the engine rejects (identity keys inside `fields`, `itemType` vs `item_type`, array-shaped templates) and stale guidance (subscriptions "roadmapped", obsolete tenancy claims, `reindex --force` overclaim). All corrected, and every generated YAML example now executes through the real loaders in CI so drift fails the build.
+- **Structural string constraints.** Optional `max_length` (hard fail, `FIELD_MAX_LENGTH_EXCEEDED`), `soft_max_length` (advisory `_meta.warnings`), and `multiline: false` on string fields — write-mode only, Unicode code-point measured; reads, reindex, and audit never judge historical data. `maad_validate includeConstraints: true` preflights existing data. Behavior change: unknown field-definition keys now fail schema activation with `SCHEMA_INVALID` instead of being silently ignored — audit deployed schemas before rolling.
+
+1190 tests passing (+56). Dev-dependency bump only (`@types/node`). No schema or database migrations. Behavior changes: reindex no longer rewrites `MAAD.md`; schemas carrying unknown field-definition keys refuse to load; browser-originated requests are denied unless explicitly allowlisted.
 
 ## 0.11.2 — 2026-07-12
 
