@@ -1,10 +1,18 @@
 ---
 enabled: true
-current: 0.12.0
+current: 0.12.1
 dev_flow: formal
 ---
 
 # Version History
+
+## 0.12.1 — 2026-07-23
+
+Escape newlines and carriage returns inside double-quoted YAML frontmatter scalars.
+
+`serializeField` already escaped `\` and `"` in quoted string values, but raw `\n` / `\r` were written as literal line breaks. That produced unparseable frontmatter on the next read whenever a string field held multi-paragraph content. Newlines now force quoting and are escaped (`\n` / `\r`) so create/update round-trips stay parseable under the engine's CORE_SCHEMA loader and gray-matter path. Array string items inherit the same path.
+
+1195 tests passing (+5). No dependency, schema, or database changes. Behavior change: string fields that previously wrote broken multiline quoted scalars now emit valid YAML; callers that depended on the broken emit (none intended) would see the corrected escaping.
 
 ## 0.12.0 — 2026-07-17
 
