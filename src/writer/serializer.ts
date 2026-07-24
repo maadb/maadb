@@ -96,8 +96,12 @@ export function serializeField(key: string, value: unknown): string {
 
   const str = String(value);
 
-  // Quote strings that contain YAML-special characters
+  // Quote strings that contain YAML-special characters. Raw newlines and CRs
+  // must be quoted *and* escaped — an unescaped break inside a double-quoted
+  // scalar yields unparseable frontmatter (dark docs on the next read).
   if (
+    str.includes('\n') ||
+    str.includes('\r') ||
     str.includes(':') ||
     str.includes('#') ||
     str.includes('"') ||
@@ -117,10 +121,19 @@ export function serializeField(key: string, value: unknown): string {
     NUMERIC_LOOKALIKE.test(str) || // number-shaped under any YAML parser
     wouldCoerceFromString(str) // catch-all: any implicit-tag coercion forces quotes
   ) {
-    return `${key}: "${str.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+    return `${key}: "${escapeDoubleQuotedScalar(str)}"`;
   }
 
   return `${key}: ${str}`;
+}
+
+/** Escape a string for safe inclusion inside a YAML double-quoted scalar. */
+function escapeDoubleQuotedScalar(str: string): string {
+  return str
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/\n/g, '\\n')
+    .replace(/\r/g, '\\r');
 }
 
 function serializeArrayItem(value: unknown): string {

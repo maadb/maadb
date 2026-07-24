@@ -58,6 +58,23 @@ describe('serializeFrontmatter', () => {
     expect(result.startsWith('---\n')).toBe(true);
     expect(result.endsWith('\n---')).toBe(true);
   });
+
+  it('emits newline-safe frontmatter that gray-matter can re-parse', async () => {
+    const { parseMatter } = await import('../../src/parser/matter.js');
+    const schema = makeSchema(['doc_id', 'summary'], ['summary', 'details']);
+    const fm = {
+      doc_id: 'test-001',
+      doc_type: 'test',
+      schema: 'test.v1',
+      summary: 'First paragraph.\n\nSecond paragraph.',
+      details: 'Windows path C:\\tmp\\out and a "quote"',
+    };
+    const serialized = serializeFrontmatter(fm, schema);
+    const doc = `${serialized}\n\n# Body\n`;
+    const parsed = parseMatter(doc);
+    expect(parsed.data.summary).toBe(fm.summary);
+    expect(parsed.data.details).toBe(fm.details);
+  });
 });
 
 describe('serializeField', () => {
@@ -108,6 +125,45 @@ describe('serializeField', () => {
 
   it('quotes empty strings', () => {
     expect(serializeField('val', '')).toBe('val: ""');
+  });
+
+  it('escapes newlines and CRs inside double-quoted scalars', () => {
+    expect(serializeField('summary', 'line1\nline2')).toBe('summary: "line1\\nline2"');
+    expect(serializeField('summary', 'para1\n\npara2')).toBe('summary: "para1\\n\\npara2"');
+    expect(serializeField('summary', 'a\rb')).toBe('summary: "a\\rb"');
+    expect(serializeField('summary', 'a\r\nb')).toBe('summary: "a\\r\\nb"');
+  });
+
+  it('preserves backslash and quote escapes alongside newlines', () => {
+    expect(serializeField('path', 'C:\\users\\x\\file')).toBe('path: "C:\\\\users\\\\x\\\\file"');
+    expect(serializeField('note', 'says "hi"\nnext')).toBe('note: "says \\"hi\\"\\nnext"');
+  });
+
+  it('round-trips newline-bearing strings through CORE_SCHEMA parse', async () => {
+    const yaml = (await import('js-yaml')).default;
+    const cases = [
+      'line1\nline2',
+      'para1\n\npara2',
+      'a\rb',
+      'a\r\nb',
+      'C:\\users\\x\\OneDrive - Org\\ops',
+      'inner "quoted" phrase\nwith break',
+    ];
+    for (const original of cases) {
+      const emitted = serializeField('summary', original);
+      expect(emitted.includes('\n')).toBe(false);
+      expect(emitted.includes('\r')).toBe(false);
+      const parsed = yaml.load(emitted, { schema: yaml.CORE_SCHEMA }) as { summary: unknown };
+      expect(parsed.summary).toBe(original);
+    }
+  });
+
+  it('round-trips newline-bearing array items', async () => {
+    const yaml = (await import('js-yaml')).default;
+    const original = ['plain', 'has\nbreak', 'C:\\tmp', 'says "hi"'];
+    const emitted = serializeField('tags', original);
+    const parsed = yaml.load(emitted, { schema: yaml.CORE_SCHEMA }) as { tags: unknown[] };
+    expect(parsed.tags).toEqual(original);
   });
 
   it('handles Date objects with full ISO precision (0.6.7 — never slice, always quote)', () => {
