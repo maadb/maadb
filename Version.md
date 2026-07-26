@@ -1,10 +1,20 @@
 ---
 enabled: true
-current: 0.12.1
+current: 0.12.2
 dev_flow: formal
 ---
 
 # Version History
+
+## 0.12.2 — 2026-07-25
+
+Canonical path containment for `maad_scan`, and serialized token-store mutations.
+
+`maad_scan` gated its target lexically, so a path whose segments were all nominally inside the project root could still resolve outside it through a symbolic link or a Windows junction — `statSync` and `readFile` follow links, so the scan returned content from outside the project. The gate now proves containment against the canonical path before opening anything, ordered after the stat so a missing file still reports `PATH_NOT_FOUND`. The directory walker already skipped links and is unchanged; a test pins that behavior. A link retargeted between the check and the read remains uncovered.
+
+Token `issue`/`revoke`/`rotate` now serialize through a single in-process mutation chain and persist through a uniquely named temporary file. Overlapping calls previously shared one temporary path — losing a rename to `ENOENT` — and could each write a stale snapshot of the record set, dropping a committed token from disk while it stayed live in memory until restart. Rollback after a failed persist removes the record by identity rather than by position. Multi-process contention is unchanged: the supported contract is still a single control-plane writer.
+
+1208 tests passing (+13). No dependency, schema, or database changes. Behavior change: a scan target that resolves outside the project root through a link is now rejected with `PATH_OUTSIDE_PROJECT`; projects that deliberately reached linked content through `maad_scan` need the content inside the root.
 
 ## 0.12.1 — 2026-07-23
 
