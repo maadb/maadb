@@ -73,8 +73,8 @@ export class TokenStore {
   private records: TokenRecord[] = [];
 
   /**
-   * Tail of the mutation chain. issue/revoke/rotate serialize against this so
-   * a mutation always builds on the previous one's committed state.
+   * Tail of the mutation chain. issue/revoke/rotate/reload serialize against
+   * this so a mutation always builds on the previous one's committed state.
    *
    * Without it, two interleaved mutations can each snapshot `records`, and
    * whichever renames last wins — silently dropping the other's record from
@@ -92,9 +92,15 @@ export class TokenStore {
     private registryName: string | undefined,
   ) {}
 
-  /** Queue `fn` behind any in-flight mutation. Rejections do not break the chain. */
+  /**
+   * Queue `fn` behind any in-flight mutation. Rejections do not break the chain.
+   *
+   * `fn` is invoked with no arguments on purpose — passing `fn` directly as the
+   * `then` handler would hand it the previous mutation's resolution value, which
+   * is a trap for any future callee that accepts a parameter.
+   */
   private runExclusive<T>(fn: () => Promise<T>): Promise<T> {
-    const run = this.mutations.then(fn, fn);
+    const run = this.mutations.then(() => fn(), () => fn());
     this.mutations = run.then(() => undefined, () => undefined);
     return run;
   }
@@ -152,8 +158,21 @@ export class TokenStore {
    * transport doesn't need a getter). Parse errors leave the existing
    * in-memory state untouched. Called by the SIGHUP handler alongside
    * instance reload.
+   *
+   * Serialized against issue/revoke/rotate. Reload replaces the same three
+   * indexes those mutations write, so an unserialized reload can interleave
+   * with an in-flight issue: the mutation pushes its record and snapshots it
+   * into the pending write, reload re-reads the still-old file and repopulates
+   * without it, and the write then lands. The token ends up on disk but absent
+   * from `byHash` — `issue` has already returned ok with a bearer that will not
+   * authenticate until the next reload or restart.
    */
   async reload(): Promise<Result<{ total: number; active: number }>> {
+    return this.runExclusive(() => this.reloadInner());
+  }
+
+  /** Unlocked body of `reload`. Callers must already hold the mutation chain. */
+  private async reloadInner(): Promise<Result<{ total: number; active: number }>> {
     if (!existsSync(this.filePath)) {
       // File was removed — empty the store. Same boot semantics as an
       // absent file (HTTP transport keeps running; next lookup misses).
