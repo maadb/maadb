@@ -19,7 +19,7 @@
 // ============================================================================
 
 import { existsSync } from 'node:fs';
-import { readFile, writeFile, rename, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, rename, mkdir, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, randomBytes } from 'node:crypto';
 import yaml from 'js-yaml';
@@ -73,10 +73,32 @@ export class TokenStore {
   private byId = new Map<TokenId, TokenRecord>();
   private records: TokenRecord[] = [];
 
+  /**
+   * Tail of the mutation chain. issue/revoke/rotate serialize against this so
+   * a mutation always builds on the previous one's committed state.
+   *
+   * Without it, two interleaved mutations can each snapshot `records`, and
+   * whichever renames last wins — silently dropping the other's record from
+   * disk while it stays live in the in-memory indexes until restart. A unique
+   * temp path alone does not close that; the serialization does.
+   *
+   * In-process only. Two processes mutating the same tokens.yaml can still
+   * clobber each other — the multi-process lease is not built yet, so the
+   * supported contract remains a single control-plane writer.
+   */
+  private mutations: Promise<unknown> = Promise.resolve();
+
   private constructor(
     private filePath: string,
     private registryName: string | undefined,
   ) {}
+
+  /** Queue `fn` behind any in-flight mutation. Rejections do not break the chain. */
+  private runExclusive<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.mutations.then(fn, fn);
+    this.mutations = run.then(() => undefined, () => undefined);
+    return run;
+  }
 
   /**
    * Load tokens.yaml from `<instanceRoot>/_auth/tokens.yaml`. Returns an empty
@@ -206,6 +228,11 @@ export class TokenStore {
    * plaintext is never recoverable after this call.
    */
   async issue(spec: IssueSpec): Promise<Result<IssuedToken>> {
+    return this.runExclusive(() => this.issueInner(spec));
+  }
+
+  /** Unlocked body of `issue`. Callers must already hold the mutation chain. */
+  private async issueInner(spec: IssueSpec): Promise<Result<IssuedToken>> {
     const plaintext = generatePlaintext();
     const hash = hashPlaintext(plaintext);
 
@@ -235,7 +262,13 @@ export class TokenStore {
     const persisted = await this.persist();
     if (!persisted.ok) {
       // Roll back in-memory state so the store stays consistent with disk.
-      this.records.pop();
+      // Remove by identity, not by position: `pop()` drops whatever landed
+      // last, which under concurrent issuance is another caller's committed
+      // record. That evicted record would stay in byHash/byId (still
+      // authenticating) while vanishing from the next serialization of
+      // `records` — a token erased from disk but live in memory until restart.
+      const at = this.records.indexOf(record);
+      if (at !== -1) this.records.splice(at, 1);
       this.byHash.delete(record.hash);
       this.byId.delete(record.id);
       return persisted;
@@ -249,6 +282,11 @@ export class TokenStore {
    * an already-revoked record is a no-op and returns the existing record.
    */
   async revoke(id: TokenId): Promise<Result<TokenRecord>> {
+    return this.runExclusive(() => this.revokeInner(id));
+  }
+
+  /** Unlocked body of `revoke`. Callers must already hold the mutation chain. */
+  private async revokeInner(id: TokenId): Promise<Result<TokenRecord>> {
     const record = this.byId.get(id);
     if (!record) return singleErr('TOKEN_NOT_FOUND', `No token with id ${id as string}`);
     if (record.revokedAt !== undefined) return ok(record);
@@ -270,6 +308,14 @@ export class TokenStore {
    * revokedAt set.
    */
   async rotate(id: TokenId): Promise<Result<IssuedToken>> {
+    return this.runExclusive(() => this.rotateInner(id));
+  }
+
+  /**
+   * Unlocked body of `rotate`. Calls issueInner directly — going through the
+   * public `issue` would queue behind the chain entry rotate itself holds.
+   */
+  private async rotateInner(id: TokenId): Promise<Result<IssuedToken>> {
     const existing = this.byId.get(id);
     if (!existing) return singleErr('TOKEN_NOT_FOUND', `No token with id ${id as string}`);
     if (existing.revokedAt !== undefined) {
@@ -288,7 +334,7 @@ export class TokenStore {
     if (existing.userId !== undefined) spec.userId = existing.userId;
     if (existing.expiresAt !== undefined) spec.expiresAt = existing.expiresAt;
 
-    const issued = await this.issue(spec);
+    const issued = await this.issueInner(spec);
     if (!issued.ok) return issued;
 
     // Mark the old record revoked after the new one persists so a crash mid-rotate
@@ -303,9 +349,14 @@ export class TokenStore {
   }
 
   /**
-   * Atomic write via `<path>.tmp` + rename. Creates `_auth/` if missing.
-   * Errors don't leak partial state because writeFile+rename is atomic on
-   * both POSIX and Windows.
+   * Atomic write via a unique temp file + rename. Creates `_auth/` if missing.
+   *
+   * The temp name carries a random suffix: a fixed `<path>.tmp` is shared
+   * state, so two overlapping persists write the same file and the second
+   * rename fails ENOENT once the first has moved it away. Rename gives
+   * atomic *visibility* — a reader sees the old or new file, never a partial
+   * one — but not crash durability; there is no fsync of the file or its
+   * directory yet, so a power loss just after rename can still lose the write.
    */
   private async persist(): Promise<Result<void>> {
     // Serialized shape uses snake_case keys for on-disk yaml; the in-memory
@@ -325,11 +376,14 @@ export class TokenStore {
         `Failed to create ${dir}: ${e instanceof Error ? e.message : String(e)}`);
     }
 
-    const tmp = `${this.filePath}.tmp`;
+    const tmp = `${this.filePath}.${randomBytes(6).toString('hex')}.tmp`;
     try {
       await writeFile(tmp, yamlText, { encoding: 'utf8', mode: 0o600 });
       await rename(tmp, this.filePath);
     } catch (e) {
+      // Best-effort sweep so a failed persist doesn't strand a temp file
+      // holding token material next to the registry.
+      try { await unlink(tmp); } catch { /* already gone or never created */ }
       return singleErr('TOKENS_FILE_INVALID',
         `Failed to persist tokens.yaml at ${this.filePath}: ${e instanceof Error ? e.message : String(e)}`);
     }
