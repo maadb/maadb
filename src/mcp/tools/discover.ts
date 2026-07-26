@@ -4,13 +4,63 @@
 
 import { z } from 'zod';
 import path from 'node:path';
+import { statSync } from 'node:fs';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { scanFile, scanDirectory } from '../../scanner.js';
 import { successResponse, errorResponse, getProvenanceMode } from '../response.js';
-import { isContainedIn } from '../../engine/pathguard.js';
+import { isContainedIn, isReallyContainedIn } from '../../engine/pathguard.js';
 import type { InstanceCtx } from '../ctx.js';
 import { withEngine } from '../with-session.js';
 import { checkProject } from '../../instructions/manifest.js';
+
+/** Outcome of gating a maad_scan target against the project root. */
+export type ScanTarget =
+  | { ok: true; absTarget: string; kind: 'file' | 'directory' }
+  | { ok: false; code: 'PATH_OUTSIDE_PROJECT' | 'PATH_NOT_FOUND' };
+
+/**
+ * Resolve and gate a caller-supplied scan path.
+ *
+ * Two gates, in this order:
+ *
+ *  1. Lexical containment — rejects `../` traversal without touching the disk.
+ *  2. Canonical containment — rejects paths that resolve outside the root
+ *     through a symlink or a Windows junction. The lexical check compares
+ *     strings, so `<root>/link/secret.md` passes it while reading from
+ *     wherever `link` points; statSync and readFile both follow links, so
+ *     containment has to be proven against the real path before any content
+ *     is opened.
+ *
+ * The canonical gate runs after the stat so a genuinely missing file still
+ * reports PATH_NOT_FOUND rather than being misreported as an escape —
+ * realpath throws on a path that does not exist.
+ *
+ * Residual: a link retargeted between this check and the subsequent read is
+ * not covered. Closing that needs open-then-verify on a handle, which is
+ * tracked with the scanner budget work.
+ *
+ * Exported so the gate is directly testable — the escape it prevents is not
+ * observable from the tool's success path.
+ */
+export function resolveScanTarget(projectRoot: string, requestedPath: string): ScanTarget {
+  const absTarget = path.resolve(projectRoot, requestedPath);
+  if (!isContainedIn(absTarget, projectRoot)) {
+    return { ok: false, code: 'PATH_OUTSIDE_PROJECT' };
+  }
+
+  let stat;
+  try {
+    stat = statSync(absTarget);
+  } catch {
+    return { ok: false, code: 'PATH_NOT_FOUND' };
+  }
+
+  if (!isReallyContainedIn(absTarget, projectRoot)) {
+    return { ok: false, code: 'PATH_OUTSIDE_PROJECT' };
+  }
+
+  return { ok: true, absTarget, kind: stat.isFile() ? 'file' : 'directory' };
+}
 
 export function register(server: McpServer, ctx: InstanceCtx): number {
   server.registerTool('maad_scan', {
@@ -20,23 +70,18 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
       project: z.string().optional().describe('Project name (multi-project mode only)'),
     }),
   }, async (args, extra) => withEngine(ctx, extra, 'maad_scan', args, async ({ projectRoot }) => {
-    const absTarget = path.resolve(projectRoot, args.path);
-    if (!isContainedIn(absTarget, projectRoot)) {
-      return errorResponse([{ code: 'PATH_OUTSIDE_PROJECT', message: `Scan path must be within the project root: ${args.path}` } as any]);
+    const target = resolveScanTarget(projectRoot, args.path);
+    if (!target.ok) {
+      const message = target.code === 'PATH_NOT_FOUND'
+        ? `Not found: ${args.path}`
+        : `Scan path must be within the project root: ${args.path}`;
+      return errorResponse([{ code: target.code, message } as any]);
     }
 
-    const { statSync } = await import('node:fs');
-    let stat;
-    try {
-      stat = statSync(absTarget);
-    } catch {
-      return errorResponse([{ code: 'PATH_NOT_FOUND', message: `Not found: ${args.path}` } as any]);
-    }
-
-    if (stat.isFile()) {
-      return successResponse(await scanFile(absTarget));
+    if (target.kind === 'file') {
+      return successResponse(await scanFile(target.absTarget));
     } else {
-      return successResponse(await scanDirectory(absTarget));
+      return successResponse(await scanDirectory(target.absTarget));
     }
   }));
 

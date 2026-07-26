@@ -419,3 +419,139 @@ describe('TokenStore.activeCount — expiry semantics', () => {
     expect(store.activeCount()).toBe(2); // future + never-expires
   });
 });
+
+// ============================================================================
+// Concurrent mutation
+//
+// issue/revoke/rotate each mutate the in-memory indexes and then serialize the
+// whole record set to disk. Overlapping calls therefore contend on two pieces
+// of shared state: the temp file used for the atomic rename, and the snapshot
+// of `records` each persist writes. Both are covered here.
+// ============================================================================
+
+describe('TokenStore — concurrent mutation', () => {
+  it('concurrent issue keeps memory and disk in agreement', async () => {
+    const loaded = await TokenStore.load(tmpRoot);
+    expect(loaded.ok).toBe(true);
+    if (!loaded.ok) return;
+    const store = loaded.value;
+
+    const N = 25;
+    const results = await Promise.all(
+      Array.from({ length: N }, (_, i) =>
+        store.issue({ role: 'writer', projects: [{ name: `proj-${i}` }] })),
+    );
+
+    // Every issue reports success — a shared temp path surfaces here as a
+    // rename failure on whichever call loses the race.
+    for (const r of results) expect(r.ok).toBe(true);
+
+    const issuedIds = results.flatMap(r => (r.ok ? [r.value.record.id] : []));
+    expect(new Set(issuedIds).size).toBe(N);
+    expect(store.size()).toBe(N);
+
+    // Disk must carry the same set — not merely the same count. A lost write
+    // shows up as a token that still authenticates from memory but is absent
+    // from the file, so compare identities.
+    const reloaded = await TokenStore.load(tmpRoot);
+    expect(reloaded.ok).toBe(true);
+    if (!reloaded.ok) return;
+    expect(reloaded.value.size()).toBe(N);
+    for (const id of issuedIds) {
+      expect(reloaded.value.lookupById(id)).toBeDefined();
+    }
+  });
+
+  it('leaves no temp files behind after concurrent issue', async () => {
+    const loaded = await TokenStore.load(tmpRoot);
+    if (!loaded.ok) return;
+    await Promise.all(
+      Array.from({ length: 10 }, () =>
+        loaded.value.issue({ role: 'reader', projects: [{ name: 'p' }] })),
+    );
+
+    const { readdir } = await import('node:fs/promises');
+    const entries = await readdir(path.join(tmpRoot, '_auth'));
+    expect(entries.filter(e => e.endsWith('.tmp'))).toEqual([]);
+  });
+
+  it('a failed persist does not evict another caller\'s committed token', async () => {
+    const loaded = await TokenStore.load(tmpRoot);
+    if (!loaded.ok) return;
+    const store = loaded.value;
+
+    const first = await store.issue({ role: 'admin', projects: [{ name: '*' }] });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+
+    // Force the next persist to fail by replacing _auth/ with a file, so the
+    // directory create inside persist() errors.
+    const { rm: rmPath, writeFile: write } = await import('node:fs/promises');
+    await rmPath(path.join(tmpRoot, '_auth'), { recursive: true, force: true });
+    await write(path.join(tmpRoot, '_auth'), 'not a directory', 'utf8');
+
+    const failed = await store.issue({ role: 'reader', projects: [{ name: 'p' }] });
+    expect(failed.ok).toBe(false);
+
+    // The rollback must remove the record that failed — and only that one.
+    // Removing by position instead of identity drops whichever record landed
+    // last, which is the previously committed token.
+    expect(store.lookupById(first.value.record.id)).toBeDefined();
+    expect(store.size()).toBe(1);
+    expect(store.list()[0]!.id).toBe(first.value.record.id);
+  });
+
+  it('concurrent revoke and issue both land on disk', async () => {
+    const loaded = await TokenStore.load(tmpRoot);
+    if (!loaded.ok) return;
+    const store = loaded.value;
+
+    const seed = await store.issue({ role: 'admin', projects: [{ name: '*' }] });
+    expect(seed.ok).toBe(true);
+    if (!seed.ok) return;
+
+    const [revoked, issued] = await Promise.all([
+      store.revoke(seed.value.record.id),
+      store.issue({ role: 'writer', projects: [{ name: 'other' }] }),
+    ]);
+    expect(revoked.ok).toBe(true);
+    expect(issued.ok).toBe(true);
+    if (!issued.ok) return;
+
+    const reloaded = await TokenStore.load(tmpRoot);
+    expect(reloaded.ok).toBe(true);
+    if (!reloaded.ok) return;
+    // The revocation and the new token were produced by overlapping calls;
+    // both must survive the round trip.
+    expect(reloaded.value.lookupById(seed.value.record.id)?.revokedAt).toBeDefined();
+    expect(reloaded.value.lookupById(issued.value.record.id)).toBeDefined();
+    expect(reloaded.value.activeCount()).toBe(1);
+  });
+
+  it('concurrent rotate does not deadlock and revokes each predecessor', async () => {
+    const loaded = await TokenStore.load(tmpRoot);
+    if (!loaded.ok) return;
+    const store = loaded.value;
+
+    const seeds = await Promise.all(
+      Array.from({ length: 5 }, (_, i) =>
+        store.issue({ role: 'writer', projects: [{ name: `p-${i}` }] })),
+    );
+    const seedIds = seeds.flatMap(s => (s.ok ? [s.value.record.id] : []));
+    expect(seedIds.length).toBe(5);
+
+    // rotate() issues internally; if it queued behind its own critical section
+    // this would never settle.
+    const rotated = await Promise.all(seedIds.map(id => store.rotate(id)));
+    for (const r of rotated) expect(r.ok).toBe(true);
+
+    const reloaded = await TokenStore.load(tmpRoot);
+    expect(reloaded.ok).toBe(true);
+    if (!reloaded.ok) return;
+    for (const id of seedIds) {
+      expect(reloaded.value.lookupById(id)?.revokedAt).toBeDefined();
+    }
+    expect(reloaded.value.size()).toBe(10);      // 5 superseded + 5 replacements
+    expect(reloaded.value.activeCount()).toBe(5);
+  });
+});
