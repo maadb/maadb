@@ -137,7 +137,7 @@ describe('aggregate ref chain — one-hop resolution', () => {
 });
 
 describe('aggregate ref chain — two-hop resolution', () => {
-  it('groups case_notes by their case\'s client\'s name (canonical jrn-2026-093 shape)', () => {
+  it('groups case_notes by their case\'s client\'s name (canonical cross-doctype shape)', () => {
     const result = engine.aggregate({
       docType: docType('case_note'),
       groupBy: 'case->client->name',

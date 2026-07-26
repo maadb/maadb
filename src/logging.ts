@@ -281,7 +281,7 @@ export function logInstanceReloadProgress(fields: InstanceReloadProgressFields):
   }
 }
 
-// ---- Ops channel readiness self-check (0.7.3, fup-2026-096) ----------------
+// ---- Ops channel readiness self-check (0.7.3) ----------------
 // One info line emitted at engine init so deploy validation can confirm the
 // ops channel is wired correctly. If this line is invisible in `journalctl
 // -u maadb` (or wherever the operator routes opsLog), no other ops event will
@@ -300,7 +300,7 @@ export function logOpsChannelReady(fields: OpsChannelReadyFields): void {
 }
 
 // ---- Schema cache stale event (ops) ---------------------------------------
-// 0.7.7 (fup-2026-202) — emitted when the engine detects that another process
+// 0.7.7 — emitted when the engine detects that another process
 // edited the registry/schema files since our last load and forces a reload
 // before processing a write. Operators tracking how often cross-process
 // schema-cache drift fires watch this event; high frequency suggests the
@@ -321,7 +321,7 @@ export function logSchemaCacheStale(fields: SchemaCacheStaleFields): void {
 // 0.6.10 — emitted when a git commit attached to a write fails (stage
 // succeeded but commit threw / returned no sha / status threw). Before this
 // release, commit failures were caught and silently dropped — producing the
-// fup-066 symptom where bulk writes ack'd durable while git held staged
+// the symptom where bulk writes ack'd durable while git held staged
 // state. Operators grep for `commit_failed` to detect durability drift.
 
 export interface CommitFailureFields {

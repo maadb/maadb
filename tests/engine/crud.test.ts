@@ -285,7 +285,7 @@ describe('bulkCreate', () => {
   });
 });
 
-describe('body thematic-break (fup-2026-091)', () => {
+describe('body thematic-break', () => {
   it('accepts --- separators in body as markdown thematic breaks, not multi-document YAML', async () => {
     const body = 'Part A\n\n---\n\nPart B\n\n---\n\nPart C';
     const result = await engine.createDocument(

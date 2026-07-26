@@ -1,5 +1,5 @@
 // ============================================================================
-// Bulk-tool item-count cap (0.7.3, fup-2026-190 §1).
+// Bulk-tool item-count cap (0.7.3).
 //
 // Defense-in-depth flood control for maad_bulk_create / maad_bulk_update.
 // Independent of per-session write rate limits — those throttle frequency,

@@ -1,5 +1,5 @@
 // ============================================================================
-// 0.7.3 — maad_query depth hydration (fup-2026-079[a]).
+// 0.7.3 — maad_query depth hydration.
 //
 // The handler in src/mcp/tools/read.ts delegates row hydration to
 // hydrateQueryRows so the cap / sequential-error / meta-shape behavior is

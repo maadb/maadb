@@ -37,7 +37,7 @@ sudo chown root:maad /etc/maad && sudo chmod 750 /etc/maad
 
 ## 2. Generate a bearer token
 
-**0.7.0+:** HTTP transport requires `_auth/tokens.yaml` (in the instance root) with at least one active token. Legacy single-bearer mode (`MAAD_AUTH_TOKEN` as a shared secret) was hard-removed in 0.7.0 — see `docs/specs/0.7.0-scoped-auth.md` and `dec-maadb-071` for rationale.
+**0.7.0+:** HTTP transport requires `_auth/tokens.yaml` (in the instance root) with at least one active token. Legacy single-bearer mode (`MAAD_AUTH_TOKEN` as a shared secret) was hard-removed in 0.7.0 — see `docs/specs/0.7.0-scoped-auth.md` for rationale.
 
 Issue a bearer from the build machine or droplet using the CLI. Plaintext is returned ONCE; the server persists only the SHA-256 hash.
 

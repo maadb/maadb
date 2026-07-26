@@ -208,7 +208,7 @@ describe('EnginePool', () => {
 });
 
 // ============================================================================
-// 0.7.3 — Idle-timeout eviction (fup-2026-150)
+// 0.7.3 — Idle-timeout eviction
 // ============================================================================
 
 describe('EnginePool — idle-timeout eviction (Stage 1)', () => {

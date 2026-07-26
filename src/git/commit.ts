@@ -16,7 +16,7 @@ import type { DocId, DocType, CommitSha } from '../types.js';
 import { commitSha } from '../types.js';
 
 /**
- * 0.7.3 (fup-2026-095) — Per-invocation git identity. The engine should never
+ * 0.7.3 — Per-invocation git identity. The engine should never
  * depend on the host user's `git config user.name/user.email` — when the host
  * lacks identity, every autoCommit silently fails with "Author identity
  * unknown" and the working tree drifts (observed 2026-04-23 on the brain-app
@@ -88,7 +88,7 @@ export function buildGitEnv(): NodeJS.ProcessEnv {
 /**
  * 0.7.0 — Identity snapshot for commit-message enrichment. Populated from
  * the session's token when `MAAD_COMMIT_IDENTITY` is on (default true in
- * 0.7.0 per dec-maadb-071 since fup-066 resolved). Set to false in the
+ * 0.7.0). Set to false in the
  * deploy env to opt out for cautious deployments.
  */
 export interface CommitIdentity {
@@ -134,8 +134,8 @@ export function formatCommitMessage(opts: CommitOptions): string {
 }
 
 /**
- * 0.7.0 — Default ON in 0.7.0 per dec-maadb-071 (fup-066 resolved in 0.6.10
- * removed the silent-commit-failure concern that gated this). Operators opt
+ * 0.7.0 — Default ON in 0.7.0 (0.6.10 removed the silent-commit-failure
+ * concern that gated this). Operators opt
  * out with MAAD_COMMIT_IDENTITY=false.
  */
 export function isCommitIdentityEnabled(): boolean {
@@ -217,7 +217,7 @@ export async function autoCommit(
     const message = formatCommitMessage(opts);
     let result;
     try {
-      // 0.7.3 (fup-2026-095) — inject identity env so we never depend on the
+      // 0.7.3 — inject identity env so we never depend on the
       // host's `git config user.name/user.email`. See buildGitEnv for why
       // this merges over process.env and strips askpass vars.
       result = await git

@@ -1,5 +1,5 @@
 // ============================================================================
-// 0.7.5 — Unix domain socket transport (fup-2026-148).
+// 0.7.5 — Unix domain socket transport.
 //
 // Same MCP/HTTP server, bound to a UDS path instead of host:port. Verifies:
 //   - Bind succeeds; socket file exists with the configured mode
@@ -122,7 +122,7 @@ function parseSseOrJson(text: string): unknown {
   return JSON.parse(text);
 }
 
-describe.skipIf(isWindows)('Unix-socket transport (fup-2026-148)', () => {
+describe.skipIf(isWindows)('Unix-socket transport', () => {
   let handle: HttpTransportHandle | null = null;
   let socketPath: string;
 

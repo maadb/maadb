@@ -16,7 +16,7 @@ export interface TransportInfo {
   kind: TransportKind;
   host?: string | undefined;
   port?: number | undefined;
-  /** 0.7.5 (fup-2026-148) — unix transport socket path. */
+  /** 0.7.5 — unix transport socket path. */
   socketPath?: string | undefined;
   startedAt: string;
 }

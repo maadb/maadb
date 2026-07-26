@@ -1,5 +1,5 @@
 // ============================================================================
-// 0.6.11 — Live notifications tests (fup-2026-035)
+// 0.6.11 — Live notifications tests
 //
 // Unit-tests the fan-out contract: registerNotifier / unregisterNotifier /
 // notifyWrite + subscription filter matching against SessionState. Doesn't

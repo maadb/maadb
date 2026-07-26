@@ -30,7 +30,7 @@ export interface HttpTransportOptions {
   host: string;
   port: number;
   /**
-   * 0.7.5 (fup-2026-148) — When set, the server binds to this Unix domain
+   * 0.7.5 — When set, the server binds to this Unix domain
    * socket path instead of host:port. Same MCP protocol over a different
    * socket, so all auth/session/SSE plumbing is reused unchanged. Intended
    * deployment: trusted-app-process colocated with the engine, socket file
@@ -404,7 +404,7 @@ export async function startHttpTransport(opts: HttpTransportOptions): Promise<Ht
   httpServer.requestTimeout = opts.requestTimeoutMs;
   httpServer.keepAliveTimeout = opts.keepAliveTimeoutMs;
 
-  // 0.7.5 (fup-2026-148) — bind to Unix socket when configured; otherwise TCP.
+  // 0.7.5 — bind to Unix socket when configured; otherwise TCP.
   // Stale-socket cleanup before listen() handles the common case where a
   // crashed prior process left the socket file behind. Socket mode (default
   // 0o660) chmod-applied after listen so transient world-readable race is

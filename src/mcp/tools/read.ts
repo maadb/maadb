@@ -70,7 +70,7 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
       effective = { ok: true, value: newValue } as typeof result;
     }
 
-    // 0.7.3 (fup-2026-079[a]) — depth hydration. Composite that kills the
+    // 0.7.3 — depth hydration. Composite that kills the
     // query-then-N-gets agent pattern.
     let depthMeta: { depth: string; hydrated: number; capped?: boolean } | null = null;
     if (effective.ok && (args.depth === 'cold' || args.depth === 'full')) {

@@ -850,7 +850,7 @@ export class SqliteBackend implements MaadBackend {
     return rows.map(rowToDocument);
   }
 
-  // 0.7.4 (fup-2026-093) — engine_meta key/value access. Used by indexAll for
+  // 0.7.4 — engine_meta key/value access. Used by indexAll for
   // per-type schema-index fingerprints; namespace keys with `<topic>:<id>`.
   getMeta(key: string): string | null {
     const row = this.db.prepare('SELECT value FROM engine_meta WHERE key = ?').get(key) as { value: string } | undefined;

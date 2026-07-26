@@ -42,7 +42,7 @@ describe('guardrails', () => {
     expect(() => auditToolCall('maad_get', { docId: 'test' })).not.toThrow();
   });
 
-  describe('auditToolCall — body redaction (fup-2026-05-19-maadb-pino-redact-write-bodies)', () => {
+  describe('auditToolCall — body redaction', () => {
     let captured: LogEntry[];
     let originalHandler: ((e: LogEntry) => void) | null;
 

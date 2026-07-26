@@ -2,7 +2,7 @@
 // 0.7.0 Scoped Auth — HTTP middleware + boot enforcement tests
 //
 // Replaces the 0.5.0 R2 tests for the shared-secret legacy path (which was
-// hard-removed in 0.7.0 per dec-maadb-071). Covers:
+// hard-removed in 0.7.0). Covers:
 //   - resolveToken: valid, missing, malformed, unknown hash, revoked, expired
 //   - checkHttpAuthAtBoot: missing file + legacy env, missing file alone,
 //     empty registry, healthy registry

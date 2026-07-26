@@ -110,7 +110,7 @@ CREATE INDEX IF NOT EXISTS idx_field_name_value_doc ON field_index(field_name, f
 CREATE INDEX IF NOT EXISTS idx_field_name_numeric_doc ON field_index(field_name, numeric_value, doc_id);
 CREATE INDEX IF NOT EXISTS idx_field_doc_name_value ON field_index(doc_id, field_name, field_value, numeric_value);
 
--- Engine meta key/value store (0.7.4, fup-2026-093). Holds per-type schema
+-- Engine meta key/value store (0.7.4). Holds per-type schema
 -- index fingerprints so indexAll can detect "indexed-field set changed since
 -- last run" and force-rebuild affected types regardless of file-hash skip.
 -- Keys are namespaced (e.g. schema_index_fp:<doc_type>).

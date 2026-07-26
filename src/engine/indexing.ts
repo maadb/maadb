@@ -31,7 +31,7 @@ import type { IndexResult } from './types.js';
 import type { BlockTextInput } from './semantic/types.js';
 import { collectMarkdownFiles, computeNumericValue, toCanonicalRelPath } from './helpers.js';
 
-// 0.7.4 (fup-2026-093) — Per-type schema fingerprint covering the indexed
+// 0.7.4 — Per-type schema fingerprint covering the indexed
 // field set. When a schema edit flips a field's `index: false → true` (or
 // adds/removes an indexed field), the fingerprint changes; indexAll detects
 // that and force-rebuilds docs of the affected type even when their file

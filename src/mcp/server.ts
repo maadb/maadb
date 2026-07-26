@@ -64,7 +64,7 @@ export interface HttpServeOptions {
   allowedOrigins?: readonly string[] | undefined;
   authToken?: string | undefined;
   /**
-   * 0.7.5 (fup-2026-148) — Unix domain socket path. When set with
+   * 0.7.5 — Unix domain socket path. When set with
    * transport='unix' (or 'http' with this populated), the server binds
    * to this socket instead of host:port. Same MCP protocol; trusted-host
    * deploy pattern.
@@ -111,7 +111,7 @@ export async function startServer(opts: ServeOptions): Promise<void> {
   setGuardrailConfig({ dryRun, toolAllowlist: opts.toolAllowlist });
   setProvenanceMode(provenance as any);
   initLogging(readLoggingEnv());
-  // 0.7.3 (fup-2026-096) — emit one self-check line so deploy validation can
+  // 0.7.3 — emit one self-check line so deploy validation can
   // confirm the ops channel is wired before any tool call. If this line is
   // missing in journalctl/stderr, no other ops event (commit_failed,
   // rate_limited, validation_warning) will surface either.
@@ -151,7 +151,7 @@ export async function startServer(opts: ServeOptions): Promise<void> {
 
   // Build the instance-scoped runtime context
   const pool = new EnginePool(instance);
-  // 0.7.3 (fup-2026-150) — start idle-timeout sweeper. Defaults: 30 min idle,
+  // 0.7.3 — start idle-timeout sweeper. Defaults: 30 min idle,
   // 60s sweep. Set MAAD_PROJECT_IDLE_TIMEOUT_MS=0 to disable.
   pool.startIdleSweeper(EnginePool.readIdleSweepEnv());
   const sessions = new SessionRegistry(instance);
@@ -216,7 +216,7 @@ export async function startServer(opts: ServeOptions): Promise<void> {
       process.exit(1);
     }
 
-    // 0.7.0 — Legacy single-bearer mode hard-removed (dec-maadb-071). HTTP
+    // 0.7.0 — Legacy single-bearer mode hard-removed. HTTP
     // requires _auth/tokens.yaml with ≥1 active entry. Stale MAAD_AUTH_TOKEN
     // env config surfaces a distinctive LEGACY_BEARER_REMOVED error so
     // operators see the migration hint before chasing a generic boot failure.

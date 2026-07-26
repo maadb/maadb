@@ -74,7 +74,7 @@ export class GitLayer {
       writeFileSync(gitignorePath, '_backend/\n', 'utf-8');
     }
 
-    // Initial commit. Identity env per fup-2026-095 — same fragility as
+    // Initial commit. Per-invocation identity env — same fragility as
     // autoCommit: a host without `git config user.name/email` would otherwise
     // fail this initial commit too. See buildGitEnv for the merge + askpass
     // stripping rationale.
@@ -131,7 +131,7 @@ export class GitLayer {
     // Inject the committer identity env — annotated tags need a tagger
     // identity and we can't depend on the host having `git config
     // user.name/user.email` set. Same pattern as autoCommit + initRepo
-    // (0.7.3 fup-2026-095); see buildGitEnv for the merge + askpass
+    // (0.7.3); see buildGitEnv for the merge + askpass
     // stripping rationale.
     await this.git
       .env(buildGitEnv())
