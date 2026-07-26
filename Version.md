@@ -1,10 +1,20 @@
 ---
 enabled: true
-current: 0.12.2
+current: 0.12.3
 dev_flow: formal
 ---
 
 # Version History
+
+## 0.12.3 — 2026-07-26
+
+Token-store `reload` serialized against in-flight mutations.
+
+0.12.2 serialized `issue` / `revoke` / `rotate` through a single mutation chain but left `reload` outside it, even though reload replaces the same three in-memory indexes those mutations write. A SIGHUP arriving while a mutation was mid-persist re-read the still-current file and repopulated without the pending record; the write then landed. The token reached disk but not the hash index, so `issue` had already returned success with a bearer that would not authenticate until the next reload or restart. A revocation losing the same race left the revoked token still active in memory. `reload` now runs through the chain.
+
+`runExclusive` also stops handing its callee the previous mutation's resolution value — inert today, since every call site is a zero-argument closure, but a trap for any future callee that takes a parameter.
+
+1210 tests passing (+2), both confirmed to fail against the unserialized reload. No dependency, schema, or database changes. No behavior change for callers beyond the correctness fix: a reload issued during an active mutation now completes after it rather than interleaving.
 
 ## 0.12.2 — 2026-07-25
 
