@@ -475,7 +475,12 @@ describe('TokenStore — concurrent mutation', () => {
     expect(entries.filter(e => e.endsWith('.tmp'))).toEqual([]);
   });
 
-  it('a failed persist does not evict another caller\'s committed token', async () => {
+  // Note: with mutations serialized, the record being rolled back is always the
+  // one this call pushed, so removal by identity and removal by position agree.
+  // This asserts the invariant itself — that a failed persist leaves prior
+  // state intact — rather than the identity-vs-position distinction, which is
+  // not reachable while the mutation chain holds.
+  it('a failed persist rolls back only the failing record', async () => {
     const loaded = await TokenStore.load(tmpRoot);
     if (!loaded.ok) return;
     const store = loaded.value;
@@ -526,6 +531,67 @@ describe('TokenStore — concurrent mutation', () => {
     expect(reloaded.value.lookupById(seed.value.record.id)?.revokedAt).toBeDefined();
     expect(reloaded.value.lookupById(issued.value.record.id)).toBeDefined();
     expect(reloaded.value.activeCount()).toBe(1);
+  });
+
+  it('reload during an in-flight issue does not lose the issued token', async () => {
+    const loaded = await TokenStore.load(tmpRoot);
+    if (!loaded.ok) return;
+    const store = loaded.value;
+
+    // Seed so tokens.yaml exists — otherwise reload takes its file-absent
+    // branch and empties the store, which is a different (louder) failure.
+    const seed = await store.issue({ role: 'admin', projects: [{ name: '*' }] });
+    expect(seed.ok).toBe(true);
+    if (!seed.ok) return;
+
+    // SIGHUP lands while an issue is mid-persist. Reload replaces the same
+    // indexes the issue is writing, so without serialization it re-reads the
+    // still-old file and repopulates without the new record.
+    const issuing = store.issue({ role: 'writer', projects: [{ name: 'p' }] });
+    const reloading = store.reload();
+    const [issued, reloaded] = await Promise.all([issuing, reloading]);
+
+    expect(issued.ok).toBe(true);
+    expect(reloaded.ok).toBe(true);
+    if (!issued.ok) return;
+
+    // The bearer handed to the caller must actually authenticate. This is the
+    // assertion that fails when reload is unserialized: issue returns ok, but
+    // the hash is missing from the index it was just evicted from.
+    expect(store.lookupByHash(hashPlaintext(issued.value.plaintext))).toBeDefined();
+    expect(store.lookupById(issued.value.record.id)).toBeDefined();
+
+    // ...and it must be on disk, so a later restart still honours it.
+    const fresh = await TokenStore.load(tmpRoot);
+    expect(fresh.ok).toBe(true);
+    if (!fresh.ok) return;
+    expect(fresh.value.lookupById(issued.value.record.id)).toBeDefined();
+    expect(fresh.value.lookupById(seed.value.record.id)).toBeDefined();
+  });
+
+  it('reload during an in-flight revoke preserves the revocation', async () => {
+    const loaded = await TokenStore.load(tmpRoot);
+    if (!loaded.ok) return;
+    const store = loaded.value;
+
+    const seed = await store.issue({ role: 'admin', projects: [{ name: '*' }] });
+    expect(seed.ok).toBe(true);
+    if (!seed.ok) return;
+
+    // A revocation losing its race with reload is the dangerous direction:
+    // the token would keep authenticating after the operator revoked it.
+    const revoking = store.revoke(seed.value.record.id);
+    const reloading = store.reload();
+    const [revoked] = await Promise.all([revoking, reloading]);
+    expect(revoked.ok).toBe(true);
+
+    expect(store.lookupById(seed.value.record.id)?.revokedAt).toBeDefined();
+    expect(store.activeCount()).toBe(0);
+
+    const fresh = await TokenStore.load(tmpRoot);
+    expect(fresh.ok).toBe(true);
+    if (!fresh.ok) return;
+    expect(fresh.value.lookupById(seed.value.record.id)?.revokedAt).toBeDefined();
   });
 
   it('concurrent rotate does not deadlock and revokes each predecessor', async () => {
