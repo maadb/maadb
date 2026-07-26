@@ -1,5 +1,5 @@
 // ============================================================================
-// Auth types — 0.7.0 Scoped Auth & Identity (dec-maadb-069 + dec-maadb-071)
+// Auth types — 0.7.0 Scoped Auth & Identity
 //
 // Token registry lives at <instance-root>/_auth/tokens.yaml. Plaintext tokens
 // use format `maad_pat_<32hex>` — 128-bit random + shell-safe + prefix
@@ -8,7 +8,7 @@
 //
 // Records are IMMUTABLE except `revokedAt`. Three operations: issue, rotate,
 // revoke. Any capability change (role / identity / projects) requires revoke
-// + reissue. Rationale in dec-maadb-069 lock #8.
+// + reissue.
 // ============================================================================
 
 import type { Role } from '../mcp/roles.js';
@@ -42,7 +42,7 @@ export interface ProjectCap {
  * Full token record as persisted in tokens.yaml. Plaintext is NOT stored
  * anywhere — only the SHA-256 hash of plaintext. revokedAt is the only
  * field that can transition on an existing record; everything else is
- * immutable (per dec-maadb-069 lock #8).
+ * immutable by design.
  */
 export interface TokenRecord {
   id: TokenId;

@@ -1,5 +1,5 @@
 // ============================================================================
-// 0.7.4 — Reindex schema-fingerprint detection (fup-2026-093).
+// 0.7.4 — Reindex schema-fingerprint detection.
 //
 // Pre-0.7.4: maad_reindex skipped any file whose content hash matched the
 // stored hash, so a schema edit that flipped a field to `index: true` left
@@ -47,7 +47,7 @@ afterAll(async () => {
   }
 });
 
-describe('reindex — schema fingerprint detection (fup-2026-093)', () => {
+describe('reindex — schema fingerprint detection', () => {
   it('first reindex after init records a fingerprint; unchanged schema → skip path works as before', async () => {
     const r = await engine.indexAll();
     // Schema unchanged since the forced indexAll in beforeAll. All files skip

@@ -179,20 +179,20 @@ describe('serializeField', () => {
     expect(serializeField('started_at', preciseDate)).toBe('started_at: "2026-04-16T17:20:30.500Z"');
   });
 
-  // 0.7.3 — coercion-roundtrip guard (fup-2026-199). Any string whose
+  // 0.7.3 — coercion-roundtrip guard. Any string whose
   // unquoted YAML form parses back as a non-string corrupts on read. Earlier
   // static checks (keywords, leading-digit-with-non-digit) miss all-digit and
   // sci-notation literals. The guard parses the candidate back through the
   // CORE_SCHEMA loader and forces quotes if `parsed !== originalString`.
-  describe('coercion-roundtrip guard (fup-2026-199)', () => {
+  describe('coercion-roundtrip guard', () => {
     it('quotes all-digit string (would parse as int)', () => {
-      // Real-world hit: jrn-2026-027 git_ref="4962218" emitted unquoted,
+      // Real-world hit: git_ref="4962218" emitted unquoted,
       // re-read as the integer 4962218.
       expect(serializeField('git_ref', '4962218')).toBe('git_ref: "4962218"');
     });
 
     it('quotes scientific-notation lookalike (would parse as float Infinity)', () => {
-      // Real-world hit: jrn-agent-setup git_ref="1e38892" → Infinity on read.
+      // Real-world hit: git_ref="1e38892" → Infinity on read.
       expect(serializeField('git_ref', '1e38892')).toBe('git_ref: "1e38892"');
     });
 

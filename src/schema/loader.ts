@@ -29,7 +29,7 @@ export async function loadSchemas(projectRoot: string, registry: Registry): Prom
   const errors: MaadError[] = [];
   const schemas = new Map<SchemaRef, SchemaDefinition>();
   const typeToSchema = new Map<string, SchemaRef>();
-  // 0.7.7 (fup-2026-202) — capture mtime+size per file for staleness checks.
+  // 0.7.7 — capture mtime+size per file for staleness checks.
   // Includes the registry file too, so registry edits (new/removed types,
   // path/schemaRef remap) trigger reload alongside per-schema edits.
   const cachedFiles = new Map<string, { mtimeMs: number; size: number }>();

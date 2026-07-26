@@ -1,5 +1,5 @@
 // ============================================================================
-// 0.7.0 P1 — TokenStore primitives (dec-maadb-069 + dec-maadb-071)
+// 0.7.0 P1 — TokenStore primitives
 //
 // Covers the registry primitives shipped in Phase 1: load, lookup, issue,
 // revoke, rotate, atomic persistence. Auth middleware (resolveToken) and

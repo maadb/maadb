@@ -1,5 +1,5 @@
 // ============================================================================
-// 0.7.7 — Multi-process schema-cache coherence (fup-2026-202).
+// 0.7.7 — Multi-process schema-cache coherence.
 //
 // Reproduces the live bug observed 2026-05-01 in the brain:
 //   1. Process A loads schemas, runs maad_reindex --force, populates
@@ -144,7 +144,7 @@ describe('runExclusive — reloads schemas before write when stale', () => {
     }
   });
 
-  it('update path also triggers reload-on-stale (the actual fup-2026-202 repro)', async () => {
+  it('update path also triggers reload-on-stale (the actual repro)', async () => {
     const original = readFileSync(CASE_SCHEMA_PATH, 'utf-8');
 
     // Seed a doc with audit_tag using the original schema (so the field

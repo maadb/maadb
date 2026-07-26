@@ -1,5 +1,5 @@
 // ============================================================================
-// 0.7.6 — Parser / write-path fuzz & security tests (fup-2026-200).
+// 0.7.6 — Parser / write-path fuzz & security tests.
 //
 // Acceptance from the followup:
 //   1. Engine rejects unsafe doc IDs/paths consistently

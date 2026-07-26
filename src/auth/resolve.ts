@@ -5,14 +5,14 @@
 // (HTTP + registry mode) and bypassed entirely in stdio/synthetic mode
 // (which has no token channel and uses the two-cap model from 0.4.0).
 //
-// THREE-CAP RULE (dec-maadb-069 lock #7):
+// THREE-CAP RULE:
 //   effectiveRole(project) = min(
 //     instance.projects[project].role,   // Cap 1: project ceiling
 //     token.cap-for-project,              // Cap 2: token allowlist role
 //     requestedRole                       // Cap 3: voluntary downgrade
 //   )
 //
-// CAP 2 RESOLUTION (dec-maadb-069 lock #4):
+// CAP 2 RESOLUTION:
 //   1. Explicit entry for the project name wins, regardless of list order.
 //   2. Wildcard '*' entry applies if no explicit entry matches.
 //   3. Otherwise the project is forbidden → TOKEN_PROJECT_FORBIDDEN.

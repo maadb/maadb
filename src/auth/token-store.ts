@@ -1,6 +1,5 @@
 // ============================================================================
-// TokenStore — 0.7.0 Scoped Auth registry primitive (dec-maadb-069 +
-//              dec-maadb-071)
+// TokenStore — 0.7.0 Scoped Auth registry primitive
 //
 // Loads and mutates `<instance-root>/_auth/tokens.yaml`. In-memory indexes
 // by hash (lookup key) and by id (CLI / admin tools). Writes are atomic via
@@ -303,7 +302,7 @@ export class TokenStore {
   /**
    * Rotate a token: issue a new token with the SAME capabilities (role,
    * projects, agentId, userId, expiresAt, name) and revoke the old one.
-   * Immediate cutover — no grace window (deferred per dec-maadb-069 lock #10).
+   * Immediate cutover — no grace window (deferred by design).
    * Returns the new record + plaintext; old record retains its id with
    * revokedAt set.
    */

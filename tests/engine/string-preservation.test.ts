@@ -1,5 +1,5 @@
 // ============================================================================
-// 0.7.3 acceptance — round-trip string preservation (fup-2026-199).
+// 0.7.3 acceptance — round-trip string preservation.
 //
 // Mirrors T16/T17 in datetime-preservation.test.ts. The 0.6.7 Phase 2 fix
 // closed datetime coercion via parser/matter.ts CORE_SCHEMA injection and

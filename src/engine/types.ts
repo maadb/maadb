@@ -20,7 +20,7 @@ export interface IndexResult {
   skipped: number;
   errors: import('../errors.js').MaadError[];
   /**
-   * 0.7.4 (fup-2026-093) — types whose indexed-field set changed since the
+   * 0.7.4 — types whose indexed-field set changed since the
    * previous indexAll. Docs of these types are force-rebuilt regardless of
    * file-hash skip; the names surface here so operators can see why a
    * "no change on disk" reindex still did work. Empty when nothing changed.
@@ -58,8 +58,8 @@ export interface IndexResult {
  * update). `writeDurable: false` means the file landed but the commit
  * failed — the caller should surface this to the client (MCP tools stamp
  * `_meta.write_durable: false` + `_meta.commit_failure`) so retries or
- * out-of-band reconciliation can happen. See fup-2026-066 for the original
- * symptom: bulk writes ack'ing durable while git held staged state.
+ * out-of-band reconciliation can happen. The original symptom: bulk writes
+ * ack'ing durable while git held staged state.
  */
 export interface CommitFailureDetail {
   code: string;

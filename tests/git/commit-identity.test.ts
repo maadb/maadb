@@ -1,5 +1,5 @@
 // ============================================================================
-// 0.7.3 — autoCommit identity env (fup-2026-095).
+// 0.7.3 — autoCommit identity env.
 //
 // resolveCommitAuthor() returns the GIT_AUTHOR_* / GIT_COMMITTER_* values that
 // autoCommit threads into the spawned git process via simple-git's .env()

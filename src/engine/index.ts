@@ -102,7 +102,7 @@ export interface HealthReport {
   diskHeadroomMb: number | null;   // free space on the volume holding projectRoot
   // 0.6.10 — commit durability counters. Bumped in `gitCommit` when a
   // trailing commit after a write fails (staged files left uncommitted).
-  // Operators watching for fup-066-style drift filter on
+  // Operators watching for that drift filter on
   // `commitFailuresTotal > 0` or grep for `commit_failed` ops events.
   commitFailuresTotal: number;
   lastCommitFailureAt: string | null;
@@ -243,7 +243,7 @@ export class MaadEngine {
     const startedAtMs = Date.now();
     this.lastWriteOp = { op, startedAtMs };
     try {
-      // 0.7.7 (fup-2026-202) — every write op enters here. Before running
+      // 0.7.7 — every write op enters here. Before running
       // fn() we check whether another process has edited registry/schemas
       // on disk since our last load; if so, reload schemas in-place so the
       // write uses fresh schema (correct field_index entries). Skip for
@@ -481,7 +481,7 @@ export class MaadEngine {
   }
 
   /**
-   * 0.7.7 (fup-2026-202) — Lightweight in-place reload of registry + schemas.
+   * 0.7.7 — Lightweight in-place reload of registry + schemas.
    * Triggered from `runExclusive` when `schemaStore.isStale()` reports drift
    * (another process edited the schema/registry files since our last load).
    *

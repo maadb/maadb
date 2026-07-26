@@ -1,5 +1,5 @@
 // ============================================================================
-// 0.7.3 (fup-2026-079[a]) — maad_query depth hydration helper.
+// 0.7.3 — maad_query depth hydration helper.
 //
 // Composite that kills the query-then-N-gets agent pattern. After the engine
 // finds matching pointer rows, the handler optionally hydrates each row with

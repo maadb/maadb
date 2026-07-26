@@ -211,10 +211,10 @@ describe('composite filters — aggregate', () => {
     expect(open?.count).toBe(3);
   });
 
-  it('aggregate with R1 ref-chain + R2 between (canonical jrn-2026-093 shape)', () => {
+  it('aggregate with R1 ref-chain + R2 between (canonical cross-doctype shape)', () => {
     // case_note grouped by its case's status, filtered to March 2026.
     // This combines R1 (ref chain in groupBy) + R2 (between filter) into the
-    // kind of single-call cross-doctype aggregate jrn-2026-093 called out.
+    // kind of single-call cross-doctype aggregate the spec called out.
     const result = engine.aggregate({
       docType: docType('case'),
       groupBy: 'client->status',

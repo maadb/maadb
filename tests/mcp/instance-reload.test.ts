@@ -1,7 +1,7 @@
 // ============================================================================
 // 0.6.9 — maad_instance_reload + SIGHUP acceptance tests
 //
-// Walks the 13 acceptance criteria from fup-2026-058:
+// Walks the 13 acceptance criteria for instance hot-reload:
 //   #1  maad_instance_reload registered admin-only (role gate in handler)
 //   #2  SIGHUP triggers same reload path, logs instance_reload_start/_complete
 //   #3  Added project visible to maad_projects ≤500ms after reload
@@ -77,7 +77,7 @@ async function rewriteYaml(configPath: string, projects: Array<{ name: string; p
   await writeFile(configPath, `name: test-reload\nprojects:\n${yamlProjects}\n`, 'utf8');
 }
 
-describe('maad_instance_reload + SIGHUP (fup-2026-058)', () => {
+describe('maad_instance_reload + SIGHUP', () => {
   let fixture: { tmpRoot: string; configPath: string; projectPaths: Map<string, string> } | null = null;
 
   afterEach(async () => {

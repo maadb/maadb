@@ -161,7 +161,7 @@ describe('logging', () => {
     expect(args.bearer).toBe('[redacted]');
   });
 
-  // ---- L5c — document body redaction (fup-2026-05-19-maadb-pino-redact-write-bodies)
+  // ---- L5c — document body redaction
   // Defense-in-depth. The canonical path is auditToolCall projecting body fields
   // into byte counts before they reach pino — these tests assert that even if
   // a caller bypasses that projection and writes a raw body into a log payload,
@@ -277,7 +277,7 @@ describe('logging', () => {
     expect(ops.lines[0]!.channel).toBeUndefined();
   });
 
-  // ---- L9 — ops_channel_ready self-check (0.7.3, fup-2026-096) -------------
+  // ---- L9 — ops_channel_ready self-check (0.7.3) -------------
 
   it('L9 — logOpsChannelReady emits one ops line with destination/level/pid', () => {
     logOpsChannelReady({ destination: 'stderr', level: 'info', pid: 12345 });

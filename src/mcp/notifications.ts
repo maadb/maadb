@@ -1,5 +1,5 @@
 // ============================================================================
-// Live notifications — 0.6.11 (fup-2026-035)
+// Live notifications — 0.6.11
 //
 // Per-session notifier registry + filtered fan-out for `maad_subscribe`. Each
 // connected MCP session registers one notifier closure that wraps its

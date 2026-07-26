@@ -310,7 +310,7 @@ export interface SchemaStore {
   getSchema(ref: SchemaRef): SchemaDefinition | undefined;
   getSchemaForType(type: DocType): SchemaDefinition | undefined;
   /**
-   * 0.7.7 (fup-2026-202) — per-file mtime + size captured at load time.
+   * 0.7.7 — per-file mtime + size captured at load time.
    * Keyed by absolute path. Used by `isStale()` to detect cross-process
    * schema edits; if any cached file's on-disk mtime/size has drifted, a
    * concurrent process edited the schema and our in-memory copy is stale.

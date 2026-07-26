@@ -34,14 +34,14 @@ export interface InstanceReloadStats {
 }
 
 /**
- * 0.7.3 (fup-2026-150) — Idle-timeout eviction Stage 1.
+ * 0.7.3 — Idle-timeout eviction Stage 1.
  *
  * Tracks last-touched-at + in-flight refcount per loaded engine. A background
  * sweeper closes engines that have been idle longer than the configured
  * timeout AND have zero in-flight ops. Caps memory growth in multi-tenant
  * deployments where projects are touched once and never again.
  *
- * Stage 2 (LRU + hard cap) is fup-2026-151 — gated on Stage 1 evidence.
+ * Stage 2 (LRU + hard cap) is gated on Stage 1 evidence.
  */
 export interface EvictionStats {
   evictionsTotal: number;

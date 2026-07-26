@@ -5,9 +5,9 @@
 // hashed (SHA-256) and looked up in the TokenStore loaded from
 // `<instance-root>/_auth/tokens.yaml`. Failed lookups, revoked, and expired
 // tokens all map to a plain 401 on the wire — reason surfaces only in the
-// ops log (per dec-maadb-069 lock on failure shape).
+// ops log.
 //
-// Legacy single-bearer fallback is HARD-REMOVED in 0.7.0 per dec-maadb-071.
+// Legacy single-bearer fallback is HARD-REMOVED in 0.7.0.
 // `MAAD_AUTH_TOKEN` without `tokens.yaml` → boot error LEGACY_BEARER_REMOVED.
 // No tokens.yaml at all → boot error TOKENS_FILE_MISSING.
 //

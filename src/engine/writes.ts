@@ -55,7 +55,7 @@ export async function createDocument(
   const existingIds = ctx.backend.getSampleDocIds(dt, 10000).map(id => id as string);
   const id = customDocId ?? generateDocId(regType.idPrefix, fields, existingIds);
 
-  // 0.7.6 (fup-2026-200) — reject hostile docIds at the boundary. Only
+  // 0.7.6 — reject hostile docIds at the boundary. Only
   // customDocId can carry attacker-controlled content; auto-generated IDs are
   // path-safe by construction. Defense-in-depth assertContainedIn fires below
   // before the actual write, so a future bug here can't escape the project.
@@ -102,7 +102,7 @@ export async function createDocument(
 
   const fp = path.join(dirPath, `${id}.md`);
 
-  // 0.7.6 (fup-2026-200) — defense-in-depth: assert the resolved write path
+  // 0.7.6 — defense-in-depth: assert the resolved write path
   // is contained within the project root. checkDocIdSafe above should have
   // already rejected any traversal attempt; this catches future regressions
   // (e.g., a new code path that bypasses validation) before disk touches.
@@ -551,7 +551,7 @@ export async function bulkCreate(
     ];
     const id = rec.docId ?? generateDocId(regType.idPrefix, rec.fields, existingIds);
 
-    // 0.7.6 (fup-2026-200) — same boundary check as createDocument.
+    // 0.7.6 — same boundary check as createDocument.
     const idRejection = checkDocIdSafe(id);
     if (idRejection) {
       failed.push({ index: i, docId: id, error: `INVALID_DOC_ID: ${idRejection.message}` });

@@ -1,5 +1,5 @@
 // ============================================================================
-// 0.7.6 — Doc ID safety validator unit tests (fup-2026-200).
+// 0.7.6 — Doc ID safety validator unit tests.
 // ============================================================================
 
 import { describe, it, expect } from 'vitest';
@@ -11,8 +11,8 @@ describe('checkDocIdSafe — accepts safe IDs', () => {
     'cas-2026-001',
     'note-some-thing-here',
     'a',
-    'jrn-2026-372',
-    'mem-live-repo-as-mcp-host-safety-doc-foot-gu',
+    'jrn-2026-001',
+    'mem-a-long-hyphenated-identifier-truncated-x',
     'agt-claude-dev',
     // Mixed case is allowed
     'Acme123',

@@ -124,7 +124,7 @@ async function cmdServe(): Promise<void> {
   const cliAllowedOrigins: string[] = [];
   let trustProxy: boolean = process.env['MAAD_TRUST_PROXY'] === '1' || process.env['MAAD_TRUST_PROXY'] === 'true';
   let authToken: string | undefined = process.env['MAAD_AUTH_TOKEN'];
-  // 0.7.5 (fup-2026-148) — Unix-socket transport
+  // 0.7.5 — Unix-socket transport
   let socketPath: string | undefined = process.env['MAAD_UNIX_SOCKET'];
   let socketMode: number | undefined = (() => {
     const raw = process.env['MAAD_UNIX_SOCKET_MODE'];

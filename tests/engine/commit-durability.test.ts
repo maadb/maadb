@@ -1,5 +1,5 @@
 // ============================================================================
-// 0.6.10 — Commit durability tests (fup-2026-066)
+// 0.6.10 — Commit durability tests
 //
 // Before 0.6.10, autoCommit caught ALL git errors and returned `null`, which
 // looked identical to a successful no-op. A trailing bulk commit that failed
@@ -25,7 +25,7 @@ import type { CommitOutcome } from '../../src/git/commit.js';
 import { docId as toDocId, docType as toDocType } from '../../src/types.js';
 
 // Minimal SimpleGit shape that autoCommit touches. 0.7.3 added .env() chaining
-// before .commit() per fup-2026-095 — stub returns itself so the chain works
+// before .commit() — stub returns itself so the chain works
 // transparently (env config is a no-op on this fake).
 interface StubGit {
   add: (files: string[]) => Promise<void>;
@@ -94,7 +94,7 @@ describe('autoCommit — CommitOutcome contract', () => {
     expect(outcome.code).toBe('GIT_STATUS_FAILED');
   });
 
-  it('returns failed=GIT_COMMIT_FAILED when git.commit throws (the fup-066 core case)', async () => {
+  it('returns failed=GIT_COMMIT_FAILED when git.commit throws (the core case)', async () => {
     const outcome = await autoCommit(asGit(stubGit({
       commit: async () => { throw new Error('index.lock held'); },
     })), commitOpts);
@@ -185,7 +185,7 @@ async function scaffoldNoteType(engine: MaadEngine, tmpRoot: string): Promise<vo
   }
 }
 
-describe('Engine writes — writeDurable signal propagates (fup-066)', () => {
+describe('Engine writes — writeDurable signal propagates', () => {
   let fx: Fixture | null = null;
 
   afterEach(async () => {
@@ -240,7 +240,7 @@ describe('Engine writes — writeDurable signal propagates (fup-066)', () => {
       ]);
       expect(result.ok).toBe(true);
       if (!result.ok) return;
-      // THE fup-066 CORE ASSERTION: records were written, but batch is flagged non-durable.
+      // THE CORE ASSERTION: records were written, but batch is flagged non-durable.
       expect(result.value.succeeded.length).toBe(3);
       expect(result.value.writeDurable).toBe(false);
       expect(result.value.commitFailure?.code).toBe('GIT_COMMIT_FAILED');
