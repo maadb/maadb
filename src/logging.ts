@@ -173,6 +173,43 @@ export function logAuthFailure(fields: AuthFailureFields): void {
   opsLog.info(fields, 'auth_failure');
 }
 
+// ---- Session principal mismatch event (ops) --------------------------------
+// Emitted when an authenticated request presents a session ID whose bound
+// principal (token id captured at initialize) does not match the request's
+// bearer. The wire response is deliberately identical to an unknown session
+// (404 SESSION_NOT_FOUND) so a wrong-principal caller cannot confirm the
+// session exists; this event is the operator-visible record of the attempt.
+// Token ids (tok-xxx) are non-secret identifiers — no token material here.
+
+export interface SessionPrincipalMismatchFields {
+  remote_addr: string;
+  session_id: string;
+  bound_token_id: string | null;
+  presented_token_id: string | null;
+}
+
+export function logSessionPrincipalMismatch(fields: SessionPrincipalMismatchFields): void {
+  opsLog.warn(fields, 'session_principal_mismatch');
+}
+
+// ---- Session token eviction event (ops) ------------------------------------
+// Emitted when the HTTP transport tears down a session because its bound
+// token is no longer active (revoked, expired, or removed from the registry).
+// The paired audit event is session_close with reason=auth. Eviction fires
+// immediately after in-process revoke/rotate/reload and on every sweeper
+// tick as a backstop — SSE streams do not re-authenticate per event, so
+// teardown is the only way a dead token's stream actually ends.
+
+export interface SessionTokenEvictedFields {
+  session_id: string;
+  token_id: string;
+  reason: 'revoked' | 'expired' | 'removed';
+}
+
+export function logSessionTokenEvicted(fields: SessionTokenEvictedFields): void {
+  opsLog.warn(fields, 'session_token_evicted');
+}
+
 // ---- Pin rejection event (ops) --------------------------------------------
 // 0.6.8 — emitted when X-Maad-Pin-Project header validation fails at HTTP
 // initialize. Operators tracking hosted-deployment misconfiguration (bad

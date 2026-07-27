@@ -14,10 +14,10 @@ import { randomBytes } from 'node:crypto';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { logger } from '../../engine/logger.js';
-import { logAuthFailure, logOriginRejected, logPinRejected } from '../../logging.js';
+import { logAuthFailure, logOriginRejected, logPinRejected, logSessionPrincipalMismatch, logSessionTokenEvicted } from '../../logging.js';
 import { resolveToken } from './auth.js';
 import type { TokenStore } from '../../auth/token-store.js';
-import type { TokenRecord } from '../../auth/types.js';
+import type { TokenId, TokenRecord } from '../../auth/types.js';
 import { validatePinHeader } from './pin.js';
 import { parseAllowedOrigins, checkOrigin } from './origin.js';
 import type { SessionRegistry } from '../../instance/session.js';
@@ -94,12 +94,29 @@ interface TransportEntry {
   createdAt: number;
   lastActivityAt: number;
   remoteAddr: string;
+  /**
+   * Principal binding — the token id resolved from the bearer that initialized
+   * this session. Every subsequent request must present a bearer resolving to
+   * this exact id; the session id itself is routing data, never authorization
+   * proof. `null` only in the tokens-undefined test/dev bypass, where requests
+   * carry no principal to compare. Rotation issues a new token id, so a
+   * rotated bearer can never resume the old session either.
+   */
+  tokenId: TokenId | null;
 }
 
 export interface HttpTransportHandle {
   httpServer: HttpServer;
   close: () => Promise<void>;
   activeSessionCount: () => number;
+  /**
+   * Tear down every session whose bound token is no longer active in the
+   * store (revoked, expired, or removed). Returns the number evicted.
+   * Called immediately after in-process token mutations/reloads (via
+   * ctx.onTokensChanged) and on every sweeper tick as a backstop.
+   * `excludeSessionId` skips one session — see InstanceCtx.onTokensChanged.
+   */
+  evictInvalidTokenSessions: (excludeSessionId?: string) => number;
 }
 
 function remoteAddrFor(req: IncomingMessage, trustProxy: boolean): string {
@@ -143,7 +160,7 @@ export async function startHttpTransport(opts: HttpTransportOptions): Promise<Ht
   }
   const allowedOrigins = originCfg.origins;
 
-  const discardEntry = (sid: string, reason: 'idle' | 'capacity' | 'shutdown'): TransportEntry | undefined => {
+  const discardEntry = (sid: string, reason: 'idle' | 'capacity' | 'shutdown' | 'auth'): TransportEntry | undefined => {
     const entry = entries.get(sid);
     if (!entry) return undefined;
     entries.delete(sid);
@@ -154,6 +171,35 @@ export async function startHttpTransport(opts: HttpTransportOptions): Promise<Ht
   // Fire `pin_ignored_legacy` at most once per process so operators see the
   // signal without getting log spam when a legacy deployment is being probed.
   let legacyPinWarned = false;
+
+  // Principal-binding teardown: close every session whose bound token is no
+  // longer active. Per-request auth already fences a dead bearer's next call,
+  // but an established SSE stream never re-presents its bearer — eviction is
+  // what actually terminates captured authority. Fired via ctx.onTokensChanged
+  // right after in-process revoke/rotate/reload, and from the sweeper as a
+  // backstop (external tokens.yaml edits + expiry have no in-process signal).
+  const evictInvalidTokenSessions = (excludeSessionId?: string): number => {
+    const store = opts.tokens;
+    if (store === undefined) return 0;
+    const nowMs = Date.now();
+    let evicted = 0;
+    for (const [sid, entry] of entries) {
+      if (entry.tokenId === null) continue;
+      if (sid === excludeSessionId) continue;
+      const record = store.lookupById(entry.tokenId);
+      const reason: 'removed' | 'revoked' | 'expired' | null =
+        record === undefined ? 'removed'
+        : record.revokedAt !== undefined ? 'revoked'
+        : record.expiresAt !== undefined && new Date(record.expiresAt).getTime() < nowMs ? 'expired'
+        : null;
+      if (reason === null) continue;
+      logSessionTokenEvicted({ session_id: sid, token_id: entry.tokenId, reason });
+      discardEntry(sid, 'auth');
+      void entry.transport.close().catch(() => { /* best-effort */ });
+      evicted += 1;
+    }
+    return evicted;
+  };
 
   const httpServer = createHttpServer(async (req, res) => {
     try {
@@ -265,9 +311,38 @@ export async function startHttpTransport(opts: HttpTransportOptions): Promise<Ht
       const sessionIdHeader = req.headers['mcp-session-id'];
       const sessionId = typeof sessionIdHeader === 'string' ? sessionIdHeader : undefined;
 
-      // Existing session — route to its transport
+      // Existing session — enforce principal binding, then route.
       if (sessionId && entries.has(sessionId)) {
         const entry = entries.get(sessionId)!;
+        // Principal binding: the session id routes, the bearer authorizes.
+        // The current request's token must be the exact token that
+        // initialized this session — a different valid principal that
+        // learned the session id gets a response wire-identical to an
+        // unknown session, so it cannot even confirm the session exists.
+        // Applies to POST (tool calls), GET (SSE attach/resume), and DELETE
+        // (session teardown) alike; auth ran above, so this check is
+        // synchronous with it in the same event-loop turn (no await between
+        // resolveToken and here — no revoke/rotate can interleave).
+        const presentedTokenId = authedToken?.id ?? null;
+        if (entry.tokenId !== presentedTokenId) {
+          logSessionPrincipalMismatch({
+            remote_addr: remoteAddrFor(req, opts.trustProxy),
+            session_id: sessionId,
+            bound_token_id: entry.tokenId,
+            presented_token_id: presentedTokenId,
+          });
+          writeJsonError(res, 404, 'SESSION_NOT_FOUND', 'Unknown session');
+          return;
+        }
+        // Same principal — refresh the registry's token snapshot to the
+        // record the store holds NOW, so audit identity and any late bind
+        // composition never run on authority older than the current token
+        // record. peek(), not get(): the registry's activity clock is bumped
+        // by tool dispatch, not transport routing.
+        if (authedToken !== null) {
+          const st = opts.sessions.peek(sessionId);
+          if (st) st.token = authedToken;
+        }
         // Inbound client request — bump transport-level lastActivityAt. This
         // is the clock the idle sweeper uses. We intentionally do NOT update
         // it on outbound SSE pushes; those are server activity, not client.
@@ -315,7 +390,13 @@ export async function startHttpTransport(opts: HttpTransportOptions): Promise<Ht
               if (oldest) void oldest.transport.close().catch(() => { /* best-effort */ });
             }
           }
-          entries.set(sid, { transport, createdAt: now, lastActivityAt: now, remoteAddr });
+          entries.set(sid, {
+            transport,
+            createdAt: now,
+            lastActivityAt: now,
+            remoteAddr,
+            tokenId: tokenForClosure?.id ?? null,
+          });
           // Register protocol-level state so registry.destroy(sid) has
           // something to destroy — otherwise the fan-out chain (rate-limit
           // dispose, audit handlers) never runs. withSession may also
@@ -447,6 +528,9 @@ export async function startHttpTransport(opts: HttpTransportOptions): Promise<Ht
   // idleMs so tiny idle thresholds don't produce microsecond spins in tests.
   const sweepIntervalMs = Math.max(1_000, Math.min(60_000, Math.floor(opts.idleMs / 2) || 60_000));
   const idleSweeper = setInterval(() => {
+    // Backstop for principal-binding teardown — catches token expiry and
+    // out-of-process tokens.yaml edits that never fire ctx.onTokensChanged.
+    evictInvalidTokenSessions();
     const now = Date.now();
     const threshold = now - opts.idleMs;
     let swept = 0;
@@ -470,6 +554,7 @@ export async function startHttpTransport(opts: HttpTransportOptions): Promise<Ht
   return {
     httpServer,
     activeSessionCount: () => entries.size,
+    evictInvalidTokenSessions,
     close: async () => {
       clearInterval(idleSweeper);
       await new Promise<void>((resolve) => httpServer.close(() => resolve()));

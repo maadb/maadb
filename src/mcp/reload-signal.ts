@@ -62,6 +62,10 @@ export function installReloadSignalHandler(ctx: InstanceCtx): void {
             { event: 'tokens_reload', total: tokensResult.value.total, active: tokensResult.value.active },
             'tokens_reload',
           );
+          // Reload may have revoked/removed tokens that live sessions are
+          // bound to — tear those sessions down now rather than on the
+          // transport sweeper's next tick.
+          ctx.onTokensChanged?.();
         }
       }
     })();
