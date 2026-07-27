@@ -117,6 +117,11 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
 
     const result = await ctx.tokens!.revoke(toTokenId(args.id));
     if (!result.ok) return errorResponse(result.errors);
+    // Tear down sessions bound to the revoked token now — excluding this
+    // session so the response is not cut off mid-write when an admin revokes
+    // their own token (per-request auth 401s its next call regardless, and
+    // the transport sweeper evicts it on the next tick).
+    ctx.onTokensChanged?.(sid);
     return successResponse({ record: sanitize(result.value) }, 'maad_revoke_token');
   });
 
@@ -134,6 +139,10 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
 
     const result = await ctx.tokens!.rotate(toTokenId(args.id));
     if (!result.ok) return errorResponse(result.errors);
+    // Same self-exclusion as revoke — critical here: closing this session's
+    // transport before the response flushes would destroy the one-time
+    // plaintext of the replacement token.
+    ctx.onTokensChanged?.(sid);
     return successResponse({
       plaintext: result.value.plaintext,
       record: sanitize(result.value.record),

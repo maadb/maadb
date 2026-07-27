@@ -83,7 +83,7 @@ export interface BindOptions {
   source?: BindingSource;
 }
 
-export type SessionCloseReason = 'client' | 'transport' | 'idle' | 'capacity' | 'shutdown';
+export type SessionCloseReason = 'client' | 'transport' | 'idle' | 'capacity' | 'shutdown' | 'auth';
 export type SessionCloseHandler = (sessionId: string, reason: SessionCloseReason) => void;
 export type SessionCreateHandler = (sessionId: string) => void;
 

@@ -276,6 +276,14 @@ export async function startServer(opts: ServeOptions): Promise<void> {
       serverFactory: () => buildMcpServer().server,
     });
 
+    // Principal-binding enforcement: token revoke/rotate/reload immediately
+    // tears down sessions bound to no-longer-active tokens (SSE streams
+    // included). The transport's sweeper provides the backstop for expiry
+    // and out-of-process tokens.yaml edits.
+    ctx.onTokensChanged = (excludeSessionId?: string) => {
+      handle.evictInvalidTokenSessions(excludeSessionId);
+    };
+
     installSignalHandlers(
       { pool, rateLimiter: getRateLimiter() },
       {
