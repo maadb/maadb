@@ -85,7 +85,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 Build:
 
 ```bash
-docker build -t maadb:0.5.0 .
+docker build -t maadb:0.12.3 .
 ```
 
 ## 3. Compose stack with traefik
@@ -114,7 +114,7 @@ services:
       - ./letsencrypt:/letsencrypt
 
   maad:
-    image: maadb:0.5.0
+    image: maadb:0.12.3
     restart: unless-stopped
     environment:
       MAAD_TRANSPORT: http
@@ -224,19 +224,23 @@ docker compose logs maad --since 1m | grep instance_reload
 # audit: instance_reload { source: "sighup", projectsAdded: [...], ... }
 ```
 
-Added projects register lazily (first tool call on the new project boots its engine). Removed projects evict their engine and cancel sessions bound to them (single-mode → `SESSION_CANCELLED` on next call; multi-mode → whitelist pruned, session survives if it has other projects). Path or role mutations on existing projects reject with `INSTANCE_MUTATION_UNSUPPORTED` — until the 0.9.0 eviction policy lands, use remove-then-re-add across two reload cycles.
+Added projects register lazily (first tool call on the new project boots its engine). Removed projects evict their engine and cancel sessions bound to them (single-mode → `SESSION_CANCELLED` on next call; multi-mode → whitelist pruned, session survives if it has other projects). Path or role mutations on existing projects reject with `INSTANCE_MUTATION_UNSUPPORTED` — use remove-then-re-add across two reload cycles rather than an in-place edit.
 
 ## 7. Rotating the token
 
-Today this is a restart:
+Prefer registry rotation (no container recreate). Issue returns new plaintext once; the old secret stops authenticating after reload:
 
 ```bash
-openssl rand -base64 48 | tr -d '=' | tr '+/' '-_' > secrets/maad_auth_token
-chmod 600 secrets/maad_auth_token
-docker compose up -d --force-recreate maad
+# From a one-shot admin container sharing the instance volume, or the built image:
+node /opt/maad/dist/cli.js --instance /data/instance.yaml auth rotate-token --id=tok-<id>
+docker compose kill -s SIGHUP maad
 ```
 
-Clients update their copy out-of-band. In-flight writes get `MAAD_SHUTDOWN_TIMEOUT_MS` to drain before the container exits. Rotation without restart is on the roadmap (0.8.5).
+Distribute the new plaintext to clients out-of-band. Revoke at end-of-life with `auth revoke-token --id=tok-<id>` and the same SIGHUP.
+
+**The SIGHUP is what applies the change.** From 0.12.4, the reload also closes every live HTTP session bound to the rotated or revoked token, terminating its SSE stream; those clients get `SESSION_NOT_FOUND` and must `initialize` again with the new bearer. Until the SIGHUP lands, the old secret keeps authenticating and its sessions stay live — `maad_instance_reload` is not a substitute here, because it does not reload `tokens.yaml`.
+
+If you also keep a Docker secret file for a client process, update that file and recreate only the client — the engine itself authenticates against `_auth/tokens.yaml`, not the secret file.
 
 ## Multi-tenant hosting with X-Maad-Pin-Project (0.6.8+)
 

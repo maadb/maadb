@@ -3,9 +3,9 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/node-%E2%89%A524-brightgreen.svg)](package.json)
 [![TypeScript](https://img.shields.io/badge/typescript-strict-blue.svg)](tsconfig.json)
-[![Tests](https://img.shields.io/badge/tests-1133%20passing-brightgreen.svg)](tests)
+[![Tests](https://img.shields.io/badge/tests-1225%20passing-brightgreen.svg)](tests)
 [![npm](https://img.shields.io/npm/v/@maadb/core.svg)](https://www.npmjs.com/package/@maadb/core)
-[![Version](https://img.shields.io/badge/version-0.11.1-purple.svg)](Version.md)
+[![Version](https://img.shields.io/badge/version-0.12.4-purple.svg)](Version.md)
 
 > **Markdown is the database. The engine makes it queryable.**
 
@@ -293,6 +293,36 @@ session when the limit is reached. Tune the bound with `MAAD_SESSION_MAX` or
 `--session-max`; evicted session IDs receive `SESSION_NOT_FOUND` and must
 initialize again.
 
+**Sessions are bound to the token that opened them.** At `initialize`, a session
+records the identity of the authenticated bearer. Every later request on that
+session — POST, GET-SSE, DELETE — must present the same token. A request that
+authenticates as a different principal is answered exactly as an unknown session
+is: `404 SESSION_NOT_FOUND`, with no way to tell the two cases apart. A session
+ID is routing data, never proof of authorization, and knowing one grants nothing.
+
+**Revoking or rotating a token terminates its sessions immediately.** Revoke,
+rotate, config reload, and expiry all tear down every session bound to the
+affected token and close its SSE stream. An admin revoking or rotating over MCP
+is the one exception: their own session is spared so the in-flight response can
+finish writing — which matters for rotation, since that response carries the
+replacement token's one-time plaintext. The spared session gains no authority.
+Its next request fails per-request authentication, and the sweeper evicts it on
+the following tick.
+
+**Reconnect contract.** A client that receives `SESSION_NOT_FOUND` must start a
+new session with `initialize`; retrying the same session ID will never succeed,
+whatever the cause — eviction, expiry, revocation, or a principal mismatch. After
+rotating a token, discard the old session and initialize a fresh one with the new
+bearer. A client that previously reused one session across several tokens must now
+open one session per token.
+
+> **Known gap (0.12.4):** `maad_instance_reload` does not reload `tokens.yaml`.
+> On a deployment where SIGHUP is unavailable, a revocation written to
+> `tokens.yaml` by another process is not observed by the running server until it
+> restarts, and sessions bound to the revoked token stay live until then. Prefer
+> SIGHUP (`systemctl reload maad`, `docker compose kill -s SIGHUP maad`) to apply
+> revocations.
+
 Per the MCP Streamable HTTP spec, `/mcp` validates the `Origin` header as a
 DNS-rebinding defense. Requests without an `Origin` header — every normal MCP
 client, SDK, or backend service — pass unaffected. A request that presents an
@@ -303,7 +333,7 @@ browser-originated requests; no wildcards, no implicit localhost. Only
 deployments where a web page calls `/mcp` directly need entries — a browser
 talking to your app's backend, which then calls MAADb, does not.
 
-Hot-reload tokens + instance config on edits: `sudo systemctl reload maad` (or `docker compose kill -s SIGHUP maad`). Rotate tokens via `maad auth rotate-token --id=tok-<id>`; revoke via `maad auth revoke-token --id=tok-<id>`. Full auth primitives: [`docs/archive/0.7.0-scoped-auth.md`](docs/archive/0.7.0-scoped-auth.md).
+Hot-reload tokens + instance config on edits: `sudo systemctl reload maad` (or `docker compose kill -s SIGHUP maad`). Rotate tokens via `maad auth rotate-token --id=tok-<id>`; revoke via `maad auth revoke-token --id=tok-<id>` — both take effect on the reload, and any live session bound to the affected token is closed at that moment. Full auth primitives: [`docs/archive/0.7.0-scoped-auth.md`](docs/archive/0.7.0-scoped-auth.md).
 
 Deployment guides:
 
@@ -317,9 +347,9 @@ MCP roles control what tools an agent can use. Ceiling set per project in `insta
 
 | Role | Tools | Use case |
 |------|-------|----------|
-| `reader` (default) | scan, summary, describe, get, query, search, related, schema, aggregate, join, verify, changes_since, history, audit | Read-only agents, reporting, analysis |
+| `reader` (default) | scan, summary, describe, get, query, search, related, schema, aggregate, join, verify, find_orphans, changes_since, semantic_search, history, audit, subscribe, unsubscribe, instructions (check) | Read-only agents, reporting, analysis |
 | `writer` | reader + create, update, validate, bulk_create, bulk_update | Standard agents that read and write records |
-| `admin` | writer + delete, reindex, reload, health, backup, bulk_delete, delete_where, purge_soft_deleted, repair_where | Project setup, schema changes, maintenance, cleanup |
+| `admin` | writer + delete, reindex, reload, health, instructions (refresh), backup, bulk_delete, delete_where, purge_soft_deleted, repair_where, instance_reload, subscriptions, issue_token, revoke_token, rotate_token, list_tokens, show_token | Project setup, schema changes, maintenance, cleanup, auth |
 
 ## Project layout
 
@@ -386,17 +416,20 @@ The vector store is `sqlite-vec` (in the same SQLite file); the lexical leg is F
 
 ## Current state
 
-**Current:** v0.11.1 — pool-mode recovery for false-empty indexes: `maad_reindex` is the one MCP tool allowed to initialize a guarded project so it can rebuild the index, while every other tool keeps failing closed with `INDEX_EMPTY` until recovery succeeds.
+**Current:** v0.12.4 — HTTP MCP sessions bound to the authenticated principal that opened them: a session ID alone no longer reaches a session, and revoke, rotate, reload, and expiry tear down every session bound to the affected token.
 
 Recent shipped scope:
-- **0.11.0** — Transactional engine lifecycle: reload swaps in a fully-initialized replacement or keeps the prior engine, `close()` is awaitable and idempotent, and read-only mode is a literal zero-write contract (no pragmas, migrations, WAL, journal, or git mutation)
-- **0.10.0** — Data-correctness wave: type-faithful YAML list round-trips with full `item_type` validation, soft-delete tombstone isolation across every read surface, collection-correct list-field predicates, portable exclusive creation (`wx` fallback where hard links are unsupported)
-- **0.9.0** — Write-identity + filesystem-boundary enforcement: caller identity tampering fails `FRONTMATTER_GUARD`, symlink/path escapes fail closed via realpath containment, creation is exclusive and race-safe
-- **0.8.4** — Boot false-empty index guard: the engine refuses to serve an empty index over existing markdown (`INDEX_EMPTY`; `MAAD_BOOT_REINDEX=1` rebuilds at boot)
-- **0.8.1–0.8.3** — Index-integrity pass (stale-row sweep guard, docId-collision guard, persisted partial state), per-block re-embed gating, CLI fail-closed exit codes for `maad validate` / `maad reindex`
-- **0.8.0** — Semantic Retrieval: `maad_semantic_search` with an exact/semantic/hybrid mode dial (FTS5 + `sqlite-vec`), opt-in and fully additive
-- **0.7.18** — Heavy-op load-shedding self-defense: admission gate, single-flight coalescing, concurrency cap, and circuit breaker behind the retryable `OVERLOADED` code
-- **0.7.x** — Scoped auth & identity, covering-index read path, integrity & cleanup primitives, transport and write-path hardening
+- **0.12.3** — Token-store `reload` serialized against in-flight mutations, so a SIGHUP during issue/revoke/rotate cannot drop a just-written token from the in-memory index
+- **0.12.2** — Canonical path containment for `maad_scan`; serialized token-store issue/revoke/rotate
+- **0.12.1** — Escape newlines and carriage returns in double-quoted YAML frontmatter scalars
+- **0.12.0** — Managed-instruction lifecycle (`maad instructions` / `maad_instructions`), schema string constraints (`max_length` / `soft_max_length` / `multiline`), HTTP `/mcp` Origin allowlist
+- **0.11.2** — Bounded HTTP session retention (`MAAD_SESSION_MAX`, default 128)
+- **0.11.1** — Pool-mode recovery for false-empty indexes: `maad_reindex` is the one MCP tool allowed to initialize a guarded project
+- **0.11.0** — Transactional engine lifecycle and literal zero-write read-only mode
+- **0.10.0** — Data-correctness wave: type-faithful YAML lists, soft-delete tombstone isolation, exclusive creation
+- **0.9.0** — Write-identity + filesystem-boundary enforcement
+- **0.8.x** — Semantic retrieval (`maad_semantic_search`), false-empty index guard, index-integrity pass
+- **0.7.x** — Scoped auth & identity, integrity/cleanup primitives, transport and write-path hardening
 
 See [Version.md](Version.md) for the full release history and forward plan.
 
@@ -404,7 +437,7 @@ See [Version.md](Version.md) for the full release history and forward plan.
 
 - TypeScript strict, Node.js 24+ (current Active LTS)
 - 6 production dependencies: `better-sqlite3`, `gray-matter`, `js-yaml`, `simple-git`, `@modelcontextprotocol/sdk`, `pino`. Plus one **optional** dependency `sqlite-vec` (semantic retrieval) — lazily loaded only when `MAAD_SEMANTIC_ENABLE` is on; absent or failed to load ⇒ semantic disabled, engine unaffected
-- 1133 tests, Vitest — run on every push/PR across Ubuntu and Windows
+- 1225 tests, Vitest — run on every push/PR across Ubuntu and Windows
 - MIT license, pre-1.0, actively developed
 
 ## License
