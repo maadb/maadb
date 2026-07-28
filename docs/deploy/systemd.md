@@ -4,7 +4,7 @@ Reference guide for running `maad serve --transport http` under systemd behind a
 
 ## Prerequisites
 
-- Node.js 22+
+- Node.js 24+
 - Git
 - A built MAADB checkout (`npm install && npm run build`) or a published npm install
 - A system user to run the service (not root)
@@ -37,9 +37,9 @@ sudo chown root:maad /etc/maad && sudo chmod 750 /etc/maad
 
 ## 2. Generate a bearer token
 
-**0.7.0+:** HTTP transport requires `_auth/tokens.yaml` (in the instance root) with at least one active token. Legacy single-bearer mode (`MAAD_AUTH_TOKEN` as a shared secret) was hard-removed in 0.7.0 — see `docs/specs/0.7.0-scoped-auth.md` for rationale.
+**0.7.0+:** HTTP transport requires `_auth/tokens.yaml` (in the instance root) with at least one active token. Legacy single-bearer mode (`MAAD_AUTH_TOKEN` as a shared secret) was hard-removed in 0.7.0 — see [`docs/archive/0.7.0-scoped-auth.md`](../archive/0.7.0-scoped-auth.md) for the design archive.
 
-Issue a bearer from the build machine or droplet using the CLI. Plaintext is returned ONCE; the server persists only the SHA-256 hash.
+Issue a bearer from the build host using the CLI. Plaintext is returned ONCE; the server persists only the SHA-256 hash.
 
 ```bash
 node /opt/maad/maadb/dist/cli.js --instance /opt/maad/instance.yaml auth issue-token \
@@ -52,6 +52,8 @@ Rotate without losing the slot via `maad auth rotate-token --id=tok-<id>` (retur
 
 Hot reload after editing tokens.yaml: `sudo systemctl reload maad` (SIGHUP re-parses both instance.yaml and tokens.yaml in-place without restarting).
 
+From 0.12.4, that reload also closes every live HTTP session bound to a token the reload revoked or rotated, terminating its SSE stream; those clients receive `SESSION_NOT_FOUND` and must `initialize` again with the new bearer. Rotation and revocation are therefore only in force once the SIGHUP lands — before it, the old secret still authenticates and its sessions stay live. Note that `maad_instance_reload` does not cover this: it reloads `instance.yaml` only, so a deployment without SIGHUP has to restart the service to apply a token change.
+
 ## 3. Write the environment file
 
 ```ini
@@ -61,7 +63,7 @@ MAAD_HTTP_HOST=127.0.0.1
 MAAD_HTTP_PORT=7733
 MAAD_INSTANCE=/opt/maad/instance.yaml
 
-# 0.7.0+ — MAAD_AUTH_TOKEN is only set on CLIENTS (e.g. brain-app) as the
+# 0.7.0+ — MAAD_AUTH_TOKEN is only set on CLIENTS (e.g. a gateway) as the
 # plaintext bearer they present. The server's tokens.yaml at
 # <instance-root>/_auth/tokens.yaml is the source of truth. If the server
 # sees MAAD_AUTH_TOKEN set without a companion tokens.yaml it refuses to
@@ -117,10 +119,10 @@ ExecStart=/usr/bin/node /opt/maad/maadb/dist/cli.js serve
 KillSignal=SIGTERM
 TimeoutStopSec=15
 
-# Hot-reload instance.yaml without a restart (0.6.9+). SIGHUP triggers
+# Hot-reload instance.yaml without a restart. SIGHUP triggers
 # maad_instance_reload internally: added projects register lazily, removed
 # projects evict their engine and cancel sessions bound to them, path/role
-# mutations on existing projects are rejected (wait for 0.9.0).
+# mutations on existing projects are rejected (remove-and-re-add instead).
 ExecReload=/bin/kill -HUP $MAINPID
 
 # ops/audit are JSON on stderr by default; journald captures stderr.
@@ -170,7 +172,7 @@ journalctl -u maad --since=-1m | grep instance_reload
 # → audit: instance_reload { source: "sighup", projectsAdded: [...], ... }
 ```
 
-Mutations of existing project paths / roles are rejected with `INSTANCE_MUTATION_UNSUPPORTED` — pending the 0.9.0 eviction policy, the pattern is remove-and-re-add (separate reload cycles) rather than an in-place edit.
+Mutations of existing project paths / roles are rejected with `INSTANCE_MUTATION_UNSUPPORTED` — use remove-and-re-add across separate reload cycles rather than an in-place edit.
 
 ## 5. nginx reverse proxy
 
