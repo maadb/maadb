@@ -1,10 +1,22 @@
 ---
 enabled: true
-current: 0.12.3
+current: 0.12.4
 dev_flow: formal
 ---
 
 # Version History
+
+## 0.12.4 — 2026-07-27
+
+HTTP MCP sessions bound to their authenticated principal.
+
+The HTTP transport authenticated the bearer on every request but selected the session by ID alone, while the session's authority was captured at initialization. Any valid principal that learned a privileged session ID reached that session under the original principal's authority, and revoking or rotating a token did not terminate sessions already established with it. Sessions now record the token id captured at initialize; POST, GET-SSE, and DELETE each reject a mismatch identically to an unknown session — no existence oracle — and emit a `session_principal_mismatch` ops event.
+
+Revocation, rotation, SIGHUP reload, and expiry now tear down every session bound to the affected token, terminating in-flight SSE streams and recording `session_close` with reason `auth`. The rotating caller's own session is exempt so a rotation can still return its one-time plaintext. Sessions invalidated out of process are caught on the existing sweeper tick.
+
+1225 tests passing (+15). No dependency, schema, or database changes. Behavior change: a session ID alone no longer reaches a session — a client that shared one session across bearers must initialize a session per token, and a client whose token is revoked or rotated must re-initialize rather than resume.
+
+Known gap: `maad_instance_reload` does not reload `tokens.yaml`, so a revocation applied out of process is not observed by a running instance until restart or SIGHUP.
 
 ## 0.12.3 — 2026-07-26
 
