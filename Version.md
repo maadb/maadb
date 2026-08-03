@@ -1,10 +1,14 @@
 ---
 enabled: true
-current: 0.12.4
+current: 0.13.0
 dev_flow: formal
 ---
 
 # Version History
+
+## 0.13.0 - 2026-08-03
+
+Add evidence-backed relationship paths with deterministic bounded traversal and canonical edge evidence.
 
 ## 0.12.4 — 2026-07-27
 
