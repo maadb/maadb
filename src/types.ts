@@ -412,6 +412,22 @@ export interface Relationship {
   targetDocId: DocId;
   field: string;
   relationType: 'ref' | 'mention';
+  /**
+   * Canonical extraction evidence. Optional on the in-memory input type so
+   * pre-evidence integrations remain source-compatible; the SQLite reader
+   * always returns the object, with null members for legacy rows until they
+   * are rebuilt by reindex.
+   */
+  evidence?: RelationshipEvidence;
+}
+
+export interface RelationshipEvidence {
+  sourceLine: number | null;
+  sourceBlockId: BlockId | null;
+  origin: {
+    kind: 'field' | 'annotation';
+    name: string;
+  } | null;
 }
 
 // --- Backend Types ---------------------------------------------------------

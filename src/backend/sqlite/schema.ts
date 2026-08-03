@@ -68,7 +68,10 @@ CREATE TABLE IF NOT EXISTS relationships (
   source_doc_id   TEXT NOT NULL REFERENCES documents(doc_id) ON DELETE CASCADE,
   target_doc_id   TEXT NOT NULL,
   field           TEXT NOT NULL,
-  relation_type   TEXT NOT NULL CHECK(relation_type IN ('ref', 'mention'))
+  relation_type   TEXT NOT NULL CHECK(relation_type IN ('ref', 'mention')),
+  source_line     INTEGER,
+  source_block_id TEXT,
+  origin_kind     TEXT CHECK(origin_kind IN ('field', 'annotation'))
 );
 CREATE INDEX IF NOT EXISTS idx_rel_source ON relationships(source_doc_id);
 CREATE INDEX IF NOT EXISTS idx_rel_target ON relationships(target_doc_id);

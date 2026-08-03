@@ -10,6 +10,7 @@ import { resultToResponse, errorResponse, attachMeta, guardResponseSize } from '
 import type { InstanceCtx } from '../ctx.js';
 import { withEngine } from '../with-session.js';
 import { hydrateQueryRows } from '../query-depth.js';
+import { RELATIONSHIP_PATH_LIMITS } from '../../engine/types.js';
 
 export function register(server: McpServer, ctx: InstanceCtx): number {
   server.registerTool('maad_get', {
@@ -139,6 +140,46 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
     }),
   }, async (args, extra) => withEngine(ctx, extra, 'maad_related', args, ({ engine }) => {
     return resultToResponse(engine.listRelated(docId(args.docId), args.direction), 'maad_related');
+  }));
+
+  server.registerTool('maad_relationship_paths', {
+    description: 'Traverses evidence-backed document relationships within the currently bound project. Deterministic and cycle-safe. Explicit ref edges are included by default; pass extractionKinds including mention to opt into inline mentions.',
+    inputSchema: z.object({
+      startDocId: z.string().describe('Document ID where traversal starts'),
+      targetDocId: z.string().optional().describe('Optional document ID whose paths should be returned'),
+      direction: z.enum(['outgoing', 'incoming', 'both']).default('outgoing')
+        .describe('Direction to traverse relative to each reached document'),
+      maxDepth: z.number().int().min(1).max(RELATIONSHIP_PATH_LIMITS.maxDepth.cap).optional()
+        .describe('Maximum hops (default 2, hard cap 4)'),
+      maxNodes: z.number().int().min(1).max(RELATIONSHIP_PATH_LIMITS.maxNodes.cap).optional()
+        .describe('Maximum returned nodes including the start (default 50, hard cap 100)'),
+      maxEdges: z.number().int().min(1).max(RELATIONSHIP_PATH_LIMITS.maxEdges.cap).optional()
+        .describe('Maximum returned edges (default 100, hard cap 200)'),
+      maxPaths: z.number().int().min(1).max(RELATIONSHIP_PATH_LIMITS.maxPaths.cap).optional()
+        .describe('Maximum deterministic path candidates (default 25, hard cap 50)'),
+      fieldLabels: z.array(z.string().min(1)).optional()
+        .describe('Only traverse relationships whose stable source field label is listed'),
+      extractionKinds: z.array(z.enum(['ref', 'mention'])).optional()
+        .describe('Extraction kinds to include. Defaults to ref only; mention is opt-in.'),
+      project: z.string().optional().describe('Project name (multi-project mode only)'),
+    }),
+  }, async (args, extra) => withEngine(ctx, extra, 'maad_relationship_paths', args, ({ engine }) => {
+    const query: import('../../engine/types.js').RelationshipPathQuery = {
+      startDocId: docId(args.startDocId),
+      direction: args.direction,
+    };
+    if (args.targetDocId !== undefined) query.targetDocId = docId(args.targetDocId);
+    if (args.maxDepth !== undefined) query.maxDepth = args.maxDepth;
+    if (args.maxNodes !== undefined) query.maxNodes = args.maxNodes;
+    if (args.maxEdges !== undefined) query.maxEdges = args.maxEdges;
+    if (args.maxPaths !== undefined) query.maxPaths = args.maxPaths;
+    if (args.fieldLabels !== undefined) query.fieldLabels = args.fieldLabels;
+    if (args.extractionKinds !== undefined) query.extractionKinds = args.extractionKinds;
+    const response = resultToResponse(engine.relationshipPaths(query), 'maad_relationship_paths');
+    return guardResponseSize(response, {
+      tool: 'maad_relationship_paths',
+      hint: 'Reduce depth, node, edge, or path limits; or add field and extraction-kind filters',
+    });
   }));
 
   server.registerTool('maad_schema', {
@@ -317,5 +358,5 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
     return guardResponseSize(response, { tool: 'maad_semantic_search' });
   }));
 
-  return 11;
+  return 12;
 }

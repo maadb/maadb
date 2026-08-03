@@ -70,7 +70,8 @@ Single deterministic pass. One input, one output. No composition, no judgment.
 | `get cold` | Read full file body |
 | `query` | Find documents by type + field filters + projection + sort |
 | `search` | Find extracted objects by primitive/subtype/value |
-| `related` | Graph traversal — outgoing/incoming/both |
+| `related` | One-hop relationship adjacency — outgoing/incoming/both |
+| `relationship_paths` | Deterministic bounded multi-hop traversal with extraction evidence |
 | `schema` | Field definitions, ID prefix, format hints |
 | `aggregate` | Group by field + optional metric (count/sum/avg/min/max) |
 | `join` | Query + follow refs + project fields from both sides |
@@ -151,3 +152,47 @@ The engine handles the fast path. Everything else pushes up.
 | Object attributes / tagging policies | Engine when built, applied via engine tools |
 
 The engine is the data layer. The agent is the reasoning layer. They do not cross.
+
+## Evidence-backed relationship paths
+
+`maad_relationship_paths` is the bounded multi-hop reader for relationships already extracted from markdown. It traverses only the project bound to the current engine session. It does not hydrate bodies, cross project boundaries, infer edges, or create another graph store.
+
+Use the read surfaces by intent:
+
+- `maad_search` finds indexed annotations and fields. `maad_semantic_search` optionally finds similar body content.
+- `maad_related` preserves the existing one-hop adjacency response.
+- `maad_relationship_paths` returns deterministic multi-hop paths and extraction evidence.
+
+### Inputs and bounds
+
+The required input is `startDocId`. Optional inputs are `targetDocId`, `direction` (`outgoing`, `incoming`, or `both`), `fieldLabels`, `extractionKinds`, and four limits.
+
+| Limit | Default | Hard cap |
+|---|---:|---:|
+| `maxDepth` | 2 | 4 |
+| `maxNodes` | 50 | 100 |
+| `maxEdges` | 100 | 200 |
+| `maxPaths` | 25 | 50 |
+
+Values must be positive integers at or below the cap. Over-cap values are rejected; they are not widened or silently ignored. `ref` is the default extraction kind. Inline `mention` edges are traversed only when explicitly included in `extractionKinds`.
+
+Traversal uses deterministic breadth-first ordering and simple paths: a node cannot repeat within one path. Missing targets are terminal. The path budget bounds deterministic path candidates, so both response size and path expansion remain finite. The node count includes the start document.
+
+### Version 1 response
+
+Every successful response has `contractVersion: 1` and includes:
+
+- stable start metadata and optional target metadata;
+- effective direction, filters, and limits;
+- nodes with `docId`, optional `docType`, minimum distance, and `present` or `missing` state;
+- edges with stable `fieldLabel`, `ref` or `mention` extraction kind, canonical evidence, and target state;
+- stable edge and path IDs with ordered node and edge references;
+- `truncation.truncated` and ordered `limitsReached` names.
+
+Canonical evidence contains the source line, source block ID, and origin `{ kind, name }`. Frontmatter references can have null line and block evidence. Inline mentions carry their parsed source line and the containing block ID when one exists. Databases created before evidence columns were added return null evidence for old relationship rows until reindex rebuilds those derived rows from markdown.
+
+Missing targets remain in `nodes` and `edges` with `state: missing` and `targetState: missing`. They do not cause traversal failure. A missing start document does cause a not-found error because traversal requires an indexed starting record.
+
+The tool returns no file paths or document bodies. Its serialized success response passes through the standard MCP response-byte guard; callers can reduce traversal limits or add filters when the response exceeds the configured byte cap.
+
+`maad_describe.capabilities.relationshipPaths` advertises the tool name, contract version, defaults, hard caps, and default extraction kinds. SQLite relationship evidence is derived data. Markdown remains canonical, and reindex reconstructs the evidence and graph edges.

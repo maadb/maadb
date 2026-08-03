@@ -37,7 +37,7 @@ export function extractAnnotationObjects(
   });
 }
 
-function findContainingBlock(line: number, blocks: ParsedBlock[]): BlockId | null {
+export function findContainingBlock(line: number, blocks: ParsedBlock[]): BlockId | null {
   for (const block of blocks) {
     if (line >= block.startLine && line <= block.endLine) {
       return block.id;

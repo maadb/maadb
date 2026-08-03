@@ -347,7 +347,7 @@ MCP roles control what tools an agent can use. Ceiling set per project in `insta
 
 | Role | Tools | Use case |
 |------|-------|----------|
-| `reader` (default) | scan, summary, describe, get, query, search, related, schema, aggregate, join, verify, find_orphans, changes_since, semantic_search, history, audit, subscribe, unsubscribe, instructions (check) | Read-only agents, reporting, analysis |
+| `reader` (default) | scan, summary, describe, get, query, search, related, relationship_paths, schema, aggregate, join, verify, find_orphans, changes_since, semantic_search, history, audit, subscribe, unsubscribe, instructions (check) | Read-only agents, reporting, analysis |
 | `writer` | reader + create, update, validate, bulk_create, bulk_update | Standard agents that read and write records |
 | `admin` | writer + delete, reindex, reload, health, instructions (refresh), backup, bulk_delete, delete_where, purge_soft_deleted, repair_where, instance_reload, subscriptions, issue_token, revoke_token, rotate_token, list_tokens, show_token | Project setup, schema changes, maintenance, cleanup, auth |
 
@@ -382,7 +382,7 @@ my-project/
 All tools return `{ ok: true, data: {...} }` or `{ ok: false, errors: [...] }`. Call `maad_schema <type>` for full field definitions before writing.
 
 **Discover:** `maad_scan`, `maad_summary`, `maad_describe`, `maad_schema`
-**Read:** `maad_get`, `maad_query`, `maad_search`, `maad_related`, `maad_aggregate`, `maad_join`, `maad_verify`, `maad_find_orphans`, `maad_changes_since`, `maad_semantic_search`
+**Read:** `maad_get`, `maad_query`, `maad_search`, `maad_related`, `maad_relationship_paths`, `maad_aggregate`, `maad_join`, `maad_verify`, `maad_find_orphans`, `maad_changes_since`, `maad_semantic_search`
 **Write:** `maad_create`, `maad_update`, `maad_bulk_create`, `maad_bulk_update`, `maad_validate`
 **Maintain:** `maad_delete`, `maad_reindex`, `maad_reload`, `maad_health`, `maad_history`, `maad_audit`, `maad_instructions`
 **Recovery anchors (0.7.10+):** `maad_backup` — annotated git tags as snapshot points.
@@ -390,6 +390,14 @@ All tools return `{ ok: true, data: {...} }` or `{ ok: false, errors: [...] }`. 
 **Live updates (0.6.11+):** `maad_subscribe`, `maad_unsubscribe` — push notifications on durable writes.
 **Instance admin:** `maad_instance_reload`, `maad_subscriptions`.
 **Auth admin (0.7.0+):** `maad_issue_token`, `maad_revoke_token`, `maad_rotate_token`, `maad_list_tokens`, `maad_show_token`.
+
+### Relationship retrieval
+
+- `maad_search` and `maad_semantic_search` find records by indexed content: exact lexical/object matches or optional semantic similarity.
+- `maad_related` returns the existing one-hop incoming/outgoing adjacency shape.
+- `maad_relationship_paths` performs deterministic, cycle-safe, bounded multi-hop traversal from one record in the currently bound project. It returns document metadata, stable field labels, extraction evidence, path references, missing targets, and explicit truncation metadata. Explicit `ref` edges are the default; inline `mention` edges are opt-in.
+
+The versioned response contract and limits are documented in [Evidence-backed relationship paths](docs/framework.md#evidence-backed-relationship-paths).
 
 In multi-project mode, session tools are always available pre-bind: `maad_projects`, `maad_use_project`, `maad_use_projects`, `maad_current_session`.
 

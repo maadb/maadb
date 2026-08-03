@@ -1,4 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import Database from 'better-sqlite3';
+import path from 'node:path';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { SqliteBackend } from '../../src/backend/sqlite/index.js';
 import {
   docId,
@@ -242,7 +246,17 @@ describe('SqliteBackend', () => {
       backend.putDocument(makeDoc('con-jane', 'contact', 'contacts/con-jane.md'));
 
       const rels: Relationship[] = [
-        { sourceDocId: docId('cas-001'), targetDocId: docId('cli-acme'), field: 'client', relationType: 'ref' },
+        {
+          sourceDocId: docId('cas-001'),
+          targetDocId: docId('cli-acme'),
+          field: 'client',
+          relationType: 'ref',
+          evidence: {
+            sourceLine: 17,
+            sourceBlockId: blockId('links'),
+            origin: { kind: 'field', name: 'client' },
+          },
+        },
         { sourceDocId: docId('cas-001'), targetDocId: docId('con-jane'), field: 'primary_contact', relationType: 'ref' },
       ];
       backend.putRelationships(docId('cas-001'), rels);
@@ -251,6 +265,16 @@ describe('SqliteBackend', () => {
     it('gets outgoing relationships', () => {
       const rels = backend.getRelationships(docId('cas-001'), 'outgoing');
       expect(rels).toHaveLength(2);
+      expect(rels.find(rel => rel.field === 'client')?.evidence).toEqual({
+        sourceLine: 17,
+        sourceBlockId: 'links',
+        origin: { kind: 'field', name: 'client' },
+      });
+      expect(rels.find(rel => rel.field === 'primary_contact')?.evidence).toEqual({
+        sourceLine: null,
+        sourceBlockId: null,
+        origin: null,
+      });
     });
 
     it('gets incoming relationships', () => {
@@ -262,6 +286,51 @@ describe('SqliteBackend', () => {
     it('gets both directions', () => {
       const rels = backend.getRelationships(docId('cas-001'), 'both');
       expect(rels).toHaveLength(2); // 2 outgoing, 0 incoming
+    });
+
+    it('migrates a pre-evidence relationship table additively', () => {
+      // Test-only scratch stays in the OS temp root, has a unique owner path,
+      // and is removed in finally. No production path default is introduced.
+      const dir = mkdtempSync(path.join(tmpdir(), 'maadb-rel-migration-'));
+      const dbPath = path.join(dir, 'legacy.db');
+      let migrated: SqliteBackend | null = null;
+      try {
+        const legacy = new Database(dbPath);
+        legacy.exec(`
+          CREATE TABLE documents (
+            doc_id TEXT PRIMARY KEY, doc_type TEXT NOT NULL, schema_ref TEXT NOT NULL,
+            file_path TEXT NOT NULL UNIQUE, file_hash TEXT NOT NULL, version INTEGER NOT NULL,
+            deleted INTEGER NOT NULL, indexed_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+            created_at TEXT NOT NULL, valid INTEGER NOT NULL, partial INTEGER NOT NULL
+          );
+          CREATE TABLE relationships (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_doc_id TEXT NOT NULL,
+            target_doc_id TEXT NOT NULL,
+            field TEXT NOT NULL,
+            relation_type TEXT NOT NULL
+          );
+          INSERT INTO documents VALUES
+            ('doc-source', 'item', 'item.v1', 'items/doc-source.md', 'a', 1, 0, '', '', '', 1, 0),
+            ('doc-target', 'item', 'item.v1', 'items/doc-target.md', 'b', 1, 0, '', '', '', 1, 0);
+          INSERT INTO relationships (source_doc_id, target_doc_id, field, relation_type)
+            VALUES ('doc-source', 'doc-target', 'parent', 'ref');
+        `);
+        legacy.close();
+
+        migrated = new SqliteBackend(dbPath);
+        migrated.init();
+        expect(migrated.getRelationships(docId('doc-source'), 'outgoing')).toEqual([{
+          sourceDocId: 'doc-source',
+          targetDocId: 'doc-target',
+          field: 'parent',
+          relationType: 'ref',
+          evidence: { sourceLine: null, sourceBlockId: null, origin: null },
+        }]);
+      } finally {
+        migrated?.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
     });
   });
 
@@ -417,6 +486,13 @@ describe('SqliteBackend', () => {
       ]);
 
       expect(backend.getRelationships(docId('cas-live'), 'outgoing')).toEqual([]);
+      expect(backend.getRelationships(docId('cas-live'), 'outgoing', true)).toEqual([{
+        sourceDocId: 'cas-live',
+        targetDocId: 'cli-deleted',
+        field: 'client',
+        relationType: 'ref',
+        evidence: { sourceLine: null, sourceBlockId: null, origin: null },
+      }]);
       expect(backend.getStats().totalRelationships).toBe(0);
       expect(backend.countBrokenRefs()).toBe(1);
       expect(backend.getBrokenRefs()).toEqual([expect.objectContaining({

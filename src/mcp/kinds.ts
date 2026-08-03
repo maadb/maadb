@@ -23,6 +23,7 @@ export const READ_TOOLS: ReadonlySet<string> = new Set([
   'maad_query',
   'maad_search',
   'maad_related',
+  'maad_relationship_paths',
   'maad_schema',
   'maad_aggregate',
   'maad_verify',

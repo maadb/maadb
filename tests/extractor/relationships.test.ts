@@ -8,6 +8,7 @@ import {
   docType,
   schemaRef,
   filePath,
+  blockId,
   type Registry,
   type SchemaDefinition,
   type BoundDocument,
@@ -30,13 +31,13 @@ beforeAll(async () => {
   caseSchema = schemaResult.value.getSchemaForType('case' as any)!;
 });
 
-function makeBound(fm: Record<string, unknown>): BoundDocument {
+function makeBound(fm: Record<string, unknown>, blocks: BoundDocument['parsed']['blocks'] = []): BoundDocument {
   return {
     parsed: {
       filePath: filePath('cases/cas-2026-001.md'),
       fileHash: 'abc123',
       frontmatter: fm,
-      blocks: [],
+      blocks,
       valueCalls: [],
       annotations: [],
     },
@@ -64,10 +65,18 @@ describe('extractRelationships', () => {
     expect(refRels).toHaveLength(2);
     expect(refRels.find(r => r.field === 'client')!.targetDocId).toBe('cli-acme');
     expect(refRels.find(r => r.field === 'primary_contact')!.targetDocId).toBe('con-jane-smith');
+    expect(refRels.find(r => r.field === 'client')!.evidence).toEqual({
+      sourceLine: null,
+      sourceBlockId: null,
+      origin: { kind: 'field', name: 'client' },
+    });
   });
 
   it('creates mention relationships from inline annotations with doc_id patterns', () => {
-    const bound = makeBound({ doc_id: 'cas-2026-001', client: 'cli-acme', status: 'open', title: 'Test' });
+    const bound = makeBound(
+      { doc_id: 'cas-2026-001', client: 'cli-acme', status: 'open', title: 'Test' },
+      [{ id: blockId('people'), heading: 'People', level: 2, startLine: 8, endLine: 12 }],
+    );
 
     const annotations: InlineAnnotation[] = [
       {
@@ -91,6 +100,11 @@ describe('extractRelationships', () => {
 
     expect(mentions).toHaveLength(1);
     expect(mentions[0]!.targetDocId).toBe('con-jane-smith');
+    expect(mentions[0]!.evidence).toEqual({
+      sourceLine: 10,
+      sourceBlockId: 'people',
+      origin: { kind: 'annotation', name: 'person' },
+    });
   });
 
   it('returns empty for no refs or mentions', () => {

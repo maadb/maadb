@@ -75,6 +75,12 @@ export class SqliteBackend implements MaadBackend {
     if (required.size > 0) {
       throw new Error(`Database requires migration before read-only use; missing columns: ${[...required].join(', ')}`);
     }
+    const relationshipRequired = new Set(['source_line', 'source_block_id', 'origin_kind']);
+    const relationshipCols = this.db.pragma('table_info(relationships)') as Array<{ name: string }>;
+    for (const col of relationshipCols) relationshipRequired.delete(col.name);
+    if (relationshipRequired.size > 0) {
+      throw new Error(`Database requires migration before read-only use; missing relationship columns: ${[...relationshipRequired].join(', ')}`);
+    }
   }
 
   init(): void {
@@ -109,6 +115,18 @@ export class SqliteBackend implements MaadBackend {
     // rows). Existing rows default to 0 and self-correct on the next reindex.
     if (!cols.some(c => c.name === 'partial')) {
       this.db.exec("ALTER TABLE documents ADD COLUMN partial INTEGER NOT NULL DEFAULT 0");
+    }
+    // Relationship evidence is derived from markdown and additive. Legacy
+    // rows retain null evidence until the next reindex rebuilds them.
+    const relCols = this.db.pragma('table_info(relationships)') as Array<{ name: string }>;
+    if (!relCols.some(c => c.name === 'source_line')) {
+      this.db.exec('ALTER TABLE relationships ADD COLUMN source_line INTEGER');
+    }
+    if (!relCols.some(c => c.name === 'source_block_id')) {
+      this.db.exec('ALTER TABLE relationships ADD COLUMN source_block_id TEXT');
+    }
+    if (!relCols.some(c => c.name === 'origin_kind')) {
+      this.db.exec('ALTER TABLE relationships ADD COLUMN origin_kind TEXT');
     }
     // Created here, after the column is guaranteed present (fresh DBs get it
     // from SCHEMA_SQL's CREATE TABLE; existing DBs from the ALTER above) — it
@@ -200,8 +218,9 @@ export class SqliteBackend implements MaadBackend {
     this.db.prepare('DELETE FROM relationships WHERE source_doc_id = ?').run(docId as string);
 
     const insert = this.db.prepare(`
-      INSERT INTO relationships (source_doc_id, target_doc_id, field, relation_type)
-      VALUES (?, ?, ?, ?)
+      INSERT INTO relationships
+        (source_doc_id, target_doc_id, field, relation_type, source_line, source_block_id, origin_kind)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
     `);
 
     for (const rel of relations) {
@@ -210,6 +229,9 @@ export class SqliteBackend implements MaadBackend {
         rel.targetDocId as string,
         rel.field,
         rel.relationType,
+        rel.evidence?.sourceLine ?? null,
+        rel.evidence?.sourceBlockId ? rel.evidence.sourceBlockId as string : null,
+        rel.evidence?.origin?.kind ?? null,
       );
     }
   }
@@ -562,7 +584,11 @@ export class SqliteBackend implements MaadBackend {
     return row.cnt;
   }
 
-  getRelationships(docId: DocId, direction: 'outgoing' | 'incoming' | 'both'): Relationship[] {
+  getRelationships(
+    docId: DocId,
+    direction: 'outgoing' | 'incoming' | 'both',
+    includeMissingTargets = false,
+  ): Relationship[] {
     const results: Relationship[] = [];
     const id = docId as string;
 
@@ -571,8 +597,10 @@ export class SqliteBackend implements MaadBackend {
         `SELECT r.* FROM relationships r
          JOIN documents sd ON sd.doc_id = r.source_doc_id AND sd.deleted = 0
          LEFT JOIN documents td ON td.doc_id = r.target_doc_id
-         WHERE r.source_doc_id = ? AND (td.doc_id IS NULL OR td.deleted = 0)`,
-      ).all(id) as RawRelRow[];
+         WHERE r.source_doc_id = ? AND (? = 1 OR td.doc_id IS NULL OR td.deleted = 0)
+         ORDER BY r.target_doc_id, r.field, r.relation_type,
+                  COALESCE(r.source_line, -1), COALESCE(r.source_block_id, ''), r.id`,
+      ).all(id, includeMissingTargets ? 1 : 0) as RawRelRow[];
 
       for (const row of rows) {
         results.push({
@@ -580,6 +608,7 @@ export class SqliteBackend implements MaadBackend {
           targetDocId: toDocId(row.target_doc_id),
           field: row.field,
           relationType: row.relation_type as 'ref' | 'mention',
+          evidence: relationshipEvidence(row),
         });
       }
     }
@@ -589,7 +618,9 @@ export class SqliteBackend implements MaadBackend {
         `SELECT r.* FROM relationships r
          JOIN documents sd ON sd.doc_id = r.source_doc_id AND sd.deleted = 0
          JOIN documents td ON td.doc_id = r.target_doc_id AND td.deleted = 0
-         WHERE r.target_doc_id = ?`,
+         WHERE r.target_doc_id = ?
+         ORDER BY r.source_doc_id, r.field, r.relation_type,
+                  COALESCE(r.source_line, -1), COALESCE(r.source_block_id, ''), r.id`,
       ).all(id) as RawRelRow[];
 
       for (const row of rows) {
@@ -598,6 +629,7 @@ export class SqliteBackend implements MaadBackend {
           targetDocId: toDocId(row.target_doc_id),
           field: row.field,
           relationType: row.relation_type as 'ref' | 'mention',
+          evidence: relationshipEvidence(row),
         });
       }
     }
@@ -1101,6 +1133,21 @@ interface RawRelRow {
   target_doc_id: string;
   field: string;
   relation_type: string;
+  source_line: number | null;
+  source_block_id: string | null;
+  origin_kind: string | null;
+}
+
+function relationshipEvidence(row: RawRelRow): NonNullable<Relationship['evidence']> {
+  const origin: NonNullable<Relationship['evidence']>['origin'] =
+    row.origin_kind === 'field' || row.origin_kind === 'annotation'
+    ? { kind: row.origin_kind as 'field' | 'annotation', name: row.field }
+    : null;
+  return {
+    sourceLine: row.source_line,
+    sourceBlockId: row.source_block_id ? toBlockId(row.source_block_id) : null,
+    origin,
+  };
 }
 
 interface RawBlockRow {
