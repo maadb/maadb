@@ -146,6 +146,37 @@ describe('relationshipPaths', () => {
     }
   });
 
+  it('traverses incoming and outgoing edges deterministically with direction both', () => {
+    const query = {
+      startDocId: docId('doc-d'),
+      direction: 'both' as const,
+      maxDepth: 1,
+    };
+    const first = relationshipPaths(context(), query);
+    const second = relationshipPaths(context(), query);
+
+    expect(first).toEqual(second);
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+
+    expect(first.value.direction).toBe('both');
+    expect(first.value.nodes.map(node => node.docId)).toEqual([
+      'doc-d', 'doc-a', 'doc-b', 'doc-c', 'doc-e',
+    ]);
+    expect(first.value.edges.map(edge => [edge.sourceDocId, edge.targetDocId])).toEqual([
+      ['doc-b', 'doc-d'],
+      ['doc-c', 'doc-d'],
+      ['doc-d', 'doc-a'],
+      ['doc-e', 'doc-d'],
+    ]);
+    expect(first.value.paths.map(path => path.nodeIds)).toEqual([
+      ['doc-d', 'doc-b'],
+      ['doc-d', 'doc-c'],
+      ['doc-d', 'doc-a'],
+      ['doc-d', 'doc-e'],
+    ]);
+  });
+
   it.each([
     ['maxDepth', { maxDepth: 1 }],
     ['maxNodes', { maxNodes: 2 }],
