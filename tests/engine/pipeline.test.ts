@@ -51,6 +51,13 @@ describe('describe', () => {
     const clientType = desc.registryTypes.find(t => t.type === 'client');
     expect(clientType).toBeDefined();
     expect(clientType!.docCount).toBe(1);
+    expect(desc.capabilities.relationshipPaths).toEqual({
+      tool: 'maad_relationship_paths',
+      contractVersion: 1,
+      defaults: { maxDepth: 2, maxNodes: 50, maxEdges: 100, maxPaths: 25 },
+      caps: { maxDepth: 4, maxNodes: 100, maxEdges: 200, maxPaths: 50 },
+      defaultExtractionKinds: ['ref'],
+    });
   });
 });
 

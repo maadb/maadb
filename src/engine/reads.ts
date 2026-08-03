@@ -22,6 +22,7 @@ import {
   type DocumentQuery,
   type ObjectQuery,
   type FilterCondition,
+  type Relationship,
 } from '../types.js';
 import { extractBody } from '../writer/index.js';
 import type { EngineContext } from './context.js';
@@ -46,7 +47,15 @@ import type {
   ChangesSinceQuery,
   ChangesPage,
   ChangesSinceParsedCursor,
+  RelationshipPathQuery,
+  RelationshipPathsResult,
+  RelationshipPathNode,
+  RelationshipPathEdge,
+  RelationshipPathReference,
+  RelationshipPathLimitName,
+  RelationshipExtractionKind,
 } from './types.js';
+import { RELATIONSHIP_PATH_LIMITS } from './types.js';
 import { readFrontmatter, readBlockContent, collectMarkdownFiles } from './helpers.js';
 
 export async function getDocument(
@@ -338,6 +347,213 @@ export function listRelated(
   return ok({ docId: id, outgoing, incoming });
 }
 
+export function relationshipPaths(
+  ctx: EngineContext,
+  query: RelationshipPathQuery,
+): Result<RelationshipPathsResult> {
+  const startDoc = ctx.backend.getDocument(query.startDocId);
+  if (!startDoc) {
+    return singleErr('FILE_NOT_FOUND', `Document "${query.startDocId as string}" not found`);
+  }
+
+  const limits: Record<RelationshipPathLimitName, number> = {
+    maxDepth: query.maxDepth ?? RELATIONSHIP_PATH_LIMITS.maxDepth.default,
+    maxNodes: query.maxNodes ?? RELATIONSHIP_PATH_LIMITS.maxNodes.default,
+    maxEdges: query.maxEdges ?? RELATIONSHIP_PATH_LIMITS.maxEdges.default,
+    maxPaths: query.maxPaths ?? RELATIONSHIP_PATH_LIMITS.maxPaths.default,
+  };
+  const limitNames = Object.keys(RELATIONSHIP_PATH_LIMITS) as RelationshipPathLimitName[];
+  for (const name of limitNames) {
+    const value = limits[name];
+    const cap = RELATIONSHIP_PATH_LIMITS[name].cap;
+    if (!Number.isInteger(value) || value < 1 || value > cap) {
+      return singleErr(
+        'INVALID_FIELDS',
+        `${name} must be an integer from 1 through ${cap}`,
+        undefined,
+        { field: name, provided: value, minimum: 1, maximum: cap },
+      );
+    }
+  }
+
+  const direction = query.direction ?? 'outgoing';
+  const compareText = (a: string, b: string): number => a < b ? -1 : a > b ? 1 : 0;
+  const fieldLabels = query.fieldLabels === undefined
+    ? null
+    : [...new Set(query.fieldLabels)].sort(compareText);
+  const extractionKinds: RelationshipExtractionKind[] = [
+    ...new Set<RelationshipExtractionKind>(query.extractionKinds ?? ['ref']),
+  ]
+    .sort(compareText);
+  const fieldSet = fieldLabels === null ? null : new Set(fieldLabels);
+  const kindSet = new Set(extractionKinds);
+
+  const docCache = new Map<string, { docId: DocId; docType: DocType } | null>();
+  docCache.set(startDoc.docId as string, { docId: startDoc.docId, docType: startDoc.docType });
+  const getDoc = (id: DocId): { docId: DocId; docType: DocType } | null => {
+    const key = id as string;
+    if (docCache.has(key)) return docCache.get(key) ?? null;
+    const row = ctx.backend.getDocument(id);
+    const value = row ? { docId: row.docId, docType: row.docType } : null;
+    docCache.set(key, value);
+    return value;
+  };
+
+  const evidenceFor = (rel: Relationship): NonNullable<Relationship['evidence']> => rel.evidence ?? {
+    sourceLine: null,
+    sourceBlockId: null,
+    origin: null,
+  };
+  const relationKey = (rel: Relationship): string => {
+    const evidence = evidenceFor(rel);
+    return JSON.stringify([
+      rel.sourceDocId,
+      rel.targetDocId,
+      rel.field,
+      rel.relationType,
+      evidence.sourceLine,
+      evidence.sourceBlockId,
+      evidence.origin?.kind ?? null,
+      evidence.origin?.name ?? null,
+    ]);
+  };
+  const adjacent = (currentId: DocId): Relationship[] => {
+    const seen = new Set<string>();
+    return ctx.backend.getRelationships(currentId, direction, true)
+      .filter(rel => kindSet.has(rel.relationType)
+        && (fieldSet === null || fieldSet.has(rel.field)))
+      .sort((a, b) => compareText(relationKey(a), relationKey(b)))
+      .filter(rel => {
+        const key = relationKey(rel);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+  };
+
+  const nodes = new Map<string, RelationshipPathNode>();
+  nodes.set(startDoc.docId as string, {
+    docId: startDoc.docId,
+    docType: startDoc.docType,
+    distance: 0,
+    state: 'present',
+  });
+  const edges: RelationshipPathEdge[] = [];
+  const edgeIds = new Map<string, string>();
+  const reachedLimits = new Set<RelationshipPathLimitName>();
+  const queue: Array<{ nodeIds: DocId[]; edgeKeys: string[] }> =
+    query.targetDocId === startDoc.docId ? [] : [{
+      nodeIds: [startDoc.docId],
+      edgeKeys: [],
+    }];
+  const pathCandidates: Array<{ targetDocId: DocId; nodeIds: DocId[]; edgeKeys: string[] }> = [];
+  let candidateCount = 0;
+
+  if (query.targetDocId === startDoc.docId) {
+    pathCandidates.push({ targetDocId: startDoc.docId, nodeIds: [startDoc.docId], edgeKeys: [] });
+  }
+
+  while (queue.length > 0) {
+    const currentPath = queue.shift()!;
+    const currentId = currentPath.nodeIds[currentPath.nodeIds.length - 1]!;
+    const depth = currentPath.edgeKeys.length;
+    const relations = adjacent(currentId);
+
+    if (depth >= limits.maxDepth) {
+      const hasDeeperStep = relations.some(rel => {
+        const neighbor = rel.sourceDocId === currentId ? rel.targetDocId : rel.sourceDocId;
+        return !currentPath.nodeIds.includes(neighbor);
+      });
+      if (hasDeeperStep) reachedLimits.add('maxDepth');
+      continue;
+    }
+
+    for (const rel of relations) {
+      const neighbor = rel.sourceDocId === currentId ? rel.targetDocId : rel.sourceDocId;
+      if (currentPath.nodeIds.includes(neighbor)) continue;
+      if (candidateCount >= limits.maxPaths) {
+        reachedLimits.add('maxPaths');
+        continue;
+      }
+
+      const neighborDoc = getDoc(neighbor);
+      if (!nodes.has(neighbor as string) && nodes.size >= limits.maxNodes) {
+        reachedLimits.add('maxNodes');
+        continue;
+      }
+
+      const key = relationKey(rel);
+      let edgeId = edgeIds.get(key);
+      if (edgeId === undefined) {
+        if (edges.length >= limits.maxEdges) {
+          reachedLimits.add('maxEdges');
+          continue;
+        }
+        edgeId = `edge-${String(edges.length + 1).padStart(4, '0')}`;
+        edgeIds.set(key, edgeId);
+        edges.push({
+          edgeId,
+          sourceDocId: rel.sourceDocId,
+          targetDocId: rel.targetDocId,
+          fieldLabel: rel.field,
+          extractionKind: rel.relationType,
+          evidence: evidenceFor(rel),
+          targetState: getDoc(rel.targetDocId) ? 'present' : 'missing',
+        });
+      }
+
+      if (!nodes.has(neighbor as string)) {
+        nodes.set(neighbor as string, {
+          docId: neighbor,
+          docType: neighborDoc?.docType ?? null,
+          distance: depth + 1,
+          state: neighborDoc ? 'present' : 'missing',
+        });
+      }
+
+      candidateCount++;
+      const nextPath = {
+        nodeIds: [...currentPath.nodeIds, neighbor],
+        edgeKeys: [...currentPath.edgeKeys, key],
+      };
+      if (query.targetDocId === undefined || neighbor === query.targetDocId) {
+        pathCandidates.push({ targetDocId: neighbor, ...nextPath });
+      }
+      if (neighborDoc && neighbor !== query.targetDocId) queue.push(nextPath);
+    }
+  }
+
+  const paths: RelationshipPathReference[] = pathCandidates.map((path, index) => ({
+    pathId: `path-${String(index + 1).padStart(4, '0')}`,
+    targetDocId: path.targetDocId,
+    nodeIds: path.nodeIds,
+    edgeIds: path.edgeKeys.map(key => edgeIds.get(key)!),
+  }));
+  const targetDoc = query.targetDocId ? getDoc(query.targetDocId) : null;
+  const targetReached = query.targetDocId === startDoc.docId
+    || (query.targetDocId !== undefined && paths.some(path => path.targetDocId === query.targetDocId));
+  const limitsReached = limitNames.filter(name => reachedLimits.has(name));
+
+  return ok({
+    contractVersion: 1,
+    start: { docId: startDoc.docId, docType: startDoc.docType, state: 'present' },
+    target: query.targetDocId ? {
+      docId: query.targetDocId,
+      docType: targetDoc?.docType ?? null,
+      state: targetDoc ? 'present' : 'missing',
+      reached: targetReached,
+    } : null,
+    direction,
+    filters: { fieldLabels, extractionKinds },
+    limits,
+    nodes: [...nodes.values()].sort((a, b) => a.distance - b.distance
+      || compareText(a.docId as string, b.docId as string)),
+    edges,
+    paths,
+    truncation: { truncated: limitsReached.length > 0, limitsReached },
+  });
+}
+
 export function describe(ctx: EngineContext): DescribeResult {
   const stats = ctx.backend.getStats();
 
@@ -358,6 +574,25 @@ export function describe(ctx: EngineContext): DescribeResult {
     totalDocuments: stats.totalDocuments,
     lastIndexedAt: stats.lastIndexedAt,
     subtypeInventory: ctx.backend.getSubtypeInventory(20),
+    capabilities: {
+      relationshipPaths: {
+        tool: 'maad_relationship_paths',
+        contractVersion: 1,
+        defaults: {
+          maxDepth: RELATIONSHIP_PATH_LIMITS.maxDepth.default,
+          maxNodes: RELATIONSHIP_PATH_LIMITS.maxNodes.default,
+          maxEdges: RELATIONSHIP_PATH_LIMITS.maxEdges.default,
+          maxPaths: RELATIONSHIP_PATH_LIMITS.maxPaths.default,
+        },
+        caps: {
+          maxDepth: RELATIONSHIP_PATH_LIMITS.maxDepth.cap,
+          maxNodes: RELATIONSHIP_PATH_LIMITS.maxNodes.cap,
+          maxEdges: RELATIONSHIP_PATH_LIMITS.maxEdges.cap,
+          maxPaths: RELATIONSHIP_PATH_LIMITS.maxPaths.cap,
+        },
+        defaultExtractionKinds: ['ref'],
+      },
+    },
   };
 }
 

@@ -11,6 +11,7 @@ import {
   type Relationship,
   type Registry,
 } from '../types.js';
+import { findContainingBlock } from './objects.js';
 
 export function extractRelationships(
   bound: BoundDocument,
@@ -30,6 +31,11 @@ export function extractRelationships(
           targetDocId: toDocId(value),
           field: fieldName,
           relationType: 'ref',
+          evidence: {
+            sourceLine: null,
+            sourceBlockId: null,
+            origin: { kind: 'field', name: fieldName },
+          },
         });
       }
     }
@@ -45,6 +51,11 @@ export function extractRelationships(
               targetDocId: toDocId(item),
               field: fieldName,
               relationType: 'ref',
+              evidence: {
+                sourceLine: null,
+                sourceBlockId: null,
+                origin: { kind: 'field', name: fieldName },
+              },
             });
           }
         }
@@ -68,6 +79,11 @@ export function extractRelationships(
         targetDocId: toDocId(ann.value),
         field: ann.rawType,
         relationType: 'mention',
+        evidence: {
+          sourceLine: ann.location.line,
+          sourceBlockId: findContainingBlock(ann.location.line, bound.parsed.blocks),
+          origin: { kind: 'annotation', name: ann.rawType },
+        },
       });
     }
   }

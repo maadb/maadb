@@ -63,6 +63,8 @@ export type {
   FindResult,
   SearchResult,
   RelatedResult,
+  RelationshipPathsResult,
+  RelationshipPathQuery,
   DescribeResult,
   SummaryResult,
   GetFullResult,
@@ -818,6 +820,7 @@ export class MaadEngine {
   findDocuments(query: import('../types.js').DocumentQuery) { return reads.findDocuments(this.ctx(), query); }
   searchObjects(query: import('../types.js').ObjectQuery) { return reads.searchObjects(this.ctx(), query); }
   listRelated(id: DocId, direction: 'outgoing' | 'incoming' | 'both', types?: DocType[]) { return reads.listRelated(this.ctx(), id, direction, types); }
+  relationshipPaths(query: import('./types.js').RelationshipPathQuery) { return reads.relationshipPaths(this.ctx(), query); }
   describe() { return reads.describe(this.ctx()); }
   summary() { return reads.summary(this.ctx()); }
   getSchema(dt: DocType) { return reads.getSchema(this.ctx(), dt); }

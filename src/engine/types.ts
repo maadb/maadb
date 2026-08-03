@@ -312,6 +312,78 @@ export interface RelatedResult {
   incoming: Array<{ docId: DocId; docType: DocType; field: string }>;
 }
 
+export const RELATIONSHIP_PATH_LIMITS = {
+  maxDepth: { default: 2, cap: 4 },
+  maxNodes: { default: 50, cap: 100 },
+  maxEdges: { default: 100, cap: 200 },
+  maxPaths: { default: 25, cap: 50 },
+} as const;
+
+export type RelationshipPathDirection = 'outgoing' | 'incoming' | 'both';
+export type RelationshipExtractionKind = 'ref' | 'mention';
+export type RelationshipTargetState = 'present' | 'missing';
+export type RelationshipPathLimitName = keyof typeof RELATIONSHIP_PATH_LIMITS;
+
+export interface RelationshipPathQuery {
+  startDocId: DocId;
+  targetDocId?: DocId;
+  direction?: RelationshipPathDirection;
+  maxDepth?: number;
+  maxNodes?: number;
+  maxEdges?: number;
+  maxPaths?: number;
+  fieldLabels?: string[];
+  extractionKinds?: RelationshipExtractionKind[];
+}
+
+export interface RelationshipPathNode {
+  docId: DocId;
+  docType: DocType | null;
+  distance: number;
+  state: RelationshipTargetState;
+}
+
+export interface RelationshipPathEdge {
+  edgeId: string;
+  sourceDocId: DocId;
+  targetDocId: DocId;
+  fieldLabel: string;
+  extractionKind: RelationshipExtractionKind;
+  evidence: NonNullable<Relationship['evidence']>;
+  targetState: RelationshipTargetState;
+}
+
+export interface RelationshipPathReference {
+  pathId: string;
+  targetDocId: DocId;
+  nodeIds: DocId[];
+  edgeIds: string[];
+}
+
+export interface RelationshipPathsResult {
+  contractVersion: 1;
+  start: { docId: DocId; docType: DocType; state: 'present' };
+  target: {
+    docId: DocId;
+    docType: DocType | null;
+    state: RelationshipTargetState;
+    reached: boolean;
+  } | null;
+  direction: RelationshipPathDirection;
+  filters: {
+    fieldLabels: string[] | null;
+    extractionKinds: RelationshipExtractionKind[];
+  };
+  limits: Record<RelationshipPathLimitName, number>;
+  nodes: RelationshipPathNode[];
+  edges: RelationshipPathEdge[];
+  paths: RelationshipPathReference[];
+  truncation: {
+    truncated: boolean;
+    limitsReached: RelationshipPathLimitName[];
+  };
+}
+
 export interface DescribeResult {
   registryTypes: Array<{
     type: string;
@@ -335,6 +407,15 @@ export interface DescribeResult {
     count: number;
     topValues: string[];
   }>;
+  capabilities: {
+    relationshipPaths: {
+      tool: 'maad_relationship_paths';
+      contractVersion: 1;
+      defaults: Record<RelationshipPathLimitName, number>;
+      caps: Record<RelationshipPathLimitName, number>;
+      defaultExtractionKinds: ['ref'];
+    };
+  };
 }
 
 export interface SummaryResult {

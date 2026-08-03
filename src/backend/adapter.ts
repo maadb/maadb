@@ -40,7 +40,11 @@ export interface MaadBackend {
   countDocuments(query: DocumentQuery): number;
   findObjects(query: ObjectQuery): ObjectMatch[];
   countObjects(query: ObjectQuery): number;
-  getRelationships(docId: DocId, direction: 'outgoing' | 'incoming' | 'both'): Relationship[];
+  getRelationships(
+    docId: DocId,
+    direction: 'outgoing' | 'incoming' | 'both',
+    includeMissingTargets?: boolean,
+  ): Relationship[];
   getBlocks(docId: DocId): ParsedBlock[];
 
   // Projection
