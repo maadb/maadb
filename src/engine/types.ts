@@ -13,6 +13,18 @@ import type {
   ValidationWarning,
   FilterCondition,
 } from '../types.js';
+import type { ResolvedHistoryConfig } from '../history/types.js';
+import type { EmbeddingProvider } from './semantic/types.js';
+
+/** Options supplied by hosts when initializing one engine instance. */
+export interface EngineInitOptions {
+  readOnly?: boolean;
+  semantic?: boolean;
+  embeddingProvider?: EmbeddingProvider;
+  guardEmptyIndex?: boolean;
+  /** Resolved per-project history policy. Runtime installation is separate. */
+  history?: ResolvedHistoryConfig;
+}
 
 export interface IndexResult {
   scanned: number;
