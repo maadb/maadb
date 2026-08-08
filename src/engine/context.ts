@@ -8,6 +8,7 @@ import type { GitLayer, CommitOptions, CommitOutcome } from '../git/index.js';
 import type { CommitIdentity } from '../git/commit.js';
 import type { OperationJournal } from './journal.js';
 import type { EmbeddingProvider } from './semantic/types.js';
+import type { HistoryRuntime } from '../history/types.js';
 import { logger } from './logger.js';
 import { logCommitFailure } from '../logging.js';
 
@@ -46,6 +47,8 @@ export interface EngineContext {
   journal: OperationJournal;
   readOnly: boolean;
   commitFailures: CommitFailureTracker;
+  /** Present once the history runtime has been installed for this engine. */
+  history?: HistoryRuntime;
   /**
    * 0.7.0 — Identity snapshot set per-operation by the MCP layer inside the
    * write mutex. When populated AND MAAD_COMMIT_IDENTITY is not "false",
@@ -67,22 +70,27 @@ export interface EngineContext {
 }
 
 /**
- * Run a git commit and return the outcome. When gitLayer is absent (git not
- * initialized or disabled), returns `noop` — the caller treats that as
- * durable since there's no git to reconcile against. When the commit fails,
+ * Run a history-policy commit and return the outcome. Before a history runtime
+ * is installed, this falls back to the legacy direct Git behavior. If both the
+ * runtime and gitLayer are absent, returns `noop`. When the commit fails,
  * the failure is logged on the ops channel AND tallied on
  * `ctx.commitFailures` so `maad_health` can surface it; the caller gets the
  * outcome back and can stamp `write_durable: false` on the MCP response.
  */
 export async function gitCommit(ctx: EngineContext, opts: CommitOptions): Promise<CommitOutcome> {
-  if (!ctx.gitLayer) return { status: 'noop' };
+  if (!ctx.history && !ctx.gitLayer) return { status: 'noop' };
   // 0.7.0 — Thread commit identity through when set by the MCP layer.
   // Engine-level direct callers (CLI imports, tests) leave ctx.commitIdentity
   // undefined; formatCommitMessage then emits the bare title.
   const enriched: CommitOptions = ctx.commitIdentity !== undefined
     ? { ...opts, identity: ctx.commitIdentity }
     : opts;
-  const outcome = await ctx.gitLayer.commit(enriched);
+  const outcome = ctx.history
+    ? await ctx.history.commit(enriched)
+    : await ctx.gitLayer!.commit(enriched);
+  if (!ctx.history && outcome.status !== 'failed') {
+    ctx.journal.completeMany(ctx.journal.findIndexedByFiles(opts.files).map(entry => entry.id));
+  }
   if (outcome.status === 'failed') {
     ctx.commitFailures.count++;
     ctx.commitFailures.lastAt = new Date().toISOString();

@@ -458,11 +458,14 @@ async function writeRepairedRecord(
     return { ok: false, code: 'FILE_READ_ERROR', message: `cannot read ${absPath}: ${e instanceof Error ? e.message : String(e)}` };
   }
   const markdown = generateDocument(newFrontmatter, targetSchema, rawBody.length > 0 ? rawBody : undefined);
+  const journalId = ctx.journal.begin('update', doc.docId as string, absPath);
   try {
     await atomicWrite(absPath, markdown);
   } catch (e) {
+    ctx.journal.complete(journalId);
     return { ok: false, code: 'WRITE_ERROR', message: `atomicWrite failed for ${absPath}: ${e instanceof Error ? e.message : String(e)}` };
   }
+  ctx.journal.advance(journalId, 'file_written');
   const indexResult = await indexFile(ctx, toFilePath(absPath));
   if (!indexResult.ok) {
     return {
@@ -471,5 +474,6 @@ async function writeRepairedRecord(
       message: `index update failed for ${doc.docId as string}: ${indexResult.errors.map((err: MaadError) => err.message).join('; ')}`,
     };
   }
+  ctx.journal.advance(journalId, 'indexed');
   return { ok: true, absPath };
 }

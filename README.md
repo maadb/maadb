@@ -14,7 +14,7 @@ MAADb stores records as markdown files with YAML frontmatter for structured fiel
 ## Why MAADb
 
 - **Markdown is canonical.** Open any record in any text editor — your data is exactly what's on screen, no translation layer.
-- **Git is the audit trail.** Every write is a commit. `maad_history` shows the full change history for any record.
+- **History policy is explicit.** Choose per-write audit commits, a Git-free feed, zero-write reads, batched commits, or annotated snapshots per project. `maad_history` shows available Git history.
 - **LLM-native.** Ships with 30+ MCP tools for discovery, read, write, maintenance, and auth. Designed for agent workflows from the start.
 - **Optional schemas.** Add YAML schemas when you want structure, skip them when you don't. Validation runs on writes, never on old records.
 - **The index is a speed layer.** SQLite stores pointers into your markdown files. Delete it and `maad reindex` rebuilds it from the markdown — your data never depends on the index surviving.
@@ -106,7 +106,7 @@ Runtime layout, client to storage:
                          │
 ┌────────────────────────▼────────────────────────────────┐
 │  Engine (per project)                                   │
-│    parse → validate → extract → index → git-commit      │
+│    parse → validate → extract → index → history policy  │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -199,8 +199,12 @@ projects:
   - `path` — absolute, or relative to the yaml file's directory.
   - `role` — `reader | writer | admin` (default `reader`). This is the project's **role ceiling** — the server-assigned maximum. No session can exceed it.
   - `description` — optional, surfaces in `maad_projects`.
+  - `history_mode` — optional explicit history policy: `audit | feed | read | batch | snapshot`.
+  - `history_options` — optional `max_writes` / `max_delay_ms` thresholds for `batch` and `snapshot`.
 
 Startup validates the file and fails fast on any error.
+
+See [History modes](docs/history-modes.md) for configuration precedence, flush and recovery semantics, health fields, and safe migration from inferred legacy behavior.
 
 Serve:
 
@@ -340,6 +344,7 @@ Deployment guides:
 - [systemd + nginx (bare metal)](docs/deploy/systemd.md)
 - [Docker + traefik](docs/deploy/docker.md)
 - [Change feed — polling patterns + cadence](docs/change-feed.md)
+- [History modes — Git policy, flush, recovery, and migration](docs/history-modes.md)
 
 ## Access roles
 
@@ -349,7 +354,7 @@ MCP roles control what tools an agent can use. Ceiling set per project in `insta
 |------|-------|----------|
 | `reader` (default) | scan, summary, describe, get, query, search, related, relationship_paths, schema, aggregate, join, verify, find_orphans, changes_since, semantic_search, history, audit, subscribe, unsubscribe, instructions (check) | Read-only agents, reporting, analysis |
 | `writer` | reader + create, update, validate, bulk_create, bulk_update | Standard agents that read and write records |
-| `admin` | writer + delete, reindex, reload, health, instructions (refresh), backup, bulk_delete, delete_where, purge_soft_deleted, repair_where, instance_reload, subscriptions, issue_token, revoke_token, rotate_token, list_tokens, show_token | Project setup, schema changes, maintenance, cleanup, auth |
+| `admin` | writer + delete, reindex, reload, health, flush, instructions (refresh), backup, bulk_delete, delete_where, purge_soft_deleted, repair_where, instance_reload, subscriptions, issue_token, revoke_token, rotate_token, list_tokens, show_token | Project setup, schema changes, maintenance, cleanup, auth |
 
 ## Project layout
 
@@ -384,7 +389,7 @@ All tools return `{ ok: true, data: {...} }` or `{ ok: false, errors: [...] }`. 
 **Discover:** `maad_scan`, `maad_summary`, `maad_describe`, `maad_schema`
 **Read:** `maad_get`, `maad_query`, `maad_search`, `maad_related`, `maad_relationship_paths`, `maad_aggregate`, `maad_join`, `maad_verify`, `maad_find_orphans`, `maad_changes_since`, `maad_semantic_search`
 **Write:** `maad_create`, `maad_update`, `maad_bulk_create`, `maad_bulk_update`, `maad_validate`
-**Maintain:** `maad_delete`, `maad_reindex`, `maad_reload`, `maad_health`, `maad_history`, `maad_audit`, `maad_instructions`
+**Maintain:** `maad_delete`, `maad_reindex`, `maad_reload`, `maad_health`, `maad_flush`, `maad_history`, `maad_audit`, `maad_instructions`
 **Recovery anchors (0.7.10+):** `maad_backup` — annotated git tags as snapshot points.
 **Cleanup (0.7.10+ admin, confirm-contract governed):** `maad_bulk_delete`, `maad_delete_where`, `maad_repair_where`, `maad_purge_soft_deleted` — destructive ops are dry-run by default; pass `confirm: true` to mutate. `maxRecords` cap default 100 / ceiling 1000.
 **Live updates (0.6.11+):** `maad_subscribe`, `maad_unsubscribe` — push notifications on durable writes.

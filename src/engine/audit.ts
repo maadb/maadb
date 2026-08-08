@@ -16,12 +16,25 @@ import {
 } from '../types.js';
 import type { EngineContext } from './context.js';
 
+function unavailable<T>(ctx: EngineContext): Result<T> {
+  const mode = ctx.history?.config.effectiveMode;
+  if (mode === 'feed' || mode === 'read') {
+    return singleErr(
+      'HISTORY_DISABLED',
+      `Git history is unavailable in history_mode ${mode}`,
+      undefined,
+      { historyMode: mode },
+    );
+  }
+  return singleErr('GIT_NOT_INITIALIZED', 'Git is not available in this project');
+}
+
 export async function history(
   ctx: EngineContext,
   id: DocId,
   opts?: { limit?: number; since?: string },
 ): Promise<Result<ParsedCommit[]>> {
-  if (!ctx.gitLayer) return singleErr('GIT_NOT_INITIALIZED', 'Git is not available in this project');
+  if (!ctx.gitLayer) return unavailable(ctx);
 
   const doc = ctx.backend.getDocument(id);
   if (!doc) return singleErr('FILE_NOT_FOUND', `Document "${id as string}" not found`);
@@ -36,7 +49,7 @@ export async function diff(
   from: string,
   to?: string,
 ): Promise<Result<DiffResult>> {
-  if (!ctx.gitLayer) return singleErr('GIT_NOT_INITIALIZED', 'Git is not available in this project');
+  if (!ctx.gitLayer) return unavailable(ctx);
 
   const doc = ctx.backend.getDocument(id);
   if (!doc) return singleErr('FILE_NOT_FOUND', `Document "${id as string}" not found`);
@@ -51,7 +64,7 @@ export async function snapshot(
   id: DocId,
   at: string,
 ): Promise<Result<SnapshotResult>> {
-  if (!ctx.gitLayer) return singleErr('GIT_NOT_INITIALIZED', 'Git is not available in this project');
+  if (!ctx.gitLayer) return unavailable(ctx);
 
   const doc = ctx.backend.getDocument(id);
   if (!doc) return singleErr('FILE_NOT_FOUND', `Document "${id as string}" not found`);
@@ -65,7 +78,7 @@ export async function audit(
   ctx: EngineContext,
   opts?: { since?: string; until?: string; docType?: DocType },
 ): Promise<Result<AuditEntry[]>> {
-  if (!ctx.gitLayer) return singleErr('GIT_NOT_INITIALIZED', 'Git is not available in this project');
+  if (!ctx.gitLayer) return unavailable(ctx);
 
   const entries = await ctx.gitLayer.audit(opts);
   return ok(entries);

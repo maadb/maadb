@@ -12,9 +12,10 @@
 
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { resultToResponse } from '../response.js';
+import { errorResponse, resultToResponse } from '../response.js';
 import { withEngine } from '../with-session.js';
 import type { InstanceCtx } from '../ctx.js';
+import { flushHistoryBoundary } from './history-mode.js';
 
 export function register(server: McpServer, ctx: InstanceCtx): number {
   server.registerTool('maad_backup', {
@@ -31,6 +32,10 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
     const mode = args.mode ?? 'create';
 
     if (mode === 'create') {
+      if (engine.health().history.effectiveMode === 'snapshot') {
+        const flush = await flushHistoryBoundary(engine, 'snapshot');
+        if (!flush.ok) return errorResponse([flush.error]);
+      }
       const opts: import('../../engine/types.js').CreateBackupOptions = {};
       if (args.label !== undefined) opts.label = args.label;
       if (args.message !== undefined) opts.message = args.message;

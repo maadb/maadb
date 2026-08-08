@@ -12,6 +12,7 @@ import { cmdGet, cmdQuery, cmdSearch, cmdRelated, cmdSchema, cmdSemanticSearch }
 import { cmdCreate, cmdUpdate } from './commands/write.js';
 import { cmdInit, cmdValidate, cmdReindex, cmdParse, cmdInstructions } from './commands/maintain.js';
 import { cmdHistory, cmdAudit } from './commands/audit.js';
+import { cmdFlush } from './commands/history-mode.js';
 import { cmdAuth } from './commands/auth.js';
 import { startServer } from '../mcp/server.js';
 import { parseAllowedOrigins, splitOriginList } from '../mcp/transport/origin.js';
@@ -75,6 +76,7 @@ async function main(): Promise<void> {
     // Audit
     case 'history':   await cmdHistory(ctx); break;
     case 'audit':     await cmdAudit(ctx); break;
+    case 'flush':     await cmdFlush(ctx); break;
     // Auth (0.7.0)
     case 'auth':     await cmdAuth({ instancePath, args }); break;
     // MCP
@@ -251,6 +253,7 @@ Commands:
   parse <file.md>                   Parse a file and print the result
   history <doc_id>                  Show git history for a document
   audit [--since date]              Show project-wide activity
+  flush                             Flush pending batch/snapshot history writes
   version                           Print the installed version (also --version, -v)
   serve [--transport stdio|http] [--role ...] [--prov ...]  Start MCP server
 
@@ -285,6 +288,7 @@ Environment Variables:
   MAAD_INSTANCE                     Path to instance.yaml (fallback for --instance)
   MAAD_ROLE                         Server role (fallback for --role)
   MAAD_PROV                         Provenance mode (fallback for --prov)
+  MAAD_HISTORY_MODE_DEFAULT         Default history mode when project config omits history_mode
   MAAD_TRANSPORT                    stdio | http | unix (default: stdio)
   MAAD_HTTP_HOST                    HTTP bind host (default: 127.0.0.1)
   MAAD_HTTP_PORT                    HTTP bind port (default: 7733)

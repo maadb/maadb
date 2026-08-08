@@ -157,8 +157,6 @@ export async function createDocument(
     summary: String(fields['name'] ?? fields['title'] ?? id),
     files: [fp],
   });
-  ctx.journal.advance(journalId, 'committed');
-  ctx.journal.complete(journalId);
 
   const result: CreateResult = {
     docId: toDocId(id),
@@ -307,8 +305,6 @@ export async function updateDocument(
       files: [absPath],
     });
   }
-  ctx.journal.advance(journalId, 'committed');
-  ctx.journal.complete(journalId);
 
   const newDoc = ctx.backend.getDocument(id);
 
@@ -356,11 +352,15 @@ export async function deleteDocument(
   }
 
   const journalId = ctx.journal.begin('delete', id as string, absPath);
+  ctx.journal.setFiles(journalId, mode === 'soft'
+    ? [absPath, path.join(path.dirname(absPath), `_deleted_${path.basename(absPath)}`)]
+    : [absPath]);
 
   if (mode === 'hard') {
     try {
       await unlink(absPath);
     } catch {
+      ctx.journal.complete(journalId);
       return singleErr('DELETE_ERROR', `Failed to delete file: ${absPath}`);
     }
     ctx.backend.removeDocument(id);
@@ -369,12 +369,14 @@ export async function deleteDocument(
     const base = path.basename(absPath);
     const deletedPath = path.join(dir, `_deleted_${base}`);
     if (!isWritePathContainedIn(deletedPath, ctx.projectRoot)) {
+      ctx.journal.complete(journalId);
       return singleErr('PATH_OUTSIDE_PROJECT', `Deleted-document path "${deletedPath}" escapes the project root`);
     }
 
     try {
       await rename(absPath, deletedPath);
     } catch {
+      ctx.journal.complete(journalId);
       return singleErr('DELETE_ERROR', `Failed to rename file: ${absPath}`);
     }
 
@@ -392,6 +394,9 @@ export async function deleteDocument(
     // them. (Hard delete handles this via removeDocument.)
     ctx.backend.semantic()?.deleteDoc(id as string);
   }
+
+  ctx.journal.advance(journalId, 'file_written');
+  ctx.journal.advance(journalId, 'indexed');
 
   let commitOutcome: CommitOutcome = { status: 'noop' };
   if (!skipGit) {
@@ -416,9 +421,6 @@ export async function deleteDocument(
       });
     }
   }
-
-  ctx.journal.advance(journalId, 'committed');
-  ctx.journal.complete(journalId);
 
   const result: DeleteResult = {
     docId: id,
@@ -612,21 +614,25 @@ export async function bulkCreate(
       continue;
     }
 
+    const journalId = ctx.journal.begin('create', id, fp);
     try {
       await atomicCreate(fp, markdown);
     } catch (e) {
+      ctx.journal.complete(journalId);
       const error = isAlreadyExistsError(e)
         ? `DUPLICATE_DOC_ID: Document "${id}" already exists on disk`
         : `WRITE_ERROR: ${e instanceof Error ? e.message : String(e)}`;
       failed.push({ index: i, docId: id, error });
       continue;
     }
+    ctx.journal.advance(journalId, 'file_written');
 
     const indexResult = await indexFile(ctx, toFilePath(fp));
     if (!indexResult.ok) {
       failed.push({ index: i, docId: id, error: `Index failed: ${indexResult.errors.map(e => e.message).join('; ')}` });
       continue;
     }
+    ctx.journal.advance(journalId, 'indexed');
 
     allFiles.push(fp);
     const entry: BulkResult['succeeded'][number] = {
@@ -939,6 +945,8 @@ export async function purgeSoftDeleted(
       });
       continue;
     }
+    const journalId = ctx.journal.begin('delete', doc.docId as string, absPath);
+    ctx.journal.setFiles(journalId, [absPath]);
     try {
       await unlink(absPath);
     } catch (e) {
@@ -959,6 +967,8 @@ export async function purgeSoftDeleted(
       });
       continue;
     }
+    ctx.journal.advance(journalId, 'file_written');
+    ctx.journal.advance(journalId, 'indexed');
     purged.push({
       docId: doc.docId as string,
       docType: doc.docType as string,

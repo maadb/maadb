@@ -12,12 +12,27 @@ import path from 'node:path';
 import { parseMatter } from '../parser/matter.js';
 import { ok, err, singleErr, maadError, type Result } from '../errors.js';
 import { parseRole, type Role } from '../mcp/roles.js';
+import { resolveHistoryConfig } from '../history/config.js';
+import type {
+  HistoryAdvisory,
+  HistoryMode,
+  HistoryModeSource,
+  HistoryOptions,
+  ResolvedHistoryConfig,
+} from '../history/types.js';
 
 export interface ProjectConfig {
   name: string;
   path: string;
   role: Role;
   description?: string;
+  /** Effective mode after project/env/inference precedence. */
+  historyMode?: HistoryMode;
+  /** Project-level mode only; null when env/default inference selected it. */
+  configuredHistoryMode?: HistoryMode | null;
+  historyModeSource?: HistoryModeSource;
+  historyOptions?: HistoryOptions;
+  historyAdvisories?: HistoryAdvisory[];
 }
 
 export interface InstanceConfig {
@@ -29,7 +44,10 @@ export interface InstanceConfig {
 
 const VALID_PROJECT_NAME = /^[a-z][a-z0-9_-]*$/;
 
-export async function loadInstance(configPath: string): Promise<Result<InstanceConfig>> {
+export async function loadInstance(
+  configPath: string,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<Result<InstanceConfig>> {
   const resolved = path.resolve(configPath);
 
   if (!existsSync(resolved)) {
@@ -56,10 +74,14 @@ export async function loadInstance(configPath: string): Promise<Result<InstanceC
     return singleErr('PARSE_ERROR', `Failed to parse instance YAML: ${message}`);
   }
 
-  return validateInstance(data, resolved);
+  return validateInstance(data, resolved, env);
 }
 
-export function validateInstance(data: Record<string, unknown>, configPath?: string): Result<InstanceConfig> {
+export function validateInstance(
+  data: Record<string, unknown>,
+  configPath?: string,
+  env: NodeJS.ProcessEnv = process.env,
+): Result<InstanceConfig> {
   const errors = [];
   const configDir = configPath ? path.dirname(configPath) : process.cwd();
 
@@ -106,6 +128,12 @@ export function validateInstance(data: Record<string, unknown>, configPath?: str
     const role = parseRole(typeof raw.role === 'string' ? raw.role : undefined);
     const project: ProjectConfig = { name: pname, path: absPath, role };
     if (typeof raw.description === 'string') project.description = raw.description;
+    const history = resolveHistoryConfig(raw, absPath, env, where);
+    if (!history.ok) {
+      errors.push(...history.errors);
+      continue;
+    }
+    applyResolvedHistory(project, history.value);
     projects.push(project);
   }
 
@@ -119,14 +147,74 @@ export function validateInstance(data: Record<string, unknown>, configPath?: str
 // Synthetic single-project instance for legacy --project path.
 // Wraps a raw project path + role into the same InstanceConfig shape so
 // downstream code (pool, session) does not need two paths.
-export function synthesizeLegacyInstance(projectPath: string, role: Role): InstanceConfig {
+export function synthesizeLegacyInstance(
+  projectPath: string,
+  role: Role,
+): InstanceConfig {
   const absPath = path.resolve(projectPath);
   const basename = path.basename(absPath).toLowerCase().replace(/[^a-z0-9_-]/g, '-') || 'default';
+  const project: ProjectConfig = { name: 'default', path: absPath, role };
+  const history = resolveHistoryConfig({}, absPath, process.env, 'projects[0]');
+  // Keep this legacy helper non-throwing. EnginePool re-resolves and returns a
+  // Result error if an invalid environment default prevented resolution here.
+  if (history.ok) applyResolvedHistory(project, history.value);
   return {
     name: `${basename}-legacy`,
-    projects: [{ name: 'default', path: absPath, role }],
+    projects: [project],
     source: 'synthetic',
   };
+}
+
+export function applyResolvedHistory(project: ProjectConfig, history: ResolvedHistoryConfig): void {
+  project.historyMode = history.effectiveMode;
+  project.configuredHistoryMode = history.configuredMode;
+  project.historyModeSource = history.modeSource;
+  project.historyOptions = { ...history.options };
+  project.historyAdvisories = [...history.advisories];
+}
+
+export function projectHistoryConfig(
+  project: ProjectConfig,
+  env: NodeJS.ProcessEnv = process.env,
+): Result<ResolvedHistoryConfig> {
+  if (
+    project.historyMode !== undefined
+    && project.configuredHistoryMode !== undefined
+    && project.historyModeSource !== undefined
+    && project.historyOptions !== undefined
+    && project.historyAdvisories !== undefined
+  ) {
+    if (
+      (project.historyMode === 'audit' || project.historyMode === 'batch' || project.historyMode === 'snapshot')
+      && !existsSync(path.join(project.path, '.git'))
+    ) {
+      return singleErr(
+        'GIT_NOT_INITIALIZED',
+        `history_mode ${project.historyMode} requires a Git repository at the project root`,
+        undefined,
+        { historyMode: project.historyMode, modeSource: project.historyModeSource },
+      );
+    }
+    return ok({
+      effectiveMode: project.historyMode,
+      configuredMode: project.configuredHistoryMode,
+      modeSource: project.historyModeSource,
+      options: { ...project.historyOptions },
+      advisories: [...project.historyAdvisories],
+    });
+  }
+
+  return resolveHistoryConfig(
+    {
+      ...(project.configuredHistoryMode !== undefined && project.configuredHistoryMode !== null
+        ? { history_mode: project.configuredHistoryMode }
+        : {}),
+      ...(project.historyOptions !== undefined ? { history_options: project.historyOptions } : {}),
+    },
+    project.path,
+    env,
+    `project "${project.name}"`,
+  );
 }
 
 export function getProject(instance: InstanceConfig, name: string): ProjectConfig | undefined {

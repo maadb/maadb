@@ -87,7 +87,7 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
   }));
 
   server.registerTool('maad_health', {
-    description: 'Engine health + transport + session telemetry + instance reload stats. sessions block: {active, pinned, subscribed, byProject: {<project>:{<role>:count}}, byIdentity: {<agent_id|anonymous>:count}, ...lifecycle counters}. instance block: {source, configPath?, projectCount, reload counters}. runtime block: {memoryPressure: {enabled, intervalMs, thresholdRatio, lastSampleAt, heapUsedMb, heapCapMb, heapRatio, rssMb, externalMb, arrayBuffersMb, cgroupCurrentMb, cgroupMaxMb, cgroupRatio, inPressure, heapInPressure, cgroupInPressure, lastPressureAt, pressureFiresTotal}}. 0.7.10 integrity/backup observability: lastIntegritySweepAt (ISO|null), lastIntegrityFindings ({missing_in_index, missing_on_disk, hash_drift, schema_drift, broken_refs}|null), lastBackupTag ({tag, sha, createdAt}|null). The integrity fields populate on the next maad_verify mode:integrity call; the backup field populates on the next maad_backup mode:create call.',
+    description: 'Engine health + history mode + transport + session telemetry + instance reload stats. history block: {effectiveMode, configuredMode, modeSource, pendingWrites, lastSuccessfulFlush, lastFlushError, advisories}. sessions block: {active, pinned, subscribed, byProject: {<project>:{<role>:count}}, byIdentity: {<agent_id|anonymous>:count}, ...lifecycle counters}. instance block: {source, configPath?, projectCount, reload counters}. runtime block: {memoryPressure: {enabled, intervalMs, thresholdRatio, lastSampleAt, heapUsedMb, heapCapMb, heapRatio, rssMb, externalMb, arrayBuffersMb, cgroupCurrentMb, cgroupMaxMb, cgroupRatio, inPressure, heapInPressure, cgroupInPressure, lastPressureAt, pressureFiresTotal}}. 0.7.10 integrity/backup observability: lastIntegritySweepAt (ISO|null), lastIntegrityFindings ({missing_in_index, missing_on_disk, hash_drift, schema_drift, broken_refs}|null), lastBackupTag ({tag, sha, createdAt}|null). The integrity fields populate on the next maad_verify mode:integrity call; the backup field populates on the next maad_backup mode:create call.',
     inputSchema: z.object({
       project: z.string().optional().describe('Project name (multi-project mode only)'),
     }),
@@ -181,8 +181,13 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
         `maad_instructions action=refresh requires admin; session has "${role}" on this project.`)]);
     }
     if (engine.isReadOnly()) {
-      return errorResponse([maadError('READ_ONLY',
-        'This deployment is read-only; managed instructions cannot be refreshed here.')]);
+      const projectReadOnly = engine.health().history.effectiveMode === 'read';
+      return errorResponse([maadError(
+        projectReadOnly ? 'PROJECT_READ_ONLY' : 'READ_ONLY',
+        projectReadOnly
+          ? 'Project history_mode is read'
+          : 'This deployment is read-only; managed instructions cannot be refreshed here.',
+      )]);
     }
     auditToolCall('maad_instructions', args);
     if (isDryRun()) return dryRunResponse('maad_instructions', args);

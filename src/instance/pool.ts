@@ -9,7 +9,8 @@
 // reloadInstance(newInstance) swaps the live instance config, applying
 // project additions (lazy — just make them declarable) and removals (evict
 // engines + callbacks for session cancellation). Mutations of existing
-// projects' path/role fail the whole reload with INSTANCE_MUTATION_UNSUPPORTED;
+// projects' path/role/history config fail the whole reload with
+// INSTANCE_MUTATION_UNSUPPORTED;
 // that seam opens when the 0.9.0 eviction policy lands.
 // ============================================================================
 
@@ -17,7 +18,9 @@ import { MaadEngine } from '../engine/index.js';
 import { ensureProjectSkills, emitInstructionsAdvisory } from '../skills-scaffold.js';
 import { ok, singleErr, type Result } from '../errors.js';
 import type { InstanceConfig, ProjectConfig } from './config.js';
-import { getProject } from './config.js';
+import { getProject, projectHistoryConfig } from './config.js';
+import { historyOptionsEqual } from '../history/config.js';
+import type { EngineInitOptions } from '../engine/types.js';
 
 export interface InstanceDiff {
   added: string[];
@@ -208,17 +211,24 @@ export class EnginePool {
 
   private async initEngine(project: ProjectConfig, guardEmptyIndex = true): Promise<Result<MaadEngine>> {
     const engine = new MaadEngine();
+    const historyResult = projectHistoryConfig(project);
+    if (!historyResult.ok) return historyResult;
+    const history = historyResult.value;
     // 0.8.4 — serving path: guard against a false-empty index (lost/unbuilt
     // derived index over existing markdown) rather than silently serving [].
-    const initResult = await engine.init(project.path, {
+    const initOptions: EngineInitOptions = {
       guardEmptyIndex,
-      ...(this.opts.readOnly !== undefined ? { readOnly: this.opts.readOnly } : {}),
-    });
+      history,
+      ...(this.opts.readOnly !== undefined || history.effectiveMode === 'read'
+        ? { readOnly: this.opts.readOnly === true || history.effectiveMode === 'read' }
+        : {}),
+    };
+    const initResult = await engine.init(project.path, initOptions);
     if (!initResult.ok) {
       await engine.close();
       return initResult;
     }
-    if (this.opts.readOnly !== true) {
+    if (this.opts.readOnly !== true && history.effectiveMode !== 'read') {
       ensureProjectSkills(project.path);
     }
     // Advisory only — bind never mutates existing instruction files.
@@ -411,9 +421,9 @@ export class EnginePool {
    * Must be called between `tryBeginReload` and `endReload` — does not manage
    * the reload slot itself.
    *
-   * Mutations (same name, different path or role) fail the whole reload with
-   * INSTANCE_MUTATION_UNSUPPORTED — no partial apply. The 0.9.0 eviction
-   * policy unlocks safe in-place project mutations.
+   * Mutations (same name, different path, role, effective history mode, or
+   * history thresholds) fail the whole reload with
+   * INSTANCE_MUTATION_UNSUPPORTED — no partial apply.
    */
   async applyDiff(newInstance: InstanceConfig): Promise<Result<InstanceDiff>> {
     const oldByName = new Map(this.instance.projects.map(p => [p.name, p] as const));
@@ -424,13 +434,19 @@ export class EnginePool {
     for (const [name, oldP] of oldByName) {
       const newP = newByName.get(name);
       if (!newP) continue; // removal, handled below
-      if (oldP.path !== newP.path || oldP.role !== newP.role) {
+      const oldHistory = projectHistoryConfig(oldP);
+      const newHistory = projectHistoryConfig(newP);
+      if (!oldHistory.ok) return oldHistory;
+      if (!newHistory.ok) return newHistory;
+      const historyChanged = oldHistory.value.effectiveMode !== newHistory.value.effectiveMode
+        || !historyOptionsEqual(oldHistory.value.options, newHistory.value.options);
+      if (oldP.path !== newP.path || oldP.role !== newP.role || historyChanged) {
         mutations.push(`"${name}" (${oldP.path}/${oldP.role} → ${newP.path}/${newP.role})`);
       }
     }
     if (mutations.length > 0) {
       return singleErr('INSTANCE_MUTATION_UNSUPPORTED',
-        `Cannot mutate existing projects in place (path/role change). Affected: ${mutations.join(', ')}. Remove and re-add, or wait for 0.9.0 eviction policy.`);
+        `Cannot mutate existing projects in place (path, role, or history configuration change). Affected: ${mutations.join(', ')}. Remove and re-add the project to apply the change.`);
     }
 
     const added: string[] = [];

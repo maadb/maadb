@@ -25,6 +25,7 @@ const ADMIN_TOOLS = [
   'maad_issue_token', 'maad_revoke_token', 'maad_rotate_token',
   'maad_list_tokens', 'maad_show_token',
   'maad_backup',
+  'maad_flush',
   // 0.7.10 — destructive cleanup primitives (confirm-contract governed)
   'maad_bulk_delete', 'maad_delete_where', 'maad_purge_soft_deleted',
   'maad_repair_where',

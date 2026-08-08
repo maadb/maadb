@@ -51,6 +51,7 @@ export const WRITE_TOOLS: ReadonlySet<string> = new Set([
   'maad_reindex',
   'maad_reload',
   'maad_backup',
+  'maad_flush',
   // 0.7.10 — destructive cleanup primitives
   'maad_bulk_delete',
   'maad_delete_where',

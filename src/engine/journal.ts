@@ -6,6 +6,7 @@
 import { existsSync, readFileSync, writeFileSync, unlinkSync, renameSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
+import type { CommitOptions } from '../git/index.js';
 
 export interface JournalEntry {
   id: string;
@@ -13,6 +14,10 @@ export interface JournalEntry {
   docId: string;
   filePath: string;
   tempPath?: string | undefined;
+  files?: string[] | undefined;
+  commit?: CommitOptions | undefined;
+  gitBoundarySha?: string | undefined;
+  snapshotTag?: string | undefined;
   timestamp: string;
   status: 'pending' | 'file_written' | 'indexed' | 'committed';
 }
@@ -64,8 +69,49 @@ export class OperationJournal {
     }
   }
 
+  setFiles(id: string, files: string[]): void {
+    const entry = this.entries.find(e => e.id === id);
+    if (!entry) return;
+    entry.files = [...new Set(files)];
+    this.save();
+  }
+
+  bindCommit(ids: string[], commit: CommitOptions): void {
+    if (ids.length === 0) return;
+    const wanted = new Set(ids);
+    let changed = false;
+    for (const entry of this.entries) {
+      if (!wanted.has(entry.id)) continue;
+      entry.commit = { ...commit, files: [...commit.files] };
+      changed = true;
+    }
+    if (changed) this.save();
+  }
+
+  recordSnapshotBoundary(ids: string[], sha: string, tag: string): void {
+    if (ids.length === 0) return;
+    const wanted = new Set(ids);
+    let changed = false;
+    for (const entry of this.entries) {
+      if (!wanted.has(entry.id)) continue;
+      entry.gitBoundarySha = sha;
+      entry.snapshotTag = tag;
+      changed = true;
+    }
+    if (changed) this.save();
+  }
+
   complete(id: string): void {
     this.entries = this.entries.filter(e => e.id !== id);
+    this.save();
+  }
+
+  completeMany(ids: string[]): void {
+    if (ids.length === 0) return;
+    const completed = new Set(ids);
+    const next = this.entries.filter(e => !completed.has(e.id));
+    if (next.length === this.entries.length) return;
+    this.entries = next;
     this.save();
   }
 
@@ -73,11 +119,23 @@ export class OperationJournal {
     return this.entries.filter(e => e.status !== 'committed');
   }
 
+  getIndexedPending(): JournalEntry[] {
+    return this.entries.filter(e => e.status === 'indexed');
+  }
+
+  findIndexedByFiles(files: string[]): JournalEntry[] {
+    const wanted = new Set(files.map(file => path.resolve(file)));
+    return this.getIndexedPending().filter(entry => {
+      const evidence = entry.files ?? [entry.filePath];
+      return evidence.some(file => wanted.has(path.resolve(file)));
+    });
+  }
+
   /**
    * Reconcile incomplete operations on startup.
    * Returns a list of recovery actions taken.
    */
-  reconcile(): string[] {
+  reconcile(opts: { retainIndexed?: boolean } = {}): string[] {
     const actions: string[] = [];
     const pending = this.getPending();
 
@@ -97,13 +155,16 @@ export class OperationJournal {
         actions.push(`File written but not indexed: ${entry.filePath} (doc: ${entry.docId}). Run reindex to recover.`);
       } else if (entry.status === 'indexed') {
         // Indexed but git commit failed — non-critical, just note it
-        actions.push(`Indexed but git commit skipped: ${entry.filePath} (doc: ${entry.docId}).`);
+        actions.push(`Indexed write pending history recovery: ${entry.filePath} (doc: ${entry.docId}).`);
       }
     }
 
-    // Clear all pending entries after reconciliation
+    // Legacy callers clear all entries. Engine startup retains indexed
+    // evidence so the history controller can finish the configured boundary.
     if (pending.length > 0) {
-      this.entries = [];
+      this.entries = opts.retainIndexed
+        ? this.entries.filter(entry => entry.status === 'indexed')
+        : [];
       this.save();
     }
 
