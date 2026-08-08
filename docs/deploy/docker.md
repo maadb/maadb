@@ -38,7 +38,7 @@ Never put the token in `compose.yaml` or in an env file checked into git. Docker
 ```bash
 # Inside the container (or from a one-shot admin container sharing the volume):
 node /opt/maad/dist/cli.js --instance /mnt/brains/instance.yaml auth issue-token \
-  --role=admin --name='primary-gateway' --projects='*' --agent=agt-gateway
+  --role=admin --name='primary-gateway' --projects='*' --agent=gateway-agent
 # Plaintext printed once; store it as the client's bearer.
 ```
 

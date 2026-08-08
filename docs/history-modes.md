@@ -55,8 +55,10 @@ Valid modes are `audit`, `feed`, `read`, `batch`, and `snapshot`.
 
 Both values must be positive integers. If both are present, the first boundary
 reached starts the flush. If neither is present, use an explicit flush; pending
-writes are also handled by shutdown and startup recovery. Omit these options
-for `audit`, `feed`, and `read`.
+writes are also handled by shutdown and startup recovery. In v0.14.0 the
+options are still validated when supplied with `audit`, `feed`, or `read`, but
+those modes do not use them. Omit the options for those modes so the
+configuration communicates its actual policy.
 
 An explicit `audit`, `batch`, or `snapshot` configuration requires a `.git`
 entry at the project root. Startup fails with `GIT_NOT_INITIALIZED` when Git is
@@ -164,6 +166,12 @@ out, the journal entries remain recoverable. At the next startup, MAADB finds
 indexed pending entries and attempts recovery before normal operation continues.
 If that attempt fails, health reports the error and the entries remain pending.
 
+In normal `audit` operation, every logical write receives its own commit. If
+several audit entries remain pending after Git commit failures, v0.14.0 startup
+recovery can consolidate those pending entries into one recovery commit. The
+Markdown writes and journal evidence remain durable, but the recovered Git
+history no longer has one commit per original logical write.
+
 For `snapshot`, the commit is created first and its boundary is recorded before
 the annotated tag is created. If tag creation fails, startup recovery retries
 the tag against that same commit instead of moving the snapshot to an older or
@@ -193,13 +201,24 @@ does not need startup scaffolding, reindexing, instruction refresh, or repair.
 ## Benchmark the modes
 
 The opt-in benchmark uses generated fixtures and reports file/index, Git
-add/status, Git commit, and total timings separately:
+add/status, Git commit, and total timings separately. Enable it explicitly;
+otherwise Vitest reports the benchmark as skipped.
 
-```bash
+PowerShell:
+
+```powershell
+$env:MAAD_HISTORY_BENCH='1'
 npx vitest bench --run tests/performance/history-modes.bench.ts
 ```
 
-Run it from a clean repository checkout on the target environment. Compare
-modes from the same run and record the environment with the result. The harness
-verifies that `feed` bypasses Git and shows how `batch` amortizes Git work; it
-does not enforce workstation-specific latency as a CI threshold.
+POSIX shells:
+
+```bash
+MAAD_HISTORY_BENCH=1 npx vitest bench --run tests/performance/history-modes.bench.ts
+```
+
+Run it from a clean repository checkout on the target environment and record
+the environment with the result. The v0.14.0 harness measures a `feed` engine
+write followed by explicit Git add, status, and commit stages. It does not yet
+execute `batch` or `snapshot`, calculate batch amortization, or enforce
+workstation-specific latency as a CI threshold.

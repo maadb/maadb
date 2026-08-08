@@ -3,9 +3,9 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/node-%E2%89%A524-brightgreen.svg)](package.json)
 [![TypeScript](https://img.shields.io/badge/typescript-strict-blue.svg)](tsconfig.json)
-[![Tests](https://img.shields.io/badge/tests-1225%20passing-brightgreen.svg)](tests)
+[![CI](https://github.com/maadb/maadb/actions/workflows/ci.yml/badge.svg)](https://github.com/maadb/maadb/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@maadb/core.svg)](https://www.npmjs.com/package/@maadb/core)
-[![Version](https://img.shields.io/badge/version-0.12.4-purple.svg)](Version.md)
+[![GitHub Release](https://img.shields.io/github/v/release/maadb/maadb?label=release)](https://github.com/maadb/maadb/releases/latest)
 
 > **Markdown is the database. The engine makes it queryable.**
 
@@ -15,7 +15,7 @@ MAADb stores records as markdown files with YAML frontmatter for structured fiel
 
 - **Markdown is canonical.** Open any record in any text editor — your data is exactly what's on screen, no translation layer.
 - **History policy is explicit.** Choose per-write audit commits, a Git-free feed, zero-write reads, batched commits, or annotated snapshots per project. `maad_history` shows available Git history.
-- **LLM-native.** Ships with 30+ MCP tools for discovery, read, write, maintenance, and auth. Designed for agent workflows from the start.
+- **LLM-native.** Ships with 46 MCP tools for discovery, read, write, maintenance, and auth. Designed for agent workflows from the start.
 - **Optional schemas.** Add YAML schemas when you want structure, skip them when you don't. Validation runs on writes, never on old records.
 - **The index is a speed layer.** SQLite stores pointers into your markdown files. Delete it and `maad reindex` rebuilds it from the markdown — your data never depends on the index surviving.
 - **Safe under concurrent writes.** Clean shutdown, lock recovery, rate limiting, retry-safe operations all built in.
@@ -279,7 +279,7 @@ Generate a token from the CLI (plaintext printed ONCE; server stores only the SH
 
 ```bash
 node dist/cli.js --instance /path/to/instance.yaml auth issue-token \
-  --role=admin --name='primary-gateway' --projects='*' --agent=agt-gateway
+  --role=admin --name='primary-gateway' --projects='*' --agent=gateway-agent
 # → maad_pat_<32hex> on stdout
 ```
 
@@ -320,7 +320,7 @@ rotating a token, discard the old session and initialize a fresh one with the ne
 bearer. A client that previously reused one session across several tokens must now
 open one session per token.
 
-> **Known gap (0.12.4):** `maad_instance_reload` does not reload `tokens.yaml`.
+> **Known gap (still present in v0.14.0):** `maad_instance_reload` does not reload `tokens.yaml`.
 > On a deployment where SIGHUP is unavailable, a revocation written to
 > `tokens.yaml` by another process is not observed by the running server until it
 > restarts, and sessions bound to the revoked token stay live until then. Prefer
@@ -429,9 +429,14 @@ The vector store is `sqlite-vec` (in the same SQLite file); the lexical leg is F
 
 ## Current state
 
-**Current:** v0.12.4 — HTTP MCP sessions bound to the authenticated principal that opened them: a session ID alone no longer reaches a session, and revoke, rotate, reload, and expiry tear down every session bound to the affected token.
+**Current:** v0.14.0 — per-project history modes let each project choose per-write audit commits, a Git-free feed, zero-write reads, batched commits, or annotated snapshots. Existing unconfigured projects keep compatibility: Git projects infer `audit`; projects without Git infer `feed`.
+
+See the [v0.14.0 release notes](docs/releases/v0.14.0.md) for highlights, verification, and known limitations.
 
 Recent shipped scope:
+- **0.14.0** — Per-project `audit`, `feed`, `read`, `batch`, and `snapshot` history modes; explicit flush; crash recovery; history health telemetry
+- **0.13.0** — Evidence-backed relationship paths with deterministic bounded traversal and canonical edge evidence
+- **0.12.4** — HTTP sessions bound to the authenticated principal that opened them; revoke, rotate, reload, and expiry tear down affected sessions
 - **0.12.3** — Token-store `reload` serialized against in-flight mutations, so a SIGHUP during issue/revoke/rotate cannot drop a just-written token from the in-memory index
 - **0.12.2** — Canonical path containment for `maad_scan`; serialized token-store issue/revoke/rotate
 - **0.12.1** — Escape newlines and carriage returns in double-quoted YAML frontmatter scalars
@@ -450,7 +455,7 @@ See [Version.md](Version.md) for the full release history and forward plan.
 
 - TypeScript strict, Node.js 24+ (current Active LTS)
 - 6 production dependencies: `better-sqlite3`, `gray-matter`, `js-yaml`, `simple-git`, `@modelcontextprotocol/sdk`, `pino`. Plus one **optional** dependency `sqlite-vec` (semantic retrieval) — lazily loaded only when `MAAD_SEMANTIC_ENABLE` is on; absent or failed to load ⇒ semantic disabled, engine unaffected
-- 1225 tests, Vitest — run on every push/PR across Ubuntu and Windows
+- 1,270 tests at v0.14.0, Vitest — run on every push/PR across Ubuntu and Windows
 - MIT license, pre-1.0, actively developed
 
 ## License
