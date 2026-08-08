@@ -31,7 +31,7 @@ The engine recognizes 11 built-in primitives for inline annotation extraction (`
 | `percentage` | Percent values | `[[percentage:12.5%\|growth rate]]` |
 | `location` | Places, addresses | `[[location:Austin, TX\|office]]` |
 | `identifier` | IDs, codes, reference numbers | `[[identifier:INV-2026-0042\|invoice]]` |
-| `contact` | Email, phone | `[[contact:jane@acme.com\|email]]` |
+| `contact` | Email, phone | `[[contact:user@example.invalid\|email]]` |
 | `media` | File references, URLs | `[[media:report.pdf\|attachment]]` |
 
 ### Extensibility via subtypes

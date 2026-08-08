@@ -43,7 +43,7 @@ Issue a bearer from the build host using the CLI. Plaintext is returned ONCE; th
 
 ```bash
 node /opt/maad/maadb/dist/cli.js --instance /opt/maad/instance.yaml auth issue-token \
-  --role=admin --name='primary-gateway' --projects='*' --agent=agt-gateway
+  --role=admin --name='primary-gateway' --projects='*' --agent=gateway-agent
 ```
 
 Output on stdout is the plaintext `maad_pat_<32hex>`. Capture it; store it securely on the client side (e.g. another env var in a gateway's deployment). Set it as the client's `Authorization: Bearer <plaintext>` header — or, if the client is itself a MAADb engine connecting to another, set its `MAAD_AUTH_TOKEN` env var to the plaintext. The env key stays the same; it's still a bearer — just validated against the registry now.
