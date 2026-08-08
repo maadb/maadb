@@ -127,11 +127,12 @@ describe('no git graceful degradation', () => {
     const indexResult = await noGitEngine.indexAll({ force: true });
     expect(indexResult.indexed).toBe(4);
 
-    // Audit returns error
+    // Compatibility inference selects feed, whose mode-aware history contract
+    // is disabled rather than a generic Git initialization failure.
     const auditResult = await noGitEngine.audit();
     expect(auditResult.ok).toBe(false);
     if (!auditResult.ok) {
-      expect(auditResult.errors[0]!.code).toBe('GIT_NOT_INITIALIZED');
+      expect(auditResult.errors[0]!.code).toBe('HISTORY_DISABLED');
     }
 
     noGitEngine.close();
