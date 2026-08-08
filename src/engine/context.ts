@@ -88,6 +88,9 @@ export async function gitCommit(ctx: EngineContext, opts: CommitOptions): Promis
   const outcome = ctx.history
     ? await ctx.history.commit(enriched)
     : await ctx.gitLayer!.commit(enriched);
+  if (!ctx.history && outcome.status !== 'failed') {
+    ctx.journal.completeMany(ctx.journal.findIndexedByFiles(opts.files).map(entry => entry.id));
+  }
   if (outcome.status === 'failed') {
     ctx.commitFailures.count++;
     ctx.commitFailures.lastAt = new Date().toISOString();

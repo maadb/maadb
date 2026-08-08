@@ -37,6 +37,10 @@ import { GitLayer } from '../git/index.js';
 import type { EngineContext, CommitFailureTracker } from './context.js';
 import { newCommitFailureTracker } from './context.js';
 import { OperationJournal } from './journal.js';
+import { HistoryController } from '../history/controller.js';
+import { resolveHistoryConfig } from '../history/config.js';
+import type { HistoryHealthState, HistoryRuntime } from '../history/types.js';
+import type { EngineInitOptions } from './types.js';
 import { isSemanticEnabled, readSemanticEnv } from './semantic/config.js';
 import { resolveEmbeddingProvider } from './semantic/provider.js';
 import { SemanticIndexer } from './semantic/indexer.js';
@@ -119,6 +123,7 @@ export interface HealthReport {
   lastIntegritySweepAt: string | null;
   lastIntegrityFindings: Record<import('./types.js').IntegrityCategory, number> | null;
   lastBackupTag: { tag: string; sha: string; createdAt: string } | null;
+  history: HistoryHealthState;
 }
 
 /**
@@ -179,6 +184,7 @@ export class MaadEngine {
   private backend!: MaadBackend;
   private gitLayer: GitLayer | null = null;
   private journal!: OperationJournal;
+  private historyRuntime: HistoryController | null = null;
   private commitFailures: CommitFailureTracker = newCommitFailureTracker();
   // 0.7.0 — pending commit identity set per-operation by the MCP `withEngine`
   // wrapper inside the write mutex (safe because write mutex serializes all
@@ -198,11 +204,7 @@ export class MaadEngine {
   private closePromise: Promise<void> | null = null;
   // Boot opts captured so reload() re-applies them (esp. an injected provider,
   // which env can't reconstruct).
-  private bootOpts: {
-    readOnly?: boolean;
-    semantic?: boolean;
-    embeddingProvider?: EmbeddingProvider;
-  } | undefined;
+  private bootOpts: EngineInitOptions | undefined;
 
   // Write mutex — serializes all mutating engine operations per instance.
   // FIFO. Blocks indefinitely in 0.4.1; timeout deferred to 0.8.5.
@@ -277,6 +279,7 @@ export class MaadEngine {
     projectRoot: string,
     opts?: {
       readOnly?: boolean;
+      history?: import('../history/types.js').ResolvedHistoryConfig;
       // 0.8.0 — force semantic on/off regardless of env (host integration / tests).
       semantic?: boolean;
       // 0.8.0 — host-injected embedding provider (engine holds no API keys).
@@ -289,7 +292,12 @@ export class MaadEngine {
     },
   ): Promise<Result<void>> {
     this.projectRoot = path.resolve(projectRoot);
-    this._readOnly = opts?.readOnly ?? false;
+    const historyResult = opts?.history !== undefined
+      ? ok(opts.history)
+      : resolveHistoryConfig({}, this.projectRoot);
+    if (!historyResult.ok) return historyResult;
+    const historyConfig = historyResult.value;
+    this._readOnly = (opts?.readOnly ?? false) || historyConfig.effectiveMode === 'read';
     this.bootOpts = opts;
 
     // Self-heal engine-owned state on empty projects. In read-only mode we
@@ -367,7 +375,7 @@ export class MaadEngine {
 
     // Operation journal — tracks pending writes for crash recovery
     this.journal = new OperationJournal(backendDir);
-    this.startupRecovery = this._readOnly ? [] : this.journal.reconcile();
+    this.startupRecovery = this._readOnly ? [] : this.journal.reconcile({ retainIndexed: true });
 
     this.gitLayer = new GitLayer(this.projectRoot);
     if (await this.gitLayer.isRepo()) {
@@ -387,6 +395,21 @@ export class MaadEngine {
       }
     } else {
       this.gitLayer = null;
+    }
+
+    this.historyRuntime = new HistoryController(
+      historyConfig,
+      this.gitLayer,
+      this.journal,
+      (op, fn) => this.runExclusive(op, fn),
+    );
+    const recovered = await this.historyRuntime.recover();
+    if (recovered) {
+      this.startupRecovery.push(
+        recovered.outcome.status === 'failed'
+          ? `history_recovery_failed:${recovered.outcome.code}`
+          : `history_recovery_completed:${historyConfig.effectiveMode}`,
+      );
     }
 
     this.initialized = true;
@@ -454,6 +477,12 @@ export class MaadEngine {
     return this._readOnly;
   }
 
+  private readOnlyMutationError(): Result<never> {
+    return this.historyRuntime?.config.effectiveMode === 'read'
+      ? singleErr('PROJECT_READ_ONLY', 'Project history_mode is read')
+      : singleErr('READ_ONLY', 'Engine is in read-only mode');
+  }
+
   async reload(): Promise<Result<void>> {
     return this.runExclusive('reload', async () => {
       const replacement = new MaadEngine();
@@ -469,6 +498,8 @@ export class MaadEngine {
       this.backend = replacement.backend;
       this.gitLayer = replacement.gitLayer;
       this.journal = replacement.journal;
+      this.historyRuntime = replacement.historyRuntime;
+      this.historyRuntime?.bindSerializer((op, fn) => this.runExclusive(op, fn));
       this.startupRecovery = replacement.startupRecovery;
       this.semanticEnabled = replacement.semanticEnabled;
       this.embeddingProvider = replacement.embeddingProvider;
@@ -477,6 +508,7 @@ export class MaadEngine {
       // Ownership moved to this instance; prevent replacement.close() from
       // touching the adopted backend or worker.
       replacement.semanticIndexer = null;
+      replacement.historyRuntime = null;
       replacement.initialized = false;
       return ok(undefined);
     });
@@ -572,6 +604,7 @@ export class MaadEngine {
       lastBackupTag: parseStoredJson(
         this.backend.getMeta('last_backup_tag'),
       ) as HealthReport['lastBackupTag'],
+      history: this.historyRuntime!.health(),
     };
   }
 
@@ -693,12 +726,18 @@ export class MaadEngine {
 
   private async disposeResources(): Promise<void> {
     this.initialized = false;
+    const history = this.historyRuntime;
+    this.historyRuntime = null;
     const indexer = this.semanticIndexer;
     this.semanticIndexer = null;
     if (indexer) await indexer.stop();
     if (this.backend) {
       try { this.backend.close(); } catch { /* idempotent/best-effort teardown */ }
     }
+    // History flushes use the journal and Git only. Close SQLite first so
+    // legacy callers that do not await close() still release the Windows file
+    // handle synchronously, then finish the bounded Git boundary.
+    if (history) await history.close();
   }
 
   private ctx(): EngineContext {
@@ -712,6 +751,7 @@ export class MaadEngine {
       journal: this.journal,
       readOnly: this._readOnly,
       commitFailures: this.commitFailures,
+      ...(this.historyRuntime !== null ? { history: this.historyRuntime as HistoryRuntime } : {}),
       semanticEnabled: this.semanticEnabled,
       ...(this.embeddingProvider !== null ? { embeddingProvider: this.embeddingProvider } : {}),
       ...(this.pendingCommitIdentity !== undefined ? { commitIdentity: this.pendingCommitIdentity } : {}),
@@ -750,13 +790,15 @@ export class MaadEngine {
   // first; these inner wraps are reentrant no-ops. Direct callers (CLI,
   // tests) get serialized via the first (outer) acquire.
   async indexAll(opts?: { force?: boolean }) {
-    if (this._readOnly) return singleErr('READ_ONLY', 'Engine is in read-only mode');
+    if (this._readOnly) return this.readOnlyMutationError();
     return this.kickIndexer(await this.runExclusive('indexAll', () => indexing.indexAll(this.ctx(), opts)));
   }
   async indexFile(absolutePath: FilePath) {
+    if (this._readOnly) return this.readOnlyMutationError();
     return this.kickIndexer(await this.runExclusive('indexFile', () => indexing.indexFile(this.ctx(), absolutePath)));
   }
   async reindex(opts?: { docId?: DocId; force?: boolean; embeddings?: boolean }) {
+    if (this._readOnly) return this.readOnlyMutationError();
     // `embeddings` forces a full reindex (so block_text/FTS are (re)populated for
     // every doc — needed when enabling semantic on an existing project), then
     // re-enqueues all blocks and drains the worker so the rebuild is synchronous.
@@ -789,6 +831,11 @@ export class MaadEngine {
    */
   async flushSemanticIndex(): Promise<void> {
     await this.semanticIndexer?.flush();
+  }
+
+  async flushHistory(trigger: import('../history/types.js').HistoryFlushTrigger = 'explicit') {
+    this.assertInit();
+    return this.runExclusive(`history:${trigger}`, () => this.historyRuntime!.flush(trigger));
   }
 
   /**
@@ -831,12 +878,12 @@ export class MaadEngine {
   verifyCount(dt: DocType, expectedCount: number, filters?: Record<string, import('../types.js').FilterCondition>) { return reads.verifyCount(this.ctx(), dt, expectedCount, filters); }
   async verifyIntegrity(query?: import('./types.js').IntegrityQuery) { return reads.verifyIntegrity(this.ctx(), query); }
   async backupCreate(opts?: import('./types.js').CreateBackupOptions) {
-    if (this._readOnly) return singleErr('READ_ONLY', 'Engine is in read-only mode');
+    if (this._readOnly) return this.readOnlyMutationError();
     return backup.createBackup(this.ctx(), opts);
   }
   async backupList(opts?: import('./types.js').ListBackupsOptions) { return backup.listBackups(this.ctx(), opts); }
   async backupDelete(tag: string) {
-    if (this._readOnly) return singleErr('READ_ONLY', 'Engine is in read-only mode');
+    if (this._readOnly) return this.readOnlyMutationError();
     return backup.deleteBackup(this.ctx(), tag);
   }
   changesSince(query: import('./types.js').ChangesSinceQuery) { return reads.changesSince(this.ctx(), query); }
@@ -849,43 +896,43 @@ export class MaadEngine {
   // --- Writes (read-only guarded, serialized under write mutex) ---
   // Self-wrapping. Reentrant under an outer runExclusive scope.
   async createDocument(dt: DocType, fields: Record<string, unknown>, body?: string, customDocId?: string) {
-    if (this._readOnly) return singleErr('READ_ONLY', 'Engine is in read-only mode');
+    if (this._readOnly) return this.readOnlyMutationError();
     return this.kickIndexer(await this.runExclusive('createDocument',
       () => writes.createDocument(this.ctx(), dt, fields, body, customDocId),
     ));
   }
   async updateDocument(id: DocId, fields?: Record<string, unknown>, body?: string, appendBody?: string, expectedVersion?: number) {
-    if (this._readOnly) return singleErr('READ_ONLY', 'Engine is in read-only mode');
+    if (this._readOnly) return this.readOnlyMutationError();
     return this.kickIndexer(await this.runExclusive('updateDocument',
       () => writes.updateDocument(this.ctx(), id, fields, body, appendBody, expectedVersion),
     ));
   }
   async deleteDocument(id: DocId, mode: 'soft' | 'hard') {
-    if (this._readOnly) return singleErr('READ_ONLY', 'Engine is in read-only mode');
+    if (this._readOnly) return this.readOnlyMutationError();
     return this.runExclusive('deleteDocument',
       () => writes.deleteDocument(this.ctx(), id, mode),
     );
   }
   async bulkCreate(records: import('./types.js').BulkCreateInput[]) {
-    if (this._readOnly) return singleErr('READ_ONLY', 'Engine is in read-only mode');
+    if (this._readOnly) return this.readOnlyMutationError();
     return this.kickIndexer(await this.runExclusive('bulkCreate',
       () => writes.bulkCreate(this.ctx(), records),
     ));
   }
   async bulkUpdate(updates: import('./types.js').BulkUpdateInput[]) {
-    if (this._readOnly) return singleErr('READ_ONLY', 'Engine is in read-only mode');
+    if (this._readOnly) return this.readOnlyMutationError();
     return this.kickIndexer(await this.runExclusive('bulkUpdate',
       () => writes.bulkUpdate(this.ctx(), updates),
     ));
   }
   async bulkDelete(docIds: string[], mode: 'soft' | 'hard') {
-    if (this._readOnly) return singleErr('READ_ONLY', 'Engine is in read-only mode');
+    if (this._readOnly) return this.readOnlyMutationError();
     return this.runExclusive('bulkDelete',
       () => writes.bulkDelete(this.ctx(), docIds, mode),
     );
   }
   async purgeSoftDeleted(olderThanIso: string, maxRecords: number) {
-    if (this._readOnly) return singleErr('READ_ONLY', 'Engine is in read-only mode');
+    if (this._readOnly) return this.readOnlyMutationError();
     return this.runExclusive('purgeSoftDeleted',
       () => writes.purgeSoftDeleted(this.ctx(), olderThanIso, maxRecords),
     );
@@ -896,7 +943,7 @@ export class MaadEngine {
     repairTypes: import('./types.js').RepairStrategyName[],
     maxRecords: number,
   ) {
-    if (this._readOnly) return singleErr('READ_ONLY', 'Engine is in read-only mode');
+    if (this._readOnly) return this.readOnlyMutationError();
     return this.kickIndexer(await this.runExclusive('repairWhere',
       () => repairs.repairWhere(this.ctx(), filter, docType, repairTypes, maxRecords),
     ));

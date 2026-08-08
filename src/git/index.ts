@@ -127,15 +127,18 @@ export class GitLayer {
 
   // ---- 0.7.10 — tag operations for maad_backup ---------------------------
 
-  async addAnnotatedTag(name: string, message: string): Promise<void> {
+  async addAnnotatedTag(name: string, message: string, targetSha?: string): Promise<void> {
     // Inject the committer identity env — annotated tags need a tagger
     // identity and we can't depend on the host having `git config
     // user.name/user.email` set. Same pattern as autoCommit + initRepo
     // (0.7.3); see buildGitEnv for the merge + askpass
     // stripping rationale.
-    await this.git
-      .env(buildGitEnv())
-      .addAnnotatedTag(name, message);
+    const git = this.git.env(buildGitEnv());
+    if (targetSha === undefined) {
+      await git.addAnnotatedTag(name, message);
+    } else {
+      await git.raw(['tag', '-a', name, targetSha, '-m', message]);
+    }
   }
 
   /**
