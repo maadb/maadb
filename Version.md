@@ -1,10 +1,14 @@
 ---
 enabled: true
-current: 0.13.0
+current: 0.14.0
 dev_flow: formal
 ---
 
 # Version History
+
+## 0.14.0 - 2026-08-08
+
+Add per-project history modes.
 
 ## 0.13.0 - 2026-08-03
 
