@@ -119,6 +119,12 @@ For each entity, determine: master or transaction. Use the design checkpoint fro
 
 ### 2. Map relationships
 Draw the refs: what points to what. A job refs a customer and a technician. A note appends to a job.
+Name \`ref\` fields as relations (\`parent_case\`, \`assigned_attorney\`), not
+generics (\`link\`, \`related\`) — the field name is the only edge label the
+graph exposes. When an existing corpus has prose links that should become
+queryable structure, that is densification: add an optional \`ref\` field
+(additive evolution), then set it on records — see \`_skills/graph-ontology.md\`
+Recipe 4. Do not invent Cypher-style edges or UI graph views in the engine.
 
 ### 3. Define fields
 For each type: name, type, required, indexed, enum values, ref targets. Use domain knowledge for sensible defaults.
