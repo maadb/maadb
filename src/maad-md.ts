@@ -121,5 +121,7 @@ of secrets and personal data you would not hand to every project member.
 - \`_skills/architect-core.md\` — design and deploy schemas (Architect mode)
 - \`_skills/schema-guide.md\` — schema DSL reference and evolution
 - \`_skills/import-guide.md\` — importing existing data
+- \`_skills/graph-ontology.md\` — typed graph traversal and densification
+- \`_skills/corpus-explorer.md\` — map an unfamiliar project to a typed corpus map
 `;
 }

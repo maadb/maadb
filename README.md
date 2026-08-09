@@ -369,7 +369,7 @@ my-project/
   _backend/                       # SQLite index — gitignored, rebuildable
     maad.db
   _import/                        # Drop zone for raw markdown imports
-  _skills/                        # Agent skill files (architect, import, etc.) — engine-managed
+  _skills/                        # Agent skill files (architect, import, graph, corpus, etc.) — engine-managed
   MAAD.md                         # Managed: canonical agent operating instructions (static, stamped)
   CLAUDE.md / AGENTS.md           # Created once at init: thin pointers to MAAD.md, user-owned after
   <type-dirs>/                    # Record files — one directory per type

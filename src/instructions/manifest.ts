@@ -26,6 +26,8 @@ import { createRequire } from 'node:module';
 import { generateMaadMd } from '../maad-md.js';
 import { generateSchemaGuide, generateImportGuide } from '../skill-files.js';
 import { generateArchitectSkill } from '../architect.js';
+import { generateGraphOntologySkill } from '../skills/graph-ontology.js';
+import { generateCorpusExplorerSkill } from '../skills/corpus-explorer.js';
 
 const require = createRequire(import.meta.url);
 
@@ -57,6 +59,8 @@ export const MANAGED_ARTIFACTS: readonly ManagedArtifact[] = [
   { name: 'architect-core', relPath: '_skills/architect-core.md', generate: generateArchitectSkill },
   { name: 'schema-guide', relPath: '_skills/schema-guide.md', generate: generateSchemaGuide },
   { name: 'import-guide', relPath: '_skills/import-guide.md', generate: generateImportGuide },
+  { name: 'graph-ontology', relPath: '_skills/graph-ontology.md', generate: generateGraphOntologySkill },
+  { name: 'corpus-explorer', relPath: '_skills/corpus-explorer.md', generate: generateCorpusExplorerSkill },
 ];
 
 const STAMP_RE = /^<!-- maadb:managed name=([A-Za-z0-9_-]+) engine=([^\s]+) hash=sha256:([0-9a-f]{64}) -->\r?\n?/;

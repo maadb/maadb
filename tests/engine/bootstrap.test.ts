@@ -6,10 +6,11 @@
 
 import { describe, it, expect, afterEach } from 'vitest';
 import path from 'node:path';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { MaadEngine } from '../../src/engine.js';
 import { ensureProjectSkills } from '../../src/skills-scaffold.js';
+import { MANAGED_ARTIFACTS } from '../../src/instructions/manifest.js';
 
 const createdDirs: string[] = [];
 
@@ -147,17 +148,21 @@ describe('ensureProjectSkills', () => {
     const dir = makeTempDir('skills-fresh');
     const result = ensureProjectSkills(dir);
 
-    expect(result.created).toHaveLength(4);
+    expect(result.created).toHaveLength(MANAGED_ARTIFACTS.length);
     expect(result.created).toContain('MAAD.md');
     expect(result.created).toContain('_skills/architect-core.md');
     expect(result.created).toContain('_skills/schema-guide.md');
     expect(result.created).toContain('_skills/import-guide.md');
+    expect(result.created).toContain('_skills/graph-ontology.md');
+    expect(result.created).toContain('_skills/corpus-explorer.md');
     expect(result.errors).toEqual([]);
 
     expect(existsSync(path.join(dir, 'MAAD.md'))).toBe(true);
     expect(existsSync(path.join(dir, '_skills', 'architect-core.md'))).toBe(true);
     expect(existsSync(path.join(dir, '_skills', 'schema-guide.md'))).toBe(true);
     expect(existsSync(path.join(dir, '_skills', 'import-guide.md'))).toBe(true);
+    expect(existsSync(path.join(dir, '_skills', 'graph-ontology.md'))).toBe(true);
+    expect(existsSync(path.join(dir, '_skills', 'corpus-explorer.md'))).toBe(true);
 
     // Lifecycle rework: every scaffolded file carries the managed stamp.
     const maadMd = readFileSync(path.join(dir, 'MAAD.md'), 'utf-8');
@@ -186,11 +191,40 @@ describe('ensureProjectSkills', () => {
   it('is idempotent — second call creates nothing new', () => {
     const dir = makeTempDir('skills-idempotent');
     const first = ensureProjectSkills(dir);
-    expect(first.created).toHaveLength(4);
+    expect(first.created).toHaveLength(MANAGED_ARTIFACTS.length);
 
     const second = ensureProjectSkills(dir);
     expect(second.created).toHaveLength(0);
-    expect(second.skipped).toHaveLength(4);
+    expect(second.skipped).toHaveLength(MANAGED_ARTIFACTS.length);
     expect(second.errors).toEqual([]);
+  });
+
+  it('UPGRADE CREATES: bind scaffolds only the newly registered missing artifacts', () => {
+    // Simulates a project that had the pre-0.15 managed set, then upgraded:
+    // create-if-absent writes the two new skills without rewriting old files.
+    const dir = makeTempDir('skills-upgrade-creates');
+    const legacy = MANAGED_ARTIFACTS.filter(
+      a => a.name !== 'graph-ontology' && a.name !== 'corpus-explorer',
+    );
+    for (const a of legacy) {
+      const abs = path.join(dir, a.relPath);
+      mkdirSync(path.dirname(abs), { recursive: true });
+      writeFileSync(abs, `# legacy ${a.name}\n`, 'utf-8');
+    }
+    const before = new Map(legacy.map(a => {
+      const abs = path.join(dir, a.relPath);
+      return [a.relPath, { mtime: statSync(abs).mtimeMs, content: readFileSync(abs, 'utf-8') }];
+    }));
+
+    const result = ensureProjectSkills(dir);
+    expect(result.created.sort()).toEqual([
+      '_skills/corpus-explorer.md',
+      '_skills/graph-ontology.md',
+    ]);
+    expect(result.skipped.length).toBe(legacy.length);
+    for (const a of legacy) {
+      const abs = path.join(dir, a.relPath);
+      expect(readFileSync(abs, 'utf-8')).toBe(before.get(a.relPath)!.content);
+    }
   });
 });

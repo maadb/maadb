@@ -120,7 +120,8 @@ describe('refresh', () => {
 
     const plan = planRefresh(root, { force: false });
     expect(plan.refresh.map(s => s.name).sort()).toEqual(['architect-core', 'schema-guide']);
-    expect(plan.current.length).toBe(2);
+    // Remaining managed artifacts stay current (total − outdated − missing).
+    expect(plan.current.length).toBe(MANAGED_ARTIFACTS.length - 2);
     expect(plan.skippedModified).toEqual([]);
     expect(plan.skippedUnmanaged).toEqual([]);
 

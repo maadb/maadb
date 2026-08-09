@@ -213,6 +213,14 @@ client:
   target: client    # points to records of type "client"
 \`\`\`
 
+**Densification (additive refs):** when agents discover structural links that
+only exist in prose or \`mention\` annotations, prefer adding a new *optional*
+\`ref\` (or \`list\` of \`ref\`) field to the current schema version, \`maad_reload\`,
+then set the field on records. That is an additive change — no \`vN+1\` bump.
+Name the field as a relation, set \`index: true\` if you will filter or join on
+it, and verify with \`maad_find_orphans\`. Full recipe:
+\`_skills/graph-ontology.md\`.
+
 ## Template headings (optional)
 
 Add heading structure that \`maad_create\` will generate for new records:

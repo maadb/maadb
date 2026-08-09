@@ -17,14 +17,23 @@ import { loadSchemas } from '../../src/schema/loader.js';
 import { generateSchemaGuide, generateImportGuide } from '../../src/skill-files.js';
 import { generateArchitectSkill } from '../../src/architect.js';
 import { generateMaadMd } from '../../src/maad-md.js';
+import { generateGraphOntologySkill } from '../../src/skills/graph-ontology.js';
+import { generateCorpusExplorerSkill } from '../../src/skills/corpus-explorer.js';
 import type { Registry, SchemaStore } from '../../src/types.js';
 
 const TEMP_ROOT = path.resolve(__dirname, '../fixtures/_temp-generator-examples');
 
+/** Guides that embed YAML schema/registry examples (loader-validated). */
 const GUIDES: Record<string, string> = {
   'schema-guide': generateSchemaGuide(),
   'import-guide': generateImportGuide(),
   'architect-core': generateArchitectSkill(),
+};
+
+/** Fully-static recipe skills — prose only, no YAML schema examples. */
+const RICH_SKILLS: Record<string, string> = {
+  'graph-ontology': generateGraphOntologySkill(),
+  'corpus-explorer': generateCorpusExplorerSkill(),
 };
 
 function extractYamlBlocks(text: string): string[] {
@@ -183,7 +192,7 @@ describe('generator schema examples load through the real schema loader', () => 
 
 describe('generator prose does not contradict engine behavior', () => {
   const maadMd = generateMaadMd();
-  const allGenerated = { ...GUIDES, 'MAAD.md': maadMd };
+  const allGenerated = { ...GUIDES, ...RICH_SKILLS, 'MAAD.md': maadMd };
 
   it('no guide teaches the itemType key (loader reads item_type)', () => {
     for (const [guide, text] of Object.entries(allGenerated)) {
@@ -240,5 +249,28 @@ describe('generator prose does not contradict engine behavior', () => {
     for (const [guide, text] of Object.entries(allGenerated)) {
       expect(/more than 1,000 records per year\?/.test(text), `${guide} still teaches the flat cutoff`).toBe(false);
     }
+  });
+
+  it('graph-ontology skill teaches relationship paths and densification overlays', () => {
+    const text = RICH_SKILLS['graph-ontology']!;
+    expect(text).toContain('maad_relationship_paths');
+    expect(text).toContain('_skills/local/ontology.md');
+    expect(text).toContain('do not edit');
+    expect(text.toLowerCase().includes('cypher')).toBe(true); // non-goal rejection
+    expect(/prj_|sess-|agt-/.test(text)).toBe(false);
+  });
+
+  it('corpus-explorer skill teaches staged mapping and corpus-map overlay', () => {
+    const text = RICH_SKILLS['corpus-explorer']!;
+    expect(text).toContain('maad_relationship_paths');
+    expect(text).toContain('_skills/local/corpus-map.md');
+    expect(text).toContain('maad_find_orphans');
+    expect(text).toContain('do not edit');
+    expect(/prj_|sess-|agt-/.test(text)).toBe(false);
+  });
+
+  it('MAAD.md Skills list includes the new managed graph skills', () => {
+    expect(maadMd).toContain('_skills/graph-ontology.md');
+    expect(maadMd).toContain('_skills/corpus-explorer.md');
   });
 });
