@@ -429,11 +429,12 @@ The vector store is `sqlite-vec` (in the same SQLite file); the lexical leg is F
 
 ## Current state
 
-**Current:** v0.14.0 — per-project history modes let each project choose per-write audit commits, a Git-free feed, zero-write reads, batched commits, or annotated snapshots. Existing unconfigured projects keep compatibility: Git projects infer `audit`; projects without Git infer `feed`.
+**Current:** v0.15.0 — managed graph-ontology and corpus-explorer skills teach agents typed-graph densification and unfamiliar-project mapping using existing MCP primitives (`maad_related`, `maad_relationship_paths`, `maad_join`, …).
 
-See the [v0.14.0 release notes](docs/releases/v0.14.0.md) for highlights, verification, and known limitations.
+See the [v0.15.0 release notes](docs/releases/v0.15.0.md) for highlights, verification, and migration notes.
 
 Recent shipped scope:
+- **0.15.0** — Managed `_skills/graph-ontology.md` and `_skills/corpus-explorer.md` (MANAGED_ARTIFACTS 4 → 6)
 - **0.14.0** — Per-project `audit`, `feed`, `read`, `batch`, and `snapshot` history modes; explicit flush; crash recovery; history health telemetry
 - **0.13.0** — Evidence-backed relationship paths with deterministic bounded traversal and canonical edge evidence
 - **0.12.4** — HTTP sessions bound to the authenticated principal that opened them; revoke, rotate, reload, and expiry tear down affected sessions
@@ -455,7 +456,7 @@ See [Version.md](Version.md) for the full release history and forward plan.
 
 - TypeScript strict, Node.js 24+ (current Active LTS)
 - 6 production dependencies: `better-sqlite3`, `gray-matter`, `js-yaml`, `simple-git`, `@modelcontextprotocol/sdk`, `pino`. Plus one **optional** dependency `sqlite-vec` (semantic retrieval) — lazily loaded only when `MAAD_SEMANTIC_ENABLE` is on; absent or failed to load ⇒ semantic disabled, engine unaffected
-- 1,270 tests at v0.14.0, Vitest — run on every push/PR across Ubuntu and Windows
+- 1,274 tests at v0.15.0, Vitest — run on every push/PR across Ubuntu and Windows
 - MIT license, pre-1.0, actively developed
 
 ## License
