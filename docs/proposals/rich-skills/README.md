@@ -1,7 +1,9 @@
 # Rich Skills Pack — Proposal
 
-Status: **proposal / draft-only**. Nothing in this directory ships with the
-engine yet. No `src/**` changes are proposed for this wave.
+Status: **partially shipped (0.15.0)**. Managed generators for
+`_skills/graph-ontology.md` and `_skills/corpus-explorer.md` shipped in
+v0.15.0. This directory remains design background and host-boundary notes —
+not runtime source of truth.
 
 ## Problem
 
