@@ -260,6 +260,14 @@ describe('generator prose does not contradict engine behavior', () => {
     expect(/prj_|sess-|agt-/.test(text)).toBe(false);
   });
 
+  it('graph-ontology maad_search recipes include required primitive', () => {
+    const text = RICH_SKILLS['graph-ontology']!;
+    expect(text).toContain('primitive=identifier');
+    expect(text).toContain('INVALID_PRIMITIVE');
+    // Bare value= without primitive is a trap (tool requires primitive).
+    expect(/maad_search` with `value=/.test(text)).toBe(false);
+  });
+
   it('corpus-explorer skill teaches staged mapping and corpus-map overlay', () => {
     const text = RICH_SKILLS['corpus-explorer']!;
     expect(text).toContain('maad_relationship_paths');
@@ -267,6 +275,12 @@ describe('generator prose does not contradict engine behavior', () => {
     expect(text).toContain('maad_find_orphans');
     expect(text).toContain('do not edit');
     expect(/prj_|sess-|agt-/.test(text)).toBe(false);
+  });
+
+  it('corpus-explorer Stage 1 does not teach filesystem tree walks', () => {
+    const text = RICH_SKILLS['corpus-explorer']!;
+    expect(/Skim `MAAD\.md` and list `_skills\/`/.test(text)).toBe(false);
+    expect(text).toContain('Do not walk the project tree on disk');
   });
 
   it('MAAD.md Skills list includes the new managed graph skills', () => {

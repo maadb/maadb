@@ -10,7 +10,7 @@ dev_flow: formal
 
 Ship managed graph-ontology and corpus-explorer agent skills.
 
-Adds stamped generators for `_skills/graph-ontology.md` (typed-graph traversal and densification) and `_skills/corpus-explorer.md` (unfamiliar-project mapping), registered in `MANAGED_ARTIFACTS` (4 → 6). Wires both into `MAAD.md`, folds densification guidance into architect/schema-guide, and documents create-if-absent scaffold on upgrade. Existing projects gain the two new files on next bind; `MAAD.md` reports `outdated` until `maad instructions refresh`. 1274 tests. No dependency or database schema changes.
+Adds stamped generators for `_skills/graph-ontology.md` (typed-graph traversal and densification) and `_skills/corpus-explorer.md` (unfamiliar-project mapping), registered in `MANAGED_ARTIFACTS` (4 → 6). Wires both into `MAAD.md`, folds densification guidance into architect/schema-guide, and documents create-if-absent scaffold on upgrade. Existing projects gain the two new files on next bind; `MAAD.md` reports `outdated` until `maad instructions refresh`. 1274 tests. No database schema changes. The tag range also carried a security dependency bump (`@modelcontextprotocol/sdk` 1.29.0 → 1.30.0, `js-yaml` ~4.3.0 → ~4.3.1, plus transitive Hono/`@hono/node-server` updates) — no new production dependency names.
 
 ## 0.14.0 - 2026-08-08
 

@@ -68,9 +68,12 @@ available in this deployment, which decides your Stage 4 toolkit.
 - Warnings: broken refs and validation errors reported here are your first
   hygiene signal; carry them to Stage 5, don't chase them yet.
 
-Skim \`MAAD.md\` and list \`_skills/\` — an existing \`_skills/local/\` overlay
-(prior conventions, an earlier corpus map) changes your job from *mapping*
-to *verifying and updating a map*.
+Ask whether the project already has orientation overlays — via
+\`maad_describe\` / summary warnings, or by reading known managed paths
+through tools when the deployment exposes them (\`MAAD.md\`,
+\`_skills/local/corpus-map.md\`, \`_skills/local/ontology.md\`). An existing
+local overlay changes your job from *mapping* to *verifying and updating
+a map*. Do not walk the project tree on disk.
 
 ### Stage 2 — Schema: the intended graph
 
