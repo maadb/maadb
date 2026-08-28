@@ -68,8 +68,8 @@ this repo, never in the project tree. Detailed in
 
 | Capability | Placement | Rationale |
 |---|---|---|
-| Graph/ontology skill (typed refs, promote prose → structure, path-walk recipes) | **Managed** — candidate `_skills/graph-ontology.md` (phase-gated, see below) | Pure tool-surface pedagogy; must track `maad_relationship_paths` contract changes; domain-free |
-| Corpus explorer skill (orient in an unfamiliar project) | **Managed** — candidate `_skills/corpus-explorer.md` (phase-gated) | Same: composes `maad_summary`/`maad_schema`/`maad_query`/paths/orphans; domain-free |
+| Graph/ontology skill (typed refs, promote prose → structure, path-walk recipes) | **Managed** — `_skills/graph-ontology.md` (**shipped 0.15.0**) | Pure tool-surface pedagogy; must track `maad_relationship_paths` contract changes; domain-free |
+| Corpus explorer skill (orient in an unfamiliar project) | **Managed** — `_skills/corpus-explorer.md` (**shipped 0.15.0**) | Same: composes `maad_summary`/`maad_schema`/`maad_query`/paths/orphans; domain-free |
 | Structure evolution (schema bumps, densification pressure → new ref fields) | **Managed, by extension** — grow `_skills/architect-core.md` + `_skills/schema-guide.md`; **no new artifact** | Evolution guidance already half-lives there (schema-guide § versioning). A third home would fragment it |
 | Report/view composition (`maad_join` + `maad_aggregate` → markdown tables/summaries) | **Managed, as recipes inside the two new skills** — not a standalone artifact yet | Composition patterns are small; a standalone report skill should earn its place with usage evidence, mirroring the Tier 2 "provisional composite" rule |
 | Project ontology conventions (what `case→client` *means* here, subtype vocabulary, annotation policy) | **Project overlay** — `_skills/local/ontology.md`, authored by agents following the graph skill | Domain decisions; differ per project; must survive engine refresh untouched |
@@ -134,24 +134,19 @@ generate that usage data; they must not presuppose the composite.
 
 ## Phased delivery recommendation
 
-**Phase 0 — this wave (draft-only).** The documents in this directory.
-Review gate: maintainer Delivery-Review. No `src/**` changes.
+**Phase 0–2 — complete as of 0.15.0.** Managed generators shipped:
+`generateGraphOntologySkill()` / `generateCorpusExplorerSkill()` in
+`src/skills/`, registered in `MANAGED_ARTIFACTS`, listed in `MAAD.md`, with
+densification notes folded into `architect-core` / `schema-guide`. This
+directory is retained as design background and host-boundary notes.
 
-**Phase 1 — overlay validation (no engine release required).** Hand-install
-the two skill drafts as `_skills/local/graph-ontology.md` /
-`_skills/local/corpus-explorer.md` in one or two real projects (the overlay
-path exists precisely so this needs no engine change). Let agents run them;
-collect friction: which recipes get used, which tool-choice rules were
-wrong, whether the response-size guard on `maad_relationship_paths` bites at
-default limits on real corpora. Fold fixes back into the drafts.
+**Historical note — Phase 1 (overlay validation).** The original plan was to
+hand-install drafts under `_skills/local/` before promotion. Delivery
+skipped straight to managed promotion after review; friction collection now
+happens against the shipped managed files + project overlays.
 
-**Phase 2 — managed promotion (engine release).** Add
-`generateGraphOntologySkill()` / `generateCorpusExplorerSkill()` (natural
-home: `src/skill-files.ts` or a sibling module), register both in
-`MANAGED_ARTIFACTS`, extend the manifest tests, mention both in the
-`MAAD.md` Skills list, and fold structure-evolution additions into
-`architect-core.md` / `schema-guide.md` in the same release. Minor version
-bump; normal Formal Flow. Names and paths are frozen from this point
+**Historical note — Phase 2 (managed promotion).** Completed in v0.15.0.
+Names and paths are frozen from this point
 (implication 3 above).
 
 **Phase 3 — host skills (separate repos / skill dirs, no engine coupling).**

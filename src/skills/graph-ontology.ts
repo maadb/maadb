@@ -65,7 +65,7 @@ verifiable.
 | "How does A connect to B?" / "what's within N hops?" / "show me the evidence" | \`maad_relationship_paths\` | Bounded multi-hop BFS, deterministic, cycle-safe, returns per-edge evidence and per-node distance |
 | "Give me these fields from many records *and* their ref targets" | \`maad_join\` | One call instead of query → get → get (N+1) chains |
 | "Roll up a metric across a ref hop" ("cases per client industry") | \`maad_aggregate\` with a ref-chain \`groupBy\` (\`"client->industry"\`) | Group-by resolves refs at query time; never iterate records to count |
-| "Where is this record *mentioned* in prose?" | \`maad_search\` (scoped \`value=<docId>\`) or \`maad_relationship_paths\` with \`extractionKinds: ["ref","mention"]\` | Mentions are opt-in on path traversal; search finds the raw extracted objects |
+| "Where is this record *mentioned* in prose?" | \`maad_search\` with \`primitive=identifier\` and \`value=<docId>\` (or \`primitive=entity\` + matching \`subtype\`), or \`maad_relationship_paths\` with \`extractionKinds: ["ref","mention"]\` | Mentions are opt-in on path traversal; search requires \`primitive\` and finds the raw extracted objects |
 
 Two defaults that will bite you if unexamined:
 
@@ -142,10 +142,11 @@ Goal: links that exist only in narrative become schema-typed refs.
 1. **Find candidates.** Probe the observed graph:
    \`maad_relationship_paths\` from key records with
    \`extractionKinds: ["ref","mention"]\`, \`maxDepth: 1\` — every \`mention\`
-   edge is a candidate. Corpus-wide, \`maad_search\` with \`value=<docId>\`
-   scoped per hub record inventories where it's mentioned. (Prose links with
-   no annotation at all are invisible to tools — surfacing those is judgment
-   work while reading \`cold\` bodies.)
+   edge is a candidate. Corpus-wide, \`maad_search\` with
+   \`primitive=identifier\` and \`value=<docId>\` (required \`primitive\` —
+   omit it and the call fails \`INVALID_PRIMITIVE\`) inventories where each
+   hub is mentioned. (Prose links with no annotation at all are invisible
+   to tools — surfacing those is judgment work while reading \`cold\` bodies.)
 2. **Decide if the link is structural.** Promote when the relationship is:
    queried or filtered on; needed in joins/aggregates; integrity-relevant
    (should break loudly if the target vanishes); or cardinality-stable

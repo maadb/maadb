@@ -1,11 +1,9 @@
 # Graph / Ontology Skill — Draft
 
-> **Proposal preamble** (dropped at promotion): intended placement is
-> **managed**, candidate path `_skills/graph-ontology.md`, artifact name
-> `graph-ontology` — phase-gated per [`architecture.md`](architecture.md)
-> (validate as a `_skills/local/` overlay first). Content below is written to
-> the fully-static managed contract: engine facts only, no project facts.
-> Open questions for the maintainer are at the end and would also be dropped.
+> **Proposal archive** (shipped 0.15.0): managed path `_skills/graph-ontology.md`,
+> artifact name `graph-ontology`. Runtime source of truth is
+> `src/skills/graph-ontology.ts`. Content below is the design draft retained
+> for history; prefer the generator when they diverge.
 
 ---
 

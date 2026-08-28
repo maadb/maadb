@@ -1,11 +1,9 @@
 # Corpus Explorer Skill — Draft
 
-> **Proposal preamble** (dropped at promotion): intended placement is
-> **managed**, candidate path `_skills/corpus-explorer.md`, artifact name
-> `corpus-explorer` — phase-gated per [`architecture.md`](architecture.md)
-> (validate as a `_skills/local/` overlay first). Written to the
-> fully-static managed contract: engine facts only, no project facts.
-> Open questions for the maintainer are at the end.
+> **Proposal archive** (shipped 0.15.0): managed path `_skills/corpus-explorer.md`,
+> artifact name `corpus-explorer`. Runtime source of truth is
+> `src/skills/corpus-explorer.ts`. Content below is the design draft retained
+> for history; prefer the generator when they diverge.
 
 ---
 
