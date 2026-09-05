@@ -3,10 +3,13 @@ dist/
 .claude/
 CLAUDE.md
 MAAD.md
-.env
-.env.*
+.env*
+.secrets/
+brains/
+user-data/
 
-# Operator/agent overlays — never tracked (Patchnet Master Dev charter)
+# Local operator and agent configuration
+.Codex/
 *.local.md
 AGENTS.md
 

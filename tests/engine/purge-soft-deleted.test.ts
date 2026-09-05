@@ -3,7 +3,11 @@
 // records whose updated_at predates a retention threshold.
 // ============================================================================
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import * as fsPromises from 'node:fs/promises';
+vi.mock('node:fs/promises', async importOriginal => ({
+  ...await importOriginal<typeof import('node:fs/promises')>(),
+}));
 import path from 'node:path';
 import { existsSync, rmSync, cpSync } from 'node:fs';
 import { simpleGit } from 'simple-git';
@@ -68,6 +72,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   engine.close();
   await new Promise(r => setTimeout(r, 100));
   try {
@@ -78,6 +83,39 @@ afterEach(async () => {
 });
 
 describe('engine.purgeSoftDeleted', () => {
+  it.each(['EACCES', 'EPERM'])('retains a failed %s deletion for a later retry', async code => {
+    await createTestClient('cli-retry');
+    await softDeleteAndBackdate('cli-retry', '2020-01-01T00:00:00.000Z');
+    const file = path.join(TEMP_ROOT, 'clients', '_deleted_cli-retry.md');
+    vi.spyOn(fsPromises, 'unlink').mockRejectedValueOnce(Object.assign(new Error('denied'), { code }));
+    const failed = await engine.purgeSoftDeleted('2026-01-01T00:00:00.000Z', 100);
+    expect(failed.ok).toBe(true);
+    if (!failed.ok) return;
+    expect(failed.value.purged).toEqual([]);
+    expect(failed.value.failed).toHaveLength(1);
+    expect(existsSync(file)).toBe(true);
+    expect(engine.getBackend().findSoftDeletedBefore('2026-01-01T00:00:00.000Z', 100)).toHaveLength(1);
+
+    const retried = await engine.purgeSoftDeleted('2026-01-01T00:00:00.000Z', 100);
+    expect(retried.ok).toBe(true);
+    if (!retried.ok) return;
+    expect(retried.value.purged).toHaveLength(1);
+    expect(retried.value.failed).toEqual([]);
+    expect(existsSync(file)).toBe(false);
+  });
+
+  it('clears an already-missing tombstone without reporting a failed deletion', async () => {
+    await createTestClient('cli-missing');
+    await softDeleteAndBackdate('cli-missing', '2020-01-01T00:00:00.000Z');
+    await fsPromises.unlink(path.join(TEMP_ROOT, 'clients', '_deleted_cli-missing.md'));
+    const result = await engine.purgeSoftDeleted('2026-01-01T00:00:00.000Z', 100);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.purged).toHaveLength(1);
+    expect(result.value.failed).toEqual([]);
+    expect(engine.getBackend().findSoftDeletedBefore('2026-01-01T00:00:00.000Z', 100)).toEqual([]);
+  });
+
   it('purges soft-deleted records older than the threshold and leaves recent ones alone', async () => {
     await createTestClient('cli-old-1');
     await createTestClient('cli-old-2');

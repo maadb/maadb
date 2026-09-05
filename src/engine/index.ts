@@ -30,7 +30,7 @@ import type {
 import { loadRegistry } from '../registry/index.js';
 import { loadSchemas } from '../schema/index.js';
 import { logSchemaCacheStale } from '../logging.js';
-import { collectMarkdownFiles } from './helpers.js';
+import { collectMarkdownFiles, withDocumentReadBoundary } from './helpers.js';
 import { SqliteBackend } from '../backend/index.js';
 import type { MaadBackend } from '../backend/index.js';
 import { GitLayer } from '../git/index.js';
@@ -374,8 +374,13 @@ export class MaadEngine {
     }
 
     // Operation journal — tracks pending writes for crash recovery
-    this.journal = new OperationJournal(backendDir);
-    this.startupRecovery = this._readOnly ? [] : this.journal.reconcile({ retainIndexed: true });
+    try {
+      this.journal = new OperationJournal(backendDir);
+      this.startupRecovery = this._readOnly ? [] : this.journal.reconcile({ retainIndexed: true });
+    } catch (error) {
+      await this.disposeResources();
+      return singleErr('BACKEND_ERROR', `Operation journal recovery failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
 
     this.gitLayer = new GitLayer(this.projectRoot);
     if (await this.gitLayer.isRepo()) {
@@ -863,7 +868,7 @@ export class MaadEngine {
   }
 
   // --- Reads ---
-  async getDocument(id: DocId, depth: 'hot' | 'warm' | 'cold', blockIdOrHeading?: string) { return reads.getDocument(this.ctx(), id, depth, blockIdOrHeading); }
+  async getDocument(id: DocId, depth: 'hot' | 'warm' | 'cold', blockIdOrHeading?: string) { return withDocumentReadBoundary(() => reads.getDocument(this.ctx(), id, depth, blockIdOrHeading)); }
   findDocuments(query: import('../types.js').DocumentQuery) { return reads.findDocuments(this.ctx(), query); }
   searchObjects(query: import('../types.js').ObjectQuery) { return reads.searchObjects(this.ctx(), query); }
   listRelated(id: DocId, direction: 'outgoing' | 'incoming' | 'both', types?: DocType[]) { return reads.listRelated(this.ctx(), id, direction, types); }
@@ -874,7 +879,7 @@ export class MaadEngine {
   schemaInfo(dt: DocType) { return reads.schemaInfo(this.ctx(), dt); }
   aggregate(query: import('./types.js').AggregateQuery) { return reads.aggregate(this.ctx(), query); }
   join(query: import('./types.js').JoinQuery) { return reads.join(this.ctx(), query); }
-  async verifyField(id: DocId, field: string, expected: unknown) { return reads.verifyField(this.ctx(), id, field, expected); }
+  async verifyField(id: DocId, field: string, expected: unknown) { return withDocumentReadBoundary(() => reads.verifyField(this.ctx(), id, field, expected)); }
   verifyCount(dt: DocType, expectedCount: number, filters?: Record<string, import('../types.js').FilterCondition>) { return reads.verifyCount(this.ctx(), dt, expectedCount, filters); }
   async verifyIntegrity(query?: import('./types.js').IntegrityQuery) { return reads.verifyIntegrity(this.ctx(), query); }
   async backupCreate(opts?: import('./types.js').CreateBackupOptions) {
@@ -891,7 +896,7 @@ export class MaadEngine {
   async semanticSearch(query: import('./semantic/types.js').SemanticSearchQuery) { return semanticSearchOps.semanticSearch(this.ctx(), query); }
 
   // --- Composites (Tier 2, provisional) ---
-  async getDocumentFull(id: DocId) { return composites.getDocumentFull(this.ctx(), id); }
+  async getDocumentFull(id: DocId) { return withDocumentReadBoundary(() => composites.getDocumentFull(this.ctx(), id)); }
 
   // --- Writes (read-only guarded, serialized under write mutex) ---
   // Self-wrapping. Reentrant under an outer runExclusive scope.

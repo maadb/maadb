@@ -950,14 +950,18 @@ export async function purgeSoftDeleted(
     try {
       await unlink(absPath);
     } catch (e) {
-      // File already gone — the row should still be cleared so the index
-      // doesn't keep pointing at a missing file. Continue but record the
-      // failure so the caller can audit.
-      failed.push({
-        docId: doc.docId as string,
-        error: `Failed to unlink ${absPath}: ${e instanceof Error ? e.message : String(e)}`,
-      });
+      // Only an already-missing file permits clearing the row. Preserve other
+      // failures in the cemetery so the next purge can retry them.
+      if ((e as NodeJS.ErrnoException).code !== 'ENOENT') {
+        ctx.journal.complete(journalId);
+        failed.push({
+          docId: doc.docId as string,
+          error: `Failed to unlink ${absPath}: ${e instanceof Error ? e.message : String(e)}`,
+        });
+        continue;
+      }
     }
+    ctx.journal.advance(journalId, 'file_written');
     try {
       ctx.backend.removeDocument(doc.docId);
     } catch (e) {
@@ -967,7 +971,6 @@ export async function purgeSoftDeleted(
       });
       continue;
     }
-    ctx.journal.advance(journalId, 'file_written');
     ctx.journal.advance(journalId, 'indexed');
     purged.push({
       docId: doc.docId as string,

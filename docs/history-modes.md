@@ -160,6 +160,19 @@ succeeds. Batch thresholds, timers, explicit flushes, shutdown, and recovery
 are serialized per engine, so two triggers cannot commit the same pending group
 concurrently.
 
+Journal updates replace `_backend/journal.json` atomically using a temporary
+file in the same directory. Failed replacement preserves the previous journal
+and restores its in-memory state. Windows replacement retries are bounded to
+handle brief file-sharing conflicts.
+
+Invalid JSON, malformed journal entries, or an unreadable journal stop engine
+initialization with `BACKEND_ERROR`; they are never treated as an empty journal.
+Preserve the original file and reconcile it with the project files and Git
+history before repairing it and restarting. Do not replace it with an empty
+array simply to bypass the error. Atomic replacement alone does not guarantee
+survival of power loss; filesystem synchronization and recovery at every write
+stage remain separate concerns.
+
 On a clean shutdown, MAADB clears the history timer and attempts a bounded
 flush. The shutdown attempt waits for up to five seconds. If it fails or times
 out, the journal entries remain recoverable. At the next startup, MAADB finds

@@ -56,7 +56,7 @@ import type {
   RelationshipExtractionKind,
 } from './types.js';
 import { RELATIONSHIP_PATH_LIMITS } from './types.js';
-import { readFrontmatter, readBlockContent, collectMarkdownFiles } from './helpers.js';
+import { readFrontmatter, readBlockContent, collectMarkdownFiles, readDocumentContent, DocumentReadPathError } from './helpers.js';
 
 export async function getDocument(
   ctx: EngineContext,
@@ -98,9 +98,10 @@ export async function getDocument(
   if (depth === 'cold') {
     const absPath = path.join(ctx.projectRoot, doc.filePath as string);
     try {
-      const raw = await readFile(absPath, 'utf-8');
+      const raw = await readDocumentContent(ctx.projectRoot, doc);
       result.body = extractBody(raw);
     } catch (e) {
+      if (e instanceof DocumentReadPathError) throw e;
       logger.degraded('reads', 'getDocument.cold', `Failed to read file for cold read: ${absPath}`, { error: e instanceof Error ? e.message : String(e) });
       result.body = '';
     }
