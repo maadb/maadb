@@ -22,9 +22,29 @@ export interface JournalEntry {
   status: 'pending' | 'file_written' | 'indexed' | 'committed';
 }
 
+function isJournalEntry(value: unknown): value is JournalEntry {
+  if (!value || typeof value !== 'object') return false;
+  const entry = value as Record<string, unknown>;
+  return ['id', 'docId', 'filePath', 'timestamp'].every(key => typeof entry[key] === 'string')
+    && typeof entry.op === 'string' && ['create', 'update', 'delete'].includes(entry.op)
+    && typeof entry.status === 'string' && ['pending', 'file_written', 'indexed', 'committed'].includes(entry.status)
+    && ['tempPath', 'gitBoundarySha', 'snapshotTag'].every(key => entry[key] === undefined || typeof entry[key] === 'string')
+    && (entry.files === undefined || (Array.isArray(entry.files) && entry.files.every(file => typeof file === 'string')))
+    && (entry.commit === undefined || isCommitOptions(entry.commit));
+}
+
+function isCommitOptions(value: unknown): value is CommitOptions {
+  if (!value || typeof value !== 'object') return false;
+  const commit = value as Record<string, unknown>;
+  return ['action', 'docId', 'docType', 'detail', 'summary'].every(key => typeof commit[key] === 'string')
+    && ['create', 'update', 'delete'].includes(commit.action as string)
+    && Array.isArray(commit.files) && commit.files.every(file => typeof file === 'string');
+}
+
 export class OperationJournal {
   private journalPath: string;
   private entries: JournalEntry[] = [];
+  private persisted = '[]';
 
   constructor(backendDir: string) {
     this.journalPath = path.join(backendDir, 'journal.json');
@@ -32,18 +52,35 @@ export class OperationJournal {
   }
 
   private load(): void {
-    if (existsSync(this.journalPath)) {
-      try {
-        const raw = readFileSync(this.journalPath, 'utf-8');
-        this.entries = JSON.parse(raw) as JournalEntry[];
-      } catch {
-        this.entries = [];
-      }
+    let raw: string;
+    try {
+      raw = readFileSync(this.journalPath, 'utf-8');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+      throw error;
     }
+    let parsed: unknown;
+    try { parsed = JSON.parse(raw); } catch {
+      throw new Error('Invalid operation journal JSON; preserve journal.json and repair it before restarting');
+    }
+    if (!Array.isArray(parsed) || !parsed.every(isJournalEntry)) {
+      throw new Error('Invalid operation journal entries; preserve journal.json and repair it before restarting');
+    }
+    this.entries = parsed;
+    this.persisted = JSON.stringify(parsed);
   }
 
   private save(): void {
-    writeFileSync(this.journalPath, JSON.stringify(this.entries, null, 2), 'utf-8');
+    const next = JSON.stringify(this.entries, null, 2);
+    try {
+      atomicWriteSync(this.journalPath, next, process.platform === 'win32' ? 5 : 0);
+      this.persisted = next;
+    } catch (error) {
+      // A failed publication must not leave unpersisted recovery state queued
+      // in memory for a later operation or shutdown flush.
+      this.entries = JSON.parse(this.persisted) as JournalEntry[];
+      throw error;
+    }
   }
 
   begin(op: JournalEntry['op'], docId: string, filePath: string, tempPath?: string): string {
@@ -176,11 +213,22 @@ export class OperationJournal {
  * Atomic file write: write to temp path, then rename.
  * On failure, temp file is cleaned up.
  */
-export function atomicWriteSync(targetPath: string, content: string): string {
+export function atomicWriteSync(targetPath: string, content: string, renameRetries = 0): string {
   const tempPath = `${targetPath}.maad-tmp-${process.pid}-${randomUUID()}`;
   try {
     writeFileSync(tempPath, content, { encoding: 'utf-8', flag: 'wx' });
-    renameSync(tempPath, targetPath);
+    for (let attempt = 0; ; attempt++) {
+      try {
+        renameSync(tempPath, targetPath);
+        break;
+      } catch (error) {
+        // Windows scanners can briefly deny replacement of a just-read file.
+        // Keep the old journal intact while making a bounded retry.
+        const code = (error as NodeJS.ErrnoException).code;
+        if (attempt >= renameRetries || !['EACCES', 'EPERM', 'EBUSY'].includes(code ?? '')) throw error;
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10 * (attempt + 1));
+      }
+    }
   } finally {
     if (existsSync(tempPath)) unlinkSync(tempPath);
   }

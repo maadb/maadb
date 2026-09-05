@@ -8,6 +8,34 @@ import path from 'node:path';
 import { glob } from 'node:fs/promises';
 import { parseMatter } from '../parser/matter.js';
 import type { DocumentRecord } from '../types.js';
+import { isContainedIn, isReallyContainedIn } from './pathguard.js';
+import { singleErr, type Result } from '../errors.js';
+
+export class DocumentReadPathError extends Error {
+  readonly code = 'PATH_OUTSIDE_PROJECT';
+}
+
+function checkedDocumentPath(projectRoot: string, doc: Pick<DocumentRecord, 'filePath'>): string {
+  const absPath = path.resolve(projectRoot, doc.filePath as string);
+  if (!isContainedIn(absPath, projectRoot) || !isReallyContainedIn(absPath, projectRoot)) {
+    throw new DocumentReadPathError('Document path cannot be verified inside the project root');
+  }
+  return absPath;
+}
+
+/** Recheck each disk read; indexed paths may have been replaced since indexing. */
+export async function readDocumentContent(projectRoot: string, doc: Pick<DocumentRecord, 'filePath'>): Promise<string> {
+  return readFile(checkedDocumentPath(projectRoot, doc), 'utf-8');
+}
+
+export async function withDocumentReadBoundary<T>(read: () => Promise<Result<T>>): Promise<Result<T>> {
+  try {
+    return await read();
+  } catch (error) {
+    if (error instanceof DocumentReadPathError) return singleErr(error.code, error.message);
+    throw error;
+  }
+}
 
 /**
  * 0.7.12 — canonical relative-path helper. path.relative emits native
@@ -21,15 +49,14 @@ export function toCanonicalRelPath(projectRoot: string, absPath: string): string
 }
 
 export async function readFrontmatter(projectRoot: string, doc: DocumentRecord): Promise<Record<string, unknown>> {
-  const absPath = path.join(projectRoot, doc.filePath as string);
-  const raw = await readFile(absPath, 'utf-8');
+  const raw = await readDocumentContent(projectRoot, doc);
   const parsed = parseMatter(raw);
   return parsed.data as Record<string, unknown>;
 }
 
 export function readFrontmatterSync(projectRoot: string, doc: DocumentRecord): Record<string, unknown> | null {
   try {
-    const absPath = path.join(projectRoot, doc.filePath as string);
+    const absPath = checkedDocumentPath(projectRoot, doc);
     const raw = readFileSync(absPath, 'utf-8');
     const parsed = parseMatter(raw);
     return parsed.data as Record<string, unknown>;
@@ -39,8 +66,7 @@ export function readFrontmatterSync(projectRoot: string, doc: DocumentRecord): R
 }
 
 export async function readBlockContent(projectRoot: string, doc: DocumentRecord, startLine: number, endLine: number, isPreamble: boolean): Promise<string> {
-  const absPath = path.join(projectRoot, doc.filePath as string);
-  const raw = await readFile(absPath, 'utf-8');
+  const raw = await readDocumentContent(projectRoot, doc);
   const lines = raw.split('\n');
   const contentStart = isPreamble ? startLine - 1 : startLine;
   const contentEnd = endLine;
