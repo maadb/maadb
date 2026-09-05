@@ -4,6 +4,8 @@
 // the async embed worker, and the maad_semantic_search read path.
 // ============================================================================
 
+import type { DocumentQuery } from '../../types.js';
+
 /** Whether a text is being embedded as a stored passage or a search query.
  *  Drives asymmetric model prefixes (e.g. nomic search_document:/search_query:). */
 export type EmbedKind = 'document' | 'query';
@@ -102,6 +104,8 @@ export interface SemanticSearchResult {
   results: SemanticHit[];
   /** Set when the requested mode degraded (e.g. 'no_vector_provider' ⇒ lexical fallback). */
   degraded?: string;
+  /** Independent fallback and candidate-budget limitations; absent when none. */
+  limitations?: string[];
 }
 
 /** Embedding subsystem stats surfaced via maad_health.embeddings. */
@@ -140,9 +144,13 @@ export interface SemanticIndex {
   putBlockEmbeddings(rows: BlockEmbedding[]): void;
   /** Vector KNN. */
   searchVec(queryVec: Float32Array, k: number): VecHit[];
-  /** Lexical BM25 search. `scopeDocIds` (when given) constrains the match to
-   *  those docs in-SQL, so the top-k is computed within scope. */
-  searchFts(query: string, k: number, withSnippet: boolean, scopeDocIds?: readonly string[]): FtsHit[];
+  /** Lexical BM25 search. Optional ID and relational scopes AND-combine
+   *  before top-k selection; deleted/missing documents are always excluded. */
+  searchFts(query: string, k: number, withSnippet: boolean, scopeDocIds?: readonly string[], scope?: DocumentQuery): FtsHit[];
+  /** Whether eligible blocks are still waiting for embeddings. */
+  hasPendingEmbeddings(scope: DocumentQuery): boolean;
+  /** Filter a bounded candidate list using live document eligibility. */
+  filterDocIds(ids: readonly string[], scope: DocumentQuery): string[];
   /** Resolve a block's heading + text (for semantic-only snippets). */
   getBlockText(docId: string, blockOrd: number): { heading: string; text: string } | null;
   /** Tally embedding failures (surfaced in stats). */

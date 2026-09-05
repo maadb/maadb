@@ -25,11 +25,8 @@ const DEFAULT_K = 10;
 const MODES: readonly SearchMode[] = ['exact', 'hybrid', 'semantic'];
 const KEY_SEP = ' ';
 const SNIPPET_MAX = 240;
-// Scope allow-set cap. Larger than MAX_QUERY_LIMIT so most scoped searches are
-// exact; if a scope matches more docs than this, results are flagged truncated.
-const SCOPE_LIMIT = 2000;
-// vec0 KNN has no in-SQL scope filter, so when a scope is active we over-fetch a
-// wider block pool and filter in the rollup. Capped to bound work.
+// This vec0 query retrieves global neighbors. Under scope, retrieve a bounded
+// wider pool and apply relational eligibility before fusion.
 const VEC_SCOPE_POOL_CAP = 1000;
 
 export function isValidMode(mode: string): mode is SearchMode {
@@ -66,31 +63,19 @@ export async function semanticSearch(
   const withSnippet = query.snippet ?? true;
   if (text.length === 0) return ok({ mode: query.mode, total: 0, results: [] });
 
-  // Scope allow-set (docType + filters). Pushed into the FTS leg as an in-SQL
-  // doc_id filter, and applied to the vec leg in the rollup. Soft-deleted docs
-  // are excluded later via getDocument (deleted=0), so they need no handling here.
-  let allowed: Set<string> | null = null;
-  let allowedList: string[] | null = null;
+  const expanded = expandFilters(query.filters as Record<string, unknown> | undefined);
+  if (!expanded.ok) return expanded;
+  const scope: DocumentQuery = { filters: expanded.value };
+  if (query.docType !== undefined) scope.docType = toDocType(query.docType);
+  const scoped = query.docType !== undefined || query.filters !== undefined;
   let degraded: string | undefined;
-  if (query.docType !== undefined || query.filters !== undefined) {
-    const expanded = expandFilters(query.filters as Record<string, unknown> | undefined);
-    if (!expanded.ok) return expanded;
-    const dq: DocumentQuery = { filters: expanded.value, limit: SCOPE_LIMIT };
-    if (query.docType !== undefined) dq.docType = toDocType(query.docType);
-    allowedList = ctx.backend.findDocuments(dq).map(m => m.docId as string);
-    allowed = new Set(allowedList);
-    // Scope itself exceeded the cap — older in-scope docs are not in the allow-set.
-    if (allowedList.length >= SCOPE_LIMIT) degraded = 'scope_truncated';
-    // Nothing in scope → no results regardless of mode.
-    if (allowedList.length === 0) return ok({ mode: query.mode, total: 0, results: [] });
-  }
-  const scoped = allowed !== null;
+  const limitations: string[] = [];
 
   const basePool = Math.max(k * 5, 50);
   const ftsPool = basePool;
   // Over-fetch the vec leg under scope (no in-SQL filter) so in-scope blocks
   // ranked below out-of-scope ones still enter the candidate set.
-  const vecPool = scoped ? Math.min(Math.max(basePool, allowed!.size), VEC_SCOPE_POOL_CAP) : basePool;
+  const vecPool = scoped ? VEC_SCOPE_POOL_CAP : basePool;
 
   const needVec = query.mode !== 'exact';
   const vecAvailable = needVec && sem.isVecReady() && ctx.embeddingProvider !== undefined;
@@ -129,7 +114,9 @@ export async function semanticSearch(
 
   const pushFtsLeg = (): void => {
     const ftsList: string[] = [];
-    for (const h of sem.searchFts(text, ftsPool, withSnippet, scoped ? allowedList! : undefined)) {
+    const ftsHits = sem.searchFts(text, ftsPool, withSnippet, undefined, scope);
+    if (ftsHits.length >= ftsPool) limitations.push('lexical_candidate_pool_saturated');
+    for (const h of ftsHits) {
       const key = h.docId + KEY_SEP + h.blockOrd;
       ftsList.push(key);
       if (!blockMeta.has(key)) {
@@ -145,9 +132,11 @@ export async function semanticSearch(
   if (useVec && queryVec !== null) {
     try {
       const vecHits = sem.searchVec(queryVec, vecPool);
-      if (scoped && vecHits.length >= vecPool) vecTruncated = true;
+      if (vecHits.length >= vecPool) vecTruncated = true;
+      const eligible = new Set(sem.filterDocIds([...new Set(vecHits.map(h => h.docId))], scope));
       const vecList: string[] = [];
       for (const h of vecHits) {
+        if (!eligible.has(h.docId)) continue;
         const key = h.docId + KEY_SEP + h.blockOrd;
         vecList.push(key);
         if (!blockMeta.has(key)) {
@@ -172,7 +161,6 @@ export async function semanticSearch(
   const bestPerDoc = new Map<string, { key: string; score: number }>();
   for (const [key, score] of scores) {
     const meta = blockMeta.get(key)!;
-    if (allowed && !allowed.has(meta.docId)) continue;
     const cur = bestPerDoc.get(meta.docId);
     if (cur === undefined || score > cur.score) bestPerDoc.set(meta.docId, { key, score });
   }
@@ -206,12 +194,16 @@ export async function semanticSearch(
   hits.sort((a, b) => b.score - a.score || a.docId.localeCompare(b.docId));
 
   const top = hits.slice(0, k);
+  if (needVec && sem.hasPendingEmbeddings(scope)) limitations.push('embeddings_pending');
   // Signal a potentially-incomplete scoped result (vec leg saturated its pool).
-  if (degraded === undefined && vecTruncated && top.length < k) degraded = 'scope_truncated';
+  if (vecTruncated) limitations.push('vector_candidate_pool_saturated');
+  if (degraded !== undefined) limitations.unshift(degraded);
+  if (degraded === undefined && scoped && vecTruncated) degraded = 'scope_truncated';
   return ok({
     mode: query.mode,
     total: top.length,
     results: top,
+    ...(limitations.length > 0 ? { limitations } : {}),
     ...(degraded !== undefined ? { degraded } : {}),
   });
 }

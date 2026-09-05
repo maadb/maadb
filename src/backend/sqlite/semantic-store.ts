@@ -15,6 +15,8 @@
 //   vec_blocks  — sqlite-vec vectors (virtual; explicit delete, no FK CASCADE).
 // ============================================================================
 
+import { buildDocumentScope } from './query-scope.js';
+import type { DocumentQuery } from '../../types.js';
 import { createRequire } from 'node:module';
 import { createHash } from 'node:crypto';
 import type { Database as DatabaseType } from 'better-sqlite3';
@@ -318,7 +320,7 @@ export class SemanticStore implements SemanticIndex {
     ).all(vecToBlob(queryVec), k) as VecHit[];
   }
 
-  searchFts(query: string, k: number, withSnippet: boolean, scopeDocIds?: readonly string[]): FtsHit[] {
+  searchFts(query: string, k: number, withSnippet: boolean, scopeDocIds?: readonly string[], scope: DocumentQuery = {}): FtsHit[] {
     if (!this.ready) return [];
     const match = toFtsMatch(query);
     if (match === null) return [];
@@ -328,9 +330,12 @@ export class SemanticStore implements SemanticIndex {
     // Optional in-SQL scope filter on the UNINDEXED doc_id column so the LIMIT
     // selects the top-k IN-SCOPE blocks (not the global top-k then post-filtered).
     const params: unknown[] = [match];
-    let scopeClause = '';
-    if (scopeDocIds && scopeDocIds.length > 0) {
-      scopeClause = ` AND doc_id IN (${scopeDocIds.map(() => '?').join(', ')})`;
+    const eligibility = buildDocumentScope(scope);
+    let scopeClause = ` AND doc_id IN (SELECT d.doc_id FROM documents d WHERE ${eligibility.where})`;
+    params.push(...eligibility.params);
+    if (scopeDocIds) {
+      if (scopeDocIds.length === 0) return [];
+      scopeClause += ` AND doc_id IN (${scopeDocIds.map(() => '?').join(', ')})`;
       params.push(...scopeDocIds);
     }
     params.push(k);
@@ -338,8 +343,25 @@ export class SemanticStore implements SemanticIndex {
     return this.db.prepare(
       `SELECT doc_id AS docId, CAST(block_ord AS INTEGER) AS blockOrd, heading, ` +
       `bm25(fts_blocks) AS score, ${snipCol} ` +
-      `FROM fts_blocks WHERE fts_blocks MATCH ?${scopeClause} ORDER BY score LIMIT ?`,
+      `FROM fts_blocks WHERE fts_blocks MATCH ?${scopeClause} ORDER BY score, doc_id, CAST(block_ord AS INTEGER) LIMIT ?`,
     ).all(...params) as FtsHit[];
+  }
+
+  hasPendingEmbeddings(scope: DocumentQuery): boolean {
+    if (!this.ready) return false;
+    const { where, params } = buildDocumentScope(scope);
+    return this.db.prepare(
+      `SELECT 1 FROM embed_queue q JOIN documents d ON d.doc_id = q.doc_id WHERE ${where} LIMIT 1`,
+    ).get(...params) !== undefined;
+  }
+
+  filterDocIds(ids: readonly string[], scope: DocumentQuery): string[] {
+    if (!this.ready || ids.length === 0) return [];
+    const { where, params } = buildDocumentScope(scope);
+    return (this.db.prepare(
+      `SELECT d.doc_id AS docId FROM documents d WHERE ${where} ` +
+      `AND d.doc_id IN (${ids.map(() => '?').join(',')})`,
+    ).all(...params, ...ids) as Array<{ docId: string }>).map(r => r.docId);
   }
 
   getBlockText(docId: string, blockOrd: number): { heading: string; text: string } | null {
