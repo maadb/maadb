@@ -1,10 +1,16 @@
 ---
 enabled: true
-current: 0.15.0
+current: 0.15.1
 dev_flow: formal
 ---
 
 # Version History
+
+## 0.15.1 - 2026-09-05
+
+Harden document reads, journal persistence, and purge retries.
+
+Reject indexed reads outside the project root, atomically replace operation journals with rollback on persistence failure, and retain soft-deleted records when file deletion fails. Invalid journals now stop initialization with a recovery error. Correct generated skill recipes and orientation guidance, update test dependencies, and complete local-data ignore rules. No database schema changes. Power-loss durability and concurrent link-retarget protection remain separate concerns.
 
 ## 0.15.0 - 2026-08-08
 
