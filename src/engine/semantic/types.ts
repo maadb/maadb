@@ -144,13 +144,17 @@ export interface SemanticIndex {
   putBlockEmbeddings(rows: BlockEmbedding[]): void;
   /** Vector KNN. */
   searchVec(queryVec: Float32Array, k: number): VecHit[];
-  /** Lexical BM25 search. Optional ID and relational scopes AND-combine
-   *  before top-k selection; deleted/missing documents are always excluded. */
-  searchFts(query: string, k: number, withSnippet: boolean, scopeDocIds?: readonly string[], scope?: DocumentQuery): FtsHit[];
-  /** Whether eligible blocks are still waiting for embeddings. */
-  hasPendingEmbeddings(scope: DocumentQuery): boolean;
-  /** Filter a bounded candidate list using live document eligibility. */
-  filterDocIds(ids: readonly string[], scope: DocumentQuery): string[];
+  /** Lexical BM25 search. Optional ID restriction applies before top-k. */
+  searchFts(query: string, k: number, withSnippet: boolean, scopeDocIds?: readonly string[]): FtsHit[];
+  /** Optional relational-scope capability. Apply live-document, type and field
+   *  predicates before top-k; required for scoped retrieval.
+   *  A separate method prevents legacy searchFts implementations silently
+   *  ignoring a new positional scope argument. */
+  searchFtsScoped?(query: string, k: number, withSnippet: boolean, scope: DocumentQuery): FtsHit[];
+  /** Optional scoped queue coverage; absence means coverage is unknown. */
+  hasPendingEmbeddings?(scope: DocumentQuery): boolean;
+  /** Optional bounded candidate eligibility; required for scoped vector modes. */
+  filterDocIds?(ids: readonly string[], scope: DocumentQuery): string[];
   /** Resolve a block's heading + text (for semantic-only snippets). */
   getBlockText(docId: string, blockOrd: number): { heading: string; text: string } | null;
   /** Tally embedding failures (surfaced in stats). */

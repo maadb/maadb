@@ -1,6 +1,6 @@
 # Retrieval scope and corpus growth
 
-Exact search now applies live-document, document-type and expanded field filters in SQL before the lexical candidate limit. It no longer selects the 2,000 most recently indexed documents as an eligibility list. Ordinary document queries and retrieval share the same filter builder, including numeric ranges and multi-value inequality semantics. Parameters remain bound values. Indexing time has no relevance weight; lexical ties use document ID and block ordinal for deterministic ordering.
+The built-in SQLite backend now applies live-document, document-type and expanded field filters in SQL before the lexical candidate limit. It no longer selects the 2,000 most recently indexed documents as an eligibility list. Ordinary document queries and retrieval share the same filter builder, including numeric ranges and multi-value inequality semantics. Parameters remain bound values. Indexing time has no relevance weight; lexical ties use document ID and block ordinal for deterministic ordering.
 
 Exact mode makes zero embedding calls. FTS tokenization remains OR-based BM25, not literal phrase matching. Search still retrieves at most `max(5*k, 50)` lexical blocks before best-block document rollup; many matching blocks in one document can therefore underfill a page. SQL can evaluate a large matching scope, but no unbounded document ID list is transferred to the engine.
 
@@ -21,18 +21,23 @@ The optional additive `limitations` array reports independent conditions:
 | `vec_search_failed` | Vector query failed; lexical fallback was used. |
 | `lexical_candidate_pool_saturated` | The lexical leg filled its block budget. |
 | `vector_candidate_pool_saturated` | The global vector leg filled its block budget, whether or not the returned page is full. |
+| `embeddings_coverage_unknown` | The custom backend does not expose pending-embedding detection; queue coverage is unknown. |
 | `embeddings_pending` | At least one live, in-scope block remains in the embedding queue. |
 
 Saturation is conservative: filling a budget does not prove additional matches exist. Pending embedding detection uses a scoped existence query, not a global count; it is not a complete index-health or coverage measurement. Exact requests do not report embedding limitations. Multiple limitations can coexist. Empty or punctuation-only lexical queries yield no matches. Scoped semantic requests may now embed even when no document is eligible, because the old preliminary allow-list query is gone.
 
-The low-level `searchFts` optional ID restriction remains available; an explicitly empty ID list now matches nothing. Its new optional relational scope is AND-combined with that restriction. Custom semantic-index implementations must implement the candidate-filter and pending-embedding methods.
+The concrete SQLite store retains the low-level `searchFts` optional ID restriction; an explicitly empty ID list now matches nothing. Its internal optional relational scope is AND-combined with that restriction. The public `SemanticIndex.searchFts` signature retains its original optional ID argument. The engine uses a separate optional `searchFtsScoped` method rather than passing an extra argument that legacy implementations could silently ignore.
+
+Existing custom implementations remain type-compatible and support unscoped retrieval. To enable scoped exact requests, implement `searchFtsScoped` (scope predicates before lexical top-k). Scoped hybrid and semantic modes additionally require `filterDocIds` (live eligibility for bounded vector candidates); they require scoped FTS even when starting with vectors because retrieval may fall back to lexical. Missing required capabilities cause nonempty scoped requests to fail explicitly with `SEMANTIC_DISABLED` before retrieval or embedding; no scope is dropped and no unbounded allow-list is materialized. This intentionally replaces the legacy capped-scope behavior with a visible unsupported result until the adapter adopts the extension. Empty-text requests still return the existing empty result.
+
+`hasPendingEmbeddings` is independently optional. Vector modes report `embeddings_coverage_unknown` when it is absent; exact mode needs no embedding coverage. Implementations providing it must apply the supplied scope. Hydration still excludes missing/deleted documents for unscoped legacy backends.
 
 ## Verification
 
 Run from the repository root:
 
 ```powershell
-npx vitest run tests/engine/semantic-scope-growth.test.ts tests/engine/semantic-search.test.ts tests/backend/semantic-store.test.ts
+npx vitest run tests/engine/semantic-legacy-backend.test.ts tests/engine/semantic-scope-growth.test.ts tests/engine/semantic-search.test.ts tests/backend/semantic-store.test.ts
 npm run lint
 npm test
 npx vitest run --config tests/performance/vitest.config.ts
@@ -66,4 +71,12 @@ Remaining work includes 100k corpora, Linux/cold-cache/multi-project/mixed-write
 - Initial `npm test`: 1,288 tests passed before one worker exited unexpectedly; Vitest reported an unhandled fork-pool error and exited nonzero. This was not treated as a successful suite.
 - `npm test -- --maxWorkers=1`: passed, 115 files / 1,301 tests, with one pre-existing skipped file / six pre-existing skipped tests, in 192.27 seconds. No new test is skipped.
 - Opt-in baseline: passed its result assertions and emitted the measurements above.
-- `git diff --check`: passed. No dependency, version or release changes were made.
+- Initial worker `git diff --check` inspected the clean working tree only; Delivery Review found an extra EOF blank line against the delivery base. The correction removes it and checks the full base-to-working-tree diff. No dependency, version or release changes were made.
+
+### Compatibility correction verification
+
+- Original-interface adapter regression: four tests cover scoped rejection before retrieval/model calls, unscoped exact/hybrid/semantic behavior, partial capability detection, and optional scoped pending coverage.
+- Final focused semantic/backend suite: 36 tests passed.
+- `npm run lint`: passed. The legacy adapter test was also explicitly type-checked with TypeScript using the repository's strict options, because normal lint excludes tests.
+- A correction suite started while the error-code edit was in progress and mixed cached source with updated assertions (two failures). It was not accepted as validation. The settled-file rerun of `npm test -- --maxWorkers=1` passed: 116 files / 1,305 tests, plus one pre-existing skipped file / six pre-existing skipped tests, in 136.36 seconds.
+- `git diff --check 4388cf8` passed across the delivery base and current working tree; the new untracked test was checked separately. No new skips, dependencies, versions, commits or release actions were introduced by this correction.

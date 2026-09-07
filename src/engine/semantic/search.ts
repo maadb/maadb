@@ -68,6 +68,12 @@ export async function semanticSearch(
   const scope: DocumentQuery = { filters: expanded.value };
   if (query.docType !== undefined) scope.docType = toDocType(query.docType);
   const scoped = query.docType !== undefined || query.filters !== undefined;
+  // Scoped FTS is also needed for vector-error lexical fallback. Exact mode
+  // needs no vector helper. Never pass scope to legacy methods that may ignore it.
+  if (scoped && (!sem.searchFtsScoped || (query.mode !== 'exact' && !sem.filterDocIds))) {
+    return singleErr('SEMANTIC_DISABLED',
+      'This semantic backend does not support relational scopes. Implement searchFtsScoped (and filterDocIds for vector modes); the requested scope was not executed.');
+  }
   let degraded: string | undefined;
   const limitations: string[] = [];
 
@@ -114,7 +120,9 @@ export async function semanticSearch(
 
   const pushFtsLeg = (): void => {
     const ftsList: string[] = [];
-    const ftsHits = sem.searchFts(text, ftsPool, withSnippet, undefined, scope);
+    const ftsHits = sem.searchFtsScoped
+      ? sem.searchFtsScoped(text, ftsPool, withSnippet, scope)
+      : sem.searchFts(text, ftsPool, withSnippet);
     if (ftsHits.length >= ftsPool) limitations.push('lexical_candidate_pool_saturated');
     for (const h of ftsHits) {
       const key = h.docId + KEY_SEP + h.blockOrd;
@@ -133,10 +141,12 @@ export async function semanticSearch(
     try {
       const vecHits = sem.searchVec(queryVec, vecPool);
       if (vecHits.length >= vecPool) vecTruncated = true;
-      const eligible = new Set(sem.filterDocIds([...new Set(vecHits.map(h => h.docId))], scope));
+      const eligible = sem.filterDocIds
+        ? new Set(sem.filterDocIds([...new Set(vecHits.map(h => h.docId))], scope))
+        : null; // Legacy unscoped retrieval still checks live documents at hydration.
       const vecList: string[] = [];
       for (const h of vecHits) {
-        if (!eligible.has(h.docId)) continue;
+        if (eligible && !eligible.has(h.docId)) continue;
         const key = h.docId + KEY_SEP + h.blockOrd;
         vecList.push(key);
         if (!blockMeta.has(key)) {
@@ -194,7 +204,10 @@ export async function semanticSearch(
   hits.sort((a, b) => b.score - a.score || a.docId.localeCompare(b.docId));
 
   const top = hits.slice(0, k);
-  if (needVec && sem.hasPendingEmbeddings(scope)) limitations.push('embeddings_pending');
+  if (needVec) {
+    if (!sem.hasPendingEmbeddings) limitations.push('embeddings_coverage_unknown');
+    else if (sem.hasPendingEmbeddings(scope)) limitations.push('embeddings_pending');
+  }
   // Signal a potentially-incomplete scoped result (vec leg saturated its pool).
   if (vecTruncated) limitations.push('vector_candidate_pool_saturated');
   if (degraded !== undefined) limitations.unshift(degraded);

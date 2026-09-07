@@ -27,7 +27,7 @@ export function scopeFixture(size: number) {
   const ctx = { backend, embeddingProvider: {
     id: 'fixture', model: 'scope-fixture', dim: 2,
     embed: async () => [new Float32Array([1, 0])],
-  } } as EngineContext;
+  } } as unknown as EngineContext;
   return { root, backend, sem, ctx, add, close() {
     backend.close();
     const resolved = path.resolve(root);

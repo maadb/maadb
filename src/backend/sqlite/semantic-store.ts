@@ -347,6 +347,10 @@ export class SemanticStore implements SemanticIndex {
     ).all(...params) as FtsHit[];
   }
 
+  searchFtsScoped(query: string, k: number, withSnippet: boolean, scope: DocumentQuery): FtsHit[] {
+    return this.searchFts(query, k, withSnippet, undefined, scope);
+  }
+
   hasPendingEmbeddings(scope: DocumentQuery): boolean {
     if (!this.ready) return false;
     const { where, params } = buildDocumentScope(scope);
