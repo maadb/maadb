@@ -1,10 +1,14 @@
 ---
 enabled: true
-current: 0.15.1
+current: 0.15.2
 dev_flow: formal
 ---
 
 # Version History
+
+## 0.15.2 - 2026-09-08
+
+Preserve older evidence in scoped search and report retrieval limits, with explicit capabilities for custom backends.
 
 ## 0.15.1 - 2026-09-05
 
