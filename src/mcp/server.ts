@@ -35,6 +35,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import * as discoverTools from './tools/discover.js';
 import * as readTools from './tools/read.js';
+import * as documentReceiptTools from './tools/document-receipt.js';
 import * as writeTools from './tools/write.js';
 import * as auditTools from './tools/audit.js';
 import * as maintainTools from './tools/maintain.js';
@@ -184,6 +185,7 @@ export async function startServer(opts: ServeOptions): Promise<void> {
     }
     toolCount += discoverTools.register(server, ctx);
     toolCount += readTools.register(server, ctx);
+    toolCount += documentReceiptTools.register(server, ctx);
     toolCount += auditTools.register(server, ctx);
     if (legacyRole === 'writer' || legacyRole === 'admin') {
       toolCount += writeTools.register(server, ctx);

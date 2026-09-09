@@ -6,6 +6,10 @@
 import type { SourceLocation } from './types.js';
 
 export type ErrorCode =
+  | 'RECEIPT_ENGINE_NOT_READY'
+  | 'RECEIPT_CONTENT_INVALID'
+  | 'RECEIPT_STORAGE_ERROR'
+  | 'RECEIPT_OBSERVATION_CHANGED'
   | 'FILE_NOT_FOUND'
   | 'FILE_READ_ERROR'
   | 'PARSE_ERROR'

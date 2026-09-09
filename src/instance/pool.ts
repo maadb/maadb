@@ -68,6 +68,39 @@ export class EnginePool {
   private recoveryEngines = new WeakSet<MaadEngine>();
   private recoveryByName = new Map<string, MaadEngine>();
   private reloadInFlight = false;
+  private receiptRefs = new Map<string, number>();
+  private receiptDrains = new Map<string, () => void>();
+  private evicting = new Set<string>();
+  private evictionPromises = new Map<string, Promise<void>>();
+
+  /** Atomically retain only an already-ready engine; never load or recover it. */
+  acquireReadyReference(name: string): Result<{ engine: MaadEngine; isCurrent: () => boolean; release: () => void }> {
+    const engine = this.engines.get(name);
+    const project = getProject(this.instance, name);
+    if (!project) return singleErr('PROJECT_UNKNOWN', 'Receipt project is not registered');
+    if (this.reloadInFlight || this.evicting.has(name) || !engine?.isReceiptReady()) {
+      return singleErr('RECEIPT_ENGINE_NOT_READY', 'Receipt requires an already-loaded ready engine');
+    }
+    this.acquire(name);
+    this.receiptRefs.set(name, (this.receiptRefs.get(name) ?? 0) + 1);
+    let released = false;
+    return ok({ engine,
+      isCurrent: () => !this.reloadInFlight && !this.evicting.has(name)
+        && this.engines.get(name) === engine && getProject(this.instance, name) === project && engine.isReceiptReady(),
+      release: () => {
+        if (released) return;
+        released = true;
+        this.release(name);
+        const remaining = (this.receiptRefs.get(name) ?? 1) - 1;
+        if (remaining > 0) this.receiptRefs.set(name, remaining);
+        else {
+          this.receiptRefs.delete(name);
+          this.receiptDrains.get(name)?.();
+          this.receiptDrains.delete(name);
+        }
+      },
+    });
+  }
   private stats: InstanceReloadStats = {
     lastReloadAt: null,
     reloadsAttempted: 0,
@@ -265,14 +298,27 @@ export class EnginePool {
 
   // Public eviction seam. 0.7.3 — also called by the idle sweeper. Closes
   // SQLite cleanly before removing. Refcount-protected callers should check
-  // refcount before calling; this method is unconditional.
+  // refcount before calling. Receipt references are always drained here.
   async evict(name: string): Promise<void> {
+    const pending = this.evictionPromises.get(name);
+    if (pending) return pending;
     const engine = this.engines.get(name);
     if (!engine) return;
-    await engine.close();
-    this.engines.delete(name);
-    this.lastTouchedAt.delete(name);
-    this.refcount.delete(name);
+    this.evicting.add(name);
+    const eviction = (async () => {
+      try {
+        if ((this.receiptRefs.get(name) ?? 0) > 0) await new Promise<void>(resolve => this.receiptDrains.set(name, resolve));
+        await engine.close();
+        this.engines.delete(name);
+        this.lastTouchedAt.delete(name);
+        this.refcount.delete(name);
+      } finally {
+        this.evicting.delete(name);
+        this.evictionPromises.delete(name);
+      }
+    })();
+    this.evictionPromises.set(name, eviction);
+    return eviction;
   }
 
   /**
@@ -351,9 +397,9 @@ export class EnginePool {
 
   async closeAll(): Promise<void> {
     this.stopIdleSweeper();
-    for (const [name, engine] of this.engines) {
+    for (const [name] of this.engines) {
       try {
-        await engine.close();
+        await this.evict(name);
       } catch {
         // swallow — shutdown best-effort
       }

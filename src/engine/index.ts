@@ -9,6 +9,8 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 
 import { ok, singleErr, type Result } from '../errors.js';
 import { AsyncFifoMutex } from './mutex.js';
+import { documentReceipt } from './document-receipt.js';
+import type { DocumentReceipt, DocumentReceiptRequest } from './document-receipt-types.js';
 
 // Reentrancy marker — present in ALS scope when runExclusive is already
 // holding the write lock on `this` engine. Engine mutation methods keep
@@ -209,6 +211,22 @@ export class MaadEngine {
   // Write mutex — serializes all mutating engine operations per instance.
   // FIFO. Blocks indefinitely in 0.4.1; timeout deferred to 0.8.5.
   private writeLock = new AsyncFifoMutex();
+
+  isReceiptReady(): boolean {
+    return this.initialized && this.closePromise === null;
+  }
+
+  /** Read-only use of the operation mutex: no schema reload or write telemetry. */
+  async documentReceipt(request: DocumentReceiptRequest, project: string, signal?: AbortSignal): Promise<Result<DocumentReceipt>> {
+    if (!this.isReceiptReady()) return singleErr('RECEIPT_ENGINE_NOT_READY', 'Receipt engine is not ready');
+    const release = await this.writeLock.acquire();
+    try {
+      if (signal?.aborted) return singleErr('REQUEST_TIMEOUT', 'Receipt observation cancelled');
+      if (!this.isReceiptReady()) return singleErr('RECEIPT_ENGINE_NOT_READY', 'Receipt engine is not ready');
+      if (this.schemaStore.isStale()) return singleErr('RECEIPT_OBSERVATION_CHANGED', 'Receipt configuration is stale');
+      return await documentReceipt(this.ctx(), request, project, signal);
+    } finally { release(); }
+  }
   private lastWriteOp: { op: string; startedAtMs: number } | null = null;
   private lastWriteAt: string | null = null;
 

@@ -20,6 +20,7 @@ import { EnginePool } from '../../src/instance/pool.js';
 import { SessionRegistry } from '../../src/instance/session.js';
 import * as discoverTools from '../../src/mcp/tools/discover.js';
 import * as readTools from '../../src/mcp/tools/read.js';
+import * as documentReceiptTools from '../../src/mcp/tools/document-receipt.js';
 import * as writeTools from '../../src/mcp/tools/write.js';
 import * as auditTools from '../../src/mcp/tools/audit.js';
 import * as maintainTools from '../../src/mcp/tools/maintain.js';
@@ -49,7 +50,7 @@ function collectRegisteredNames(register: (s: McpServer, c: InstanceCtx) => void
 
 describe('OperationKind coverage', () => {
   it('set cardinalities match the documented roster', () => {
-    expect(READ_TOOLS.size).toBe(19);
+    expect(READ_TOOLS.size).toBe(20);
     expect(WRITE_TOOLS.size).toBe(14);
     expect(ENGINE_LESS_TOOLS.size).toBe(13);
   });
@@ -58,6 +59,7 @@ describe('OperationKind coverage', () => {
     const registered = [
       ...collectRegisteredNames(discoverTools.register),
       ...collectRegisteredNames(readTools.register),
+      ...collectRegisteredNames(documentReceiptTools.register),
       ...collectRegisteredNames(writeTools.register),
       ...collectRegisteredNames(auditTools.register),
       ...collectRegisteredNames(maintainTools.register),
@@ -68,6 +70,14 @@ describe('OperationKind coverage', () => {
       const kind = getKindForTool(name);
       expect(kind, `tool "${name}" must be registered in READ_TOOLS or WRITE_TOOLS`).not.toBeNull();
     }
+  });
+
+  it('registers the document receipt as a read-only engine-bound tool', () => {
+    expect(collectRegisteredNames(documentReceiptTools.register)).toEqual(['maad_document_receipt']);
+    expect(READ_TOOLS.has('maad_document_receipt')).toBe(true);
+    expect(WRITE_TOOLS.has('maad_document_receipt')).toBe(false);
+    expect(getKindForTool('maad_document_receipt')).toBe('read');
+    expect(isEngineLess('maad_document_receipt')).toBe(false);
   });
 
   it('every engine-less tool is marked engine-less and has no kind', () => {
