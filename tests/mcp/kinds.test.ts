@@ -20,6 +20,7 @@ import { EnginePool } from '../../src/instance/pool.js';
 import { SessionRegistry } from '../../src/instance/session.js';
 import * as discoverTools from '../../src/mcp/tools/discover.js';
 import * as readTools from '../../src/mcp/tools/read.js';
+import * as guardedCreateTools from '../../src/mcp/tools/guarded-create.js';
 import * as documentReceiptTools from '../../src/mcp/tools/document-receipt.js';
 import * as writeTools from '../../src/mcp/tools/write.js';
 import * as auditTools from '../../src/mcp/tools/audit.js';
@@ -50,8 +51,8 @@ function collectRegisteredNames(register: (s: McpServer, c: InstanceCtx) => void
 
 describe('OperationKind coverage', () => {
   it('set cardinalities match the documented roster', () => {
-    expect(READ_TOOLS.size).toBe(20);
-    expect(WRITE_TOOLS.size).toBe(14);
+    expect(READ_TOOLS.size).toBe(21);
+    expect(WRITE_TOOLS.size).toBe(15);
     expect(ENGINE_LESS_TOOLS.size).toBe(13);
   });
 
@@ -60,6 +61,8 @@ describe('OperationKind coverage', () => {
       ...collectRegisteredNames(discoverTools.register),
       ...collectRegisteredNames(readTools.register),
       ...collectRegisteredNames(documentReceiptTools.register),
+      ...collectRegisteredNames(guardedCreateTools.registerContract),
+      ...collectRegisteredNames(guardedCreateTools.registerWrite),
       ...collectRegisteredNames(writeTools.register),
       ...collectRegisteredNames(auditTools.register),
       ...collectRegisteredNames(maintainTools.register),

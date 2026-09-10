@@ -6,9 +6,10 @@ import { docId, docType, schemaRef, filePath } from '../../src/types.js';
 import type { EngineContext } from '../../src/engine/context.js';
 
 /** Synthetic index fixture; no canonical files, Git, network, or background worker. */
-export function scopeFixture(size: number) {
+export function scopeFixture(size: number, options: { inMemory?: boolean } = {}) {
   const root = mkdtempSync(path.join(tmpdir(), 'maadb-scope-'));
-  const backend = new SqliteBackend(path.join(root, 'index.db'));
+  // Correctness tests can avoid disk latency; performance baselines keep the file-backed default.
+  const backend = new SqliteBackend(options.inMemory ? ':memory:' : path.join(root, 'index.db'));
   backend.init();
   backend.initSemantic({ dim: 2, model: 'scope-fixture' });
   const sem = backend.semantic()!;

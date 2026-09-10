@@ -5,7 +5,7 @@
 export type Role = 'reader' | 'writer' | 'admin';
 
 const READER_TOOLS = [
-  'maad_document_receipt',
+  'maad_document_receipt', 'maad_create_contract',
   'maad_scan', 'maad_summary', 'maad_describe',
   'maad_get', 'maad_query', 'maad_search', 'maad_related', 'maad_relationship_paths', 'maad_schema', 'maad_aggregate', 'maad_join',
   'maad_verify', 'maad_find_orphans', 'maad_changes_since', 'maad_semantic_search',
@@ -15,7 +15,7 @@ const READER_TOOLS = [
 
 const WRITER_TOOLS = [
   ...READER_TOOLS,
-  'maad_create', 'maad_update', 'maad_validate', 'maad_bulk_create', 'maad_bulk_update',
+  'maad_create_guarded', 'maad_create', 'maad_update', 'maad_validate', 'maad_bulk_create', 'maad_bulk_update',
 ] as const;
 
 const ADMIN_TOOLS = [

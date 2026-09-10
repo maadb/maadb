@@ -26,9 +26,6 @@ import {
 const VALID_FIELD_TYPES: FieldType[] = ['string', 'number', 'date', 'enum', 'ref', 'boolean', 'list', 'amount'];
 
 export async function loadSchemas(projectRoot: string, registry: Registry): Promise<Result<SchemaStore>> {
-  const errors: MaadError[] = [];
-  const schemas = new Map<SchemaRef, SchemaDefinition>();
-  const typeToSchema = new Map<string, SchemaRef>();
   // 0.7.7 — capture mtime+size per file for staleness checks.
   // Includes the registry file too, so registry edits (new/removed types,
   // path/schemaRef remap) trigger reload alongside per-schema edits.
@@ -43,27 +40,61 @@ export async function loadSchemas(projectRoot: string, registry: Registry): Prom
     // doesn't exist. For an absent registry the schemas map is empty anyway.
   }
 
+  return loadSchemasWithReader(registry, async (ref, type) => {
+    const schemaFile = path.join(projectRoot, '_schema', `${ref}.yaml`);
+    try {
+      if (!isWritePathContainedIn(schemaFile, projectRoot)) {
+        return err([maadError('SCHEMA_INVALID', `Schema path escapes project root: ${ref as string}`)]);
+      }
+      const raw = await readFile(schemaFile, 'utf-8');
+      const st = await stat(schemaFile);
+      cachedFiles.set(schemaFile, { mtimeMs: st.mtimeMs, size: st.size });
+      return ok(raw);
+    } catch (e) {
+      return err([maadError('SCHEMA_NOT_FOUND', `Schema file not found for type "${type}": ${schemaFile}`)]);
+    }
+  }, cachedFiles);
+}
+
+/** Captured source text keyed by schema reference; missing entries never fall back to disk. */
+export type SchemaSourceSnapshot = ReadonlyMap<SchemaRef, string>;
+
+/**
+ * Validate captured sources with the legacy parser and constraint validator.
+ * The caller owns capture bounds/path checks. Copy entries before any await so
+ * caller mutations cannot change the inputs. No filesystem reads occur here.
+ */
+export function loadSchemasFromSnapshot(registry: Registry, sources: SchemaSourceSnapshot,
+  options: { signal?: AbortSignal | undefined; cachedFiles?: SchemaStore['cachedFiles'] } = {}): Promise<Result<SchemaStore>> {
+  const captured = new Map(sources);
+  return loadSchemasWithReader(registry, async (ref, type) => {
+    const raw = captured.get(ref);
+    return raw === undefined
+      ? err([maadError('SCHEMA_NOT_FOUND', `Schema snapshot missing for type "${type}": ${ref}`)])
+      : ok(raw);
+  }, options.cachedFiles ? new Map(options.cachedFiles) : undefined, options.signal);
+}
+
+async function loadSchemasWithReader(registry: Registry,
+  readSource: (ref: SchemaRef, type: DocType) => Promise<Result<string>>,
+  cachedFiles?: SchemaStore['cachedFiles'], signal?: AbortSignal): Promise<Result<SchemaStore>> {
+  const errors: MaadError[] = [];
+  const schemas = new Map<SchemaRef, SchemaDefinition>();
+  const typeToSchema = new Map<string, SchemaRef>();
+  const cancelled = () => err<SchemaStore>([maadError('REQUEST_TIMEOUT', 'Schema snapshot validation cancelled')]);
   for (const [, regType] of registry.types) {
+    if (signal?.aborted) return cancelled();
     if (!isSafeSchemaRef(regType.schemaRef as string)) {
       errors.push(maadError('SCHEMA_INVALID', `Unsafe schema reference for type "${regType.name as string}": ${regType.schemaRef as string}`));
       continue;
     }
-
-    const schemaFile = path.join(projectRoot, '_schema', `${regType.schemaRef}.yaml`);
-    let raw: string;
-
-    try {
-      if (!isWritePathContainedIn(schemaFile, projectRoot)) {
-        errors.push(maadError('SCHEMA_INVALID', `Schema path escapes project root: ${regType.schemaRef as string}`));
-        continue;
-      }
-      raw = await readFile(schemaFile, 'utf-8');
-      const st = await stat(schemaFile);
-      cachedFiles.set(schemaFile, { mtimeMs: st.mtimeMs, size: st.size });
-    } catch (e) {
-      errors.push(maadError('SCHEMA_NOT_FOUND', `Schema file not found for type "${regType.name}": ${schemaFile}`));
+    const source = await readSource(regType.schemaRef, regType.name);
+    if (signal?.aborted) return cancelled();
+    if (!source.ok) {
+      errors.push(...source.errors);
       continue;
     }
+    const raw = source.value;
 
     let data: Record<string, unknown>;
     try {
@@ -88,13 +119,14 @@ export async function loadSchemas(projectRoot: string, registry: Registry): Prom
     typeToSchema.set(result.value.type as string, regType.schemaRef);
   }
 
+  if (signal?.aborted) return cancelled();
   if (errors.length > 0) {
     return err(errors);
   }
 
   const store: SchemaStore = {
     schemas,
-    cachedFiles,
+    cachedFiles: cachedFiles ?? new Map(),
     getSchema(ref: SchemaRef) {
       return schemas.get(ref);
     },
@@ -104,6 +136,9 @@ export async function loadSchemas(projectRoot: string, registry: Registry): Prom
       return schemas.get(ref);
     },
     isStale() {
+      // A source-only snapshot has no disk-cache evidence. If installed after
+      // admission, make the next legacy write reload rather than cache forever.
+      if (!cachedFiles) return true;
       // Sync stat — called on every write entry so latency matters; for the
       // typical project (5-20 schemas) this is microseconds. Any disagreement
       // with cached mtime/size is treated as stale; an absent file (cached

@@ -20,3 +20,6 @@ export type {
   SchemaInfoResult,
   ValidationReport,
 } from './engine/types.js';
+
+export type { CreateContractRequest, CreateContract, GuardedCreateRequest, GuardedCreateResult, GuardedCreateOptions } from './engine/guarded-create-types.js';
+export { canonicalJson, contentDigest } from './engine/document-receipt.js';

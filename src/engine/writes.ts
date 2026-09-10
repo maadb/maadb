@@ -35,13 +35,13 @@ function isAlreadyExistsError(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === 'EEXIST';
 }
 
-export async function createDocument(
+export function prepareCreateDocument(
   ctx: EngineContext,
   dt: DocType,
   fields: Record<string, unknown>,
   body?: string | undefined,
   customDocId?: string | undefined,
-): Promise<Result<CreateResult>> {
+): Result<PreparedCreate> {
   const fieldsViolation = validateCallerFields(fields);
   if (fieldsViolation) {
     return singleErr(fieldsViolation.code, fieldsViolation.message);
@@ -90,15 +90,6 @@ export async function createDocument(
   if (!isWritePathContainedIn(dirPath, ctx.projectRoot)) {
     return singleErr('PATH_OUTSIDE_PROJECT', `Write directory "${dirPath}" escapes the project root`);
   }
-  try {
-    if (!existsSync(dirPath)) mkdirSync(dirPath, { recursive: true });
-  } catch (error) {
-    return singleErr('WRITE_ERROR', `Failed to create write directory: ${error instanceof Error ? error.message : String(error)}`);
-  }
-  if (!isWritePathContainedIn(dirPath, ctx.projectRoot)) {
-    return singleErr('PATH_OUTSIDE_PROJECT',
-      `Write directory "${dirPath}" escapes the project root through a symbolic link`);
-  }
 
   const fp = path.join(dirPath, `${id}.md`);
 
@@ -122,6 +113,39 @@ export async function createDocument(
       ...e,
       details: { ...e.details, docId: id, filePath: fp, fileWritten: false },
     })));
+  }
+
+  return ok({ id, dt, fields, markdown, fp, dirPath, validation });
+}
+
+export interface PreparedCreate {
+  id: string;
+  dt: DocType;
+  fields: Record<string, unknown>;
+  markdown: string;
+  fp: string;
+  dirPath: string;
+  validation: CreateResult['validation'];
+}
+
+export async function createDocument(
+  ctx: EngineContext, dt: DocType, fields: Record<string, unknown>, body?: string, customDocId?: string,
+): Promise<Result<CreateResult>> {
+  const prepared = prepareCreateDocument(ctx, dt, fields, body, customDocId);
+  return prepared.ok ? publishPreparedCreate(ctx, prepared.value) : prepared;
+}
+
+/** Called only after admission, with the exact bytes already validated. */
+export async function publishPreparedCreate(ctx: EngineContext, prepared: PreparedCreate): Promise<Result<CreateResult>> {
+  const { id, dt, fields, markdown, fp, dirPath, validation } = prepared;
+  try {
+    if (!existsSync(dirPath)) mkdirSync(dirPath, { recursive: true });
+  } catch (error) {
+    return singleErr('WRITE_ERROR', `Failed to create write directory: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (!isWritePathContainedIn(dirPath, ctx.projectRoot)) {
+    return singleErr('PATH_OUTSIDE_PROJECT',
+      `Write directory "${dirPath}" escapes the project root through a symbolic link`);
   }
 
   // Durable write: journal → atomic write → index → git → complete

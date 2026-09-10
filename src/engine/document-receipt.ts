@@ -34,6 +34,11 @@ export function canonicalJson(value: unknown): string {
       throw new ReceiptError('RECEIPT_CONTENT_INVALID', 'Unsupported content prototype');
     }
     if (Reflect.ownKeys(v).some(key => typeof key !== 'string')) throw new ReceiptError('RECEIPT_CONTENT_INVALID', 'Unsupported content key');
+    const descriptors = Object.getOwnPropertyDescriptors(v);
+    for (const [key, descriptor] of Object.entries(descriptors)) {
+      if (Array.isArray(v) && key === 'length') continue;
+      if (!('value' in descriptor) || !descriptor.enumerable) throw new ReceiptError('RECEIPT_CONTENT_INVALID', 'Unsupported content property');
+    }
     seen.add(v);
     let result: string;
     if (Array.isArray(v)) {
@@ -94,8 +99,14 @@ async function checkedPath(root: string, relative: string): Promise<string> {
   return target;
 }
 
-/** One bounded handle read; compare both handle and pathname identity around it. */
 export async function readWorkingReceipt(root: string, relative: string, signal?: AbortSignal): Promise<Buffer> {
+  return (await readWorkingReceiptSnapshot(root, relative, signal)).bytes;
+}
+
+/** One bounded handle read; compare both handle and pathname identity around it. */
+export async function readWorkingReceiptSnapshot(root: string, relative: string, signal?: AbortSignal): Promise<{
+  bytes: Buffer; mtimeMs: number; size: number;
+}> {
   checkReceiptAbort(signal);
   const target = await checkedPath(root, relative);
   const before = await lstat(target, { bigint: true });
@@ -107,6 +118,10 @@ export async function readWorkingReceipt(root: string, relative: string, signal?
     const opened = await handle.stat({ bigint: true });
     if (!same(before, opened)) throw new ReceiptError('RECEIPT_OBSERVATION_CHANGED', 'Working file changed before read');
     if (opened.size > BigInt(RECEIPT_MAX_BYTES)) throw new ReceiptError('RESPONSE_TOO_LARGE', 'Working file exceeds bound');
+    // Cache hints come from this same handle. Bigint nanosecond identity checks
+    // below remain authoritative; retain native numeric stat precision for the
+    // existing legacy mtime/size cache comparisons.
+    const cached = await handle.stat();
     const buffer = Buffer.alloc(Number(opened.size) + 1);
     let length = 0;
     while (length < buffer.length) {
@@ -125,7 +140,7 @@ export async function readWorkingReceipt(root: string, relative: string, signal?
       throw new ReceiptError('RECEIPT_OBSERVATION_CHANGED', 'Working file changed during read');
     }
     checkReceiptAbort(signal);
-    return buffer.subarray(0, length);
+    return { bytes: buffer.subarray(0, length), mtimeMs: cached.mtimeMs, size: cached.size };
   } finally { await handle.close(); }
 }
 

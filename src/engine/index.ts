@@ -10,6 +10,11 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { ok, singleErr, type Result } from '../errors.js';
 import { AsyncFifoMutex } from './mutex.js';
 import { documentReceipt } from './document-receipt.js';
+import { canonicalJson } from './document-receipt.js';
+import { freshCreateContract } from './create-contract.js';
+import { guardedCreate, admissionError, createContractRequestSchema } from './guarded-create.js';
+import type { CreateContractRequest, CreateContract, GuardedCreateRequest, GuardedCreateResult, GuardedCreateOptions } from './guarded-create-types.js';
+
 import type { DocumentReceipt, DocumentReceiptRequest } from './document-receipt-types.js';
 
 // Reentrancy marker — present in ALS scope when runExclusive is already
@@ -227,6 +232,44 @@ export class MaadEngine {
       return await documentReceipt(this.ctx(), request, project, signal);
     } finally { release(); }
   }
+  /** Same publication mutex, without legacy reload/recovery side effects. */
+  async runGuardedExclusive<T>(fn: () => Promise<T>): Promise<T> {
+    if (writeScope.getStore() === this) return fn();
+    const release = await this.writeLock.acquire();
+    try { return await writeScope.run(this, fn); } finally { release(); }
+  }
+
+  async createContract(request: CreateContractRequest, options: GuardedCreateOptions = {}): Promise<Result<CreateContract>> {
+    if (!createContractRequestSchema.safeParse(request).success) return singleErr('INVALID_FIELDS', 'Invalid create contract request');
+    const type = request.docType;
+    return this.runGuardedExclusive(async () => {
+      try {
+        if (!this.isReceiptReady()) return singleErr('CREATE_ENGINE_NOT_READY', 'Create engine is not ready');
+        const snapshot = await freshCreateContract(this.ctx(), type, options.signal);
+        const denied = await options.validateAccess?.();
+        if (denied) return { ok: false, errors: [denied] };
+        if (options.signal?.aborted) return singleErr('REQUEST_TIMEOUT', 'Create contract observation cancelled');
+        if (!this.isReceiptReady()) return singleErr('CREATE_ENGINE_NOT_READY', 'Create engine is not ready');
+        return ok(snapshot.contract);
+      } catch (error) { return admissionError(error); }
+    });
+  }
+
+  async createGuarded(request: GuardedCreateRequest, options: GuardedCreateOptions = {}): Promise<Result<GuardedCreateResult>> {
+    let frozen: GuardedCreateRequest;
+    try { frozen = JSON.parse(canonicalJson(request)) as GuardedCreateRequest; }
+    catch { return singleErr('INVALID_FIELDS', 'Guarded create requires bounded JSON data'); }
+    return this.runGuardedExclusive(async () => {
+      if (!this.isReceiptReady()) return singleErr('CREATE_ENGINE_NOT_READY', 'Create engine is not ready');
+      const context = this.ctx();
+      const result = await guardedCreate(context, frozen, options,
+        () => this.isReceiptReady() && this._readOnly === context.readOnly && this.historyRuntime === context.history,
+        (registry, schemaStore) => { this.registry = registry; this.schemaStore = schemaStore; });
+      if (result.ok) this.lastWriteAt = new Date().toISOString();
+      return this.kickIndexer(result);
+    });
+  }
+
   private lastWriteOp: { op: string; startedAtMs: number } | null = null;
   private lastWriteAt: string | null = null;
 
