@@ -1,10 +1,14 @@
 ---
 enabled: true
-current: 0.15.2
+current: 0.16.0
 dev_flow: formal
 ---
 
 # Version History
+
+## 0.16.0 - 2026-09-09
+
+Add read-only exact-document receipts with committed content, canonical digests, and current authorization checks. Receipts report local Git evidence; consumers must verify intended content.
 
 ## 0.15.2 - 2026-09-08
 
