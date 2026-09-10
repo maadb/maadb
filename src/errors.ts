@@ -6,6 +6,10 @@
 import type { SourceLocation } from './types.js';
 
 export type ErrorCode =
+  | 'SCHEMA_CONTRACT_CHANGED'
+  | 'CONTENT_DIGEST_MISMATCH'
+  | 'HISTORY_MODE_MISMATCH'
+  | 'CREATE_ENGINE_NOT_READY'
   | 'RECEIPT_ENGINE_NOT_READY'
   | 'RECEIPT_CONTENT_INVALID'
   | 'RECEIPT_STORAGE_ERROR'

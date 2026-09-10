@@ -34,6 +34,11 @@ export function canonicalJson(value: unknown): string {
       throw new ReceiptError('RECEIPT_CONTENT_INVALID', 'Unsupported content prototype');
     }
     if (Reflect.ownKeys(v).some(key => typeof key !== 'string')) throw new ReceiptError('RECEIPT_CONTENT_INVALID', 'Unsupported content key');
+    const descriptors = Object.getOwnPropertyDescriptors(v);
+    for (const [key, descriptor] of Object.entries(descriptors)) {
+      if (Array.isArray(v) && key === 'length') continue;
+      if (!('value' in descriptor) || !descriptor.enumerable) throw new ReceiptError('RECEIPT_CONTENT_INVALID', 'Unsupported content property');
+    }
     seen.add(v);
     let result: string;
     if (Array.isArray(v)) {

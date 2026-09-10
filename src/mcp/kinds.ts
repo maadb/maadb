@@ -19,7 +19,7 @@ export type OperationKind = 'read' | 'write';
 // Tools that flow through withEngine and do not mutate git / SQLite /
 // in-memory cache / filesystem state.
 export const READ_TOOLS: ReadonlySet<string> = new Set([
-  'maad_document_receipt',
+  'maad_document_receipt', 'maad_create_contract',
   'maad_get',
   'maad_query',
   'maad_search',
@@ -44,6 +44,7 @@ export const READ_TOOLS: ReadonlySet<string> = new Set([
 // Tools that flow through withEngine and may mutate engine state. Must
 // acquire the write mutex.
 export const WRITE_TOOLS: ReadonlySet<string> = new Set([
+  'maad_create_guarded',
   'maad_create',
   'maad_update',
   'maad_bulk_create',

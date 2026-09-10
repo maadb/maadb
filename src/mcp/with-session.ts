@@ -40,6 +40,7 @@ function getRequestTimeoutMs(): number {
 
 interface CallContext {
   signal?: AbortSignal;
+  validateAccess?: () => MaadError | null;
   engine: MaadEngine;
   projectName: string;
   projectRoot: string;
@@ -75,7 +76,8 @@ export async function withEngine(
   args: Record<string, unknown> | undefined,
   handler: (call: CallContext) => Promise<McpToolResponse> | McpToolResponse
 ): Promise<McpToolResponse> {
-  const receiptOnly = toolName === 'maad_document_receipt';
+  const guarded = toolName === 'maad_create_guarded';
+  const strictReady = guarded || toolName === 'maad_create_contract' || toolName === 'maad_document_receipt';
   const requestId = randomUUID();
   const startedMs = Date.now();
   const sessionId = resolveSessionId(extra);
@@ -92,7 +94,7 @@ export async function withEngine(
   const emitRequestId = process.env.MAAD_EMIT_REQUEST_ID === 'true';
   const finalize = (response: McpToolResponse): McpToolResponse => {
     let stamped = emitRequestId ? attachMeta(response, { request_id: requestId }) : response;
-    if (receiptOnly && Buffer.byteLength(JSON.stringify(stamped), 'utf8') > Math.min(1024 * 1024, responseMaxBytes())) {
+    if (strictReady && Buffer.byteLength(JSON.stringify(stamped), 'utf8') > Math.min(1024 * 1024, responseMaxBytes())) {
       stamped = mcpError('RESPONSE_TOO_LARGE', 'Complete receipt response exceeds response cap');
     }
     const latencyMs = Date.now() - startedMs;
@@ -119,7 +121,7 @@ export async function withEngine(
   }
 
   let state = ctx.sessions.get(sessionId);
-  if (receiptOnly && !state) return finalize(mcpError('SESSION_UNBOUND', 'Receipt requires an already-bound session'));
+  if (strictReady && !state) return finalize(mcpError('SESSION_UNBOUND', 'Receipt requires an already-bound session'));
   if (!state) state = ctx.sessions.create(sessionId);
 
   // Session cancelled by instance-reload (its bound project was removed, or
@@ -133,7 +135,7 @@ export async function withEngine(
   }
 
   // Legacy single-project instance: auto-bind to 'default' on first call.
-  if (!receiptOnly && state.mode === null && ctx.instance.source === 'synthetic') {
+  if (!strictReady && state.mode === null && ctx.instance.source === 'synthetic') {
     const bindResult = ctx.sessions.bindSingle(sessionId, 'default');
     if (!bindResult.ok) return finalize(errorResponse(bindResult.errors));
     state = bindResult.value;
@@ -145,7 +147,7 @@ export async function withEngine(
   }
 
   // Pick project
-  if (receiptOnly && state.mode === 'single' && args?.project !== undefined && args.project !== state.activeProject) {
+  if (strictReady && state.mode === 'single' && args?.project !== undefined && args.project !== state.activeProject) {
     return finalize(mcpError('PROJECT_NOT_WHITELISTED', 'Receipt project differs from the bound project'));
   }
   const projectName = resolveProjectName(state, args);
@@ -169,29 +171,33 @@ export async function withEngine(
   // Re-read live records rather than treating the bind-time snapshot as authority.
   const boundState = state;
   const boundToken = state.token;
+  const boundTokenHash = boundToken?.hash;
+  const boundTokenId = boundToken?.id;
+  const boundMode = state.mode;
+  const requiredLiveRole = guarded ? 'writer' : 'reader';
   const currentReceiptAccess = (): McpToolResponse | null => {
     const current = ctx.sessions.peek(sessionId);
     if (current !== boundState || current.cancelled) return mcpError('SESSION_CANCELLED', 'Receipt session is no longer active');
     const selected = resolveProjectName(current, args);
-    if (selected !== projectName) return mcpError('PROJECT_NOT_WHITELISTED', 'Receipt project binding changed');
+    if (current.mode !== boundMode || (current.mode === 'single' && current.activeProject !== projectName) || selected !== projectName) return mcpError('PROJECT_NOT_WHITELISTED', 'Receipt project binding changed');
     const role = current.effectiveRoles.get(projectName);
     const project = ctx.pool.getInstance().projects.find(p => p.name === projectName);
-    if (!project || !role || !roleSatisfies(role, 'reader') || !roleSatisfies(project.role, 'reader')) {
+    if (!project || !role || !roleSatisfies(role, requiredLiveRole) || !roleSatisfies(project.role, requiredLiveRole)) {
       return mcpError('INSUFFICIENT_ROLE', 'Current receipt read access is unavailable');
     }
     if (ctx.tokens || boundToken) {
-      if (!ctx.tokens || !boundToken || current.token?.hash !== boundToken.hash) return mcpError('TOKEN_UNKNOWN', 'Receipt token is unavailable');
-      const token = ctx.tokens.lookupByHash(boundToken.hash);
-      if (!token || token.id !== boundToken.id) return mcpError('TOKEN_UNKNOWN', 'Receipt token is unavailable');
+      if (!ctx.tokens || !boundToken || current.token?.hash !== boundTokenHash) return mcpError('TOKEN_UNKNOWN', 'Receipt token is unavailable');
+      const token = ctx.tokens.lookupByHash(boundTokenHash!);
+      if (!token || token.id !== boundTokenId) return mcpError('TOKEN_UNKNOWN', 'Receipt token is unavailable');
       if (token.revokedAt !== undefined) return mcpError('TOKEN_REVOKED', 'Receipt token was revoked');
       if (token.expiresAt !== undefined && !(Date.parse(token.expiresAt) > Date.now())) return mcpError('TOKEN_EXPIRED', 'Receipt token expired');
       const access = composeEffectiveRole(project.role, token, projectName);
       if (!access.ok) return mcpError(access.code, access.message);
-      if (!roleSatisfies(access.role, 'reader')) return mcpError('INSUFFICIENT_ROLE', 'Receipt read access is unavailable');
+      if (!roleSatisfies(access.role, requiredLiveRole)) return mcpError('INSUFFICIENT_ROLE', 'Receipt read access is unavailable');
     }
     return null;
   };
-  if (receiptOnly) {
+  if (strictReady) {
     const denied = currentReceiptAccess();
     if (denied) return finalize(denied);
   }
@@ -226,7 +232,7 @@ export async function withEngine(
   let recoveryEngine: import('../engine/index.js').MaadEngine | null = null;
   try {
     // Resolve engine
-    const ready = receiptOnly ? ctx.pool.acquireReadyReference(projectName) : null;
+    const ready = strictReady ? ctx.pool.acquireReadyReference(projectName) : null;
     if (ready && !ready.ok) return finalize(errorResponse(ready.errors));
     if (ready?.ok) readyReference = ready.value;
     const poolResult = readyReference ? { ok: true as const, value: readyReference.engine } : await ctx.pool.get(projectName, {
@@ -237,7 +243,7 @@ export async function withEngine(
 
     // 0.7.3 — refcount the engine for the duration of this handler so the
     // idle sweeper cannot evict mid-call. Released in finally below.
-    if (!receiptOnly) {
+    if (!strictReady) {
       ctx.pool.acquire(projectName);
       acquiredProject = projectName;
     }
@@ -263,7 +269,7 @@ export async function withEngine(
     // delayed `tool_call_overrun` log line so operators can see what the
     // slow work was doing.
     const timeoutMs = getRequestTimeoutMs();
-    const receiptAbort = receiptOnly ? new AbortController() : null;
+    const receiptAbort = strictReady ? new AbortController() : null;
     const externalSignal = (extra as { signal?: AbortSignal } | undefined)?.signal;
     const onAbort = () => receiptAbort?.abort();
     if (receiptAbort) {
@@ -280,6 +286,16 @@ export async function withEngine(
     };
     if (state.token !== undefined) callCtx.token = state.token;
     if (receiptAbort) callCtx.signal = receiptAbort.signal;
+    if (strictReady) {
+      const retained = readyReference!;
+      callCtx.validateAccess = () => {
+        const denied = currentReceiptAccess();
+        if (denied) return (JSON.parse(denied.content[0]!.text) as { errors: MaadError[] }).errors[0]!;
+        if (receiptAbort?.signal.aborted) return { code: 'REQUEST_TIMEOUT', message: 'Strict operation cancelled' };
+        if (!retained.isCurrent()) return { code: 'CREATE_ENGINE_NOT_READY', message: 'Bound engine changed during admission' };
+        return null;
+      };
+    }
     const invokeHandler = (): Promise<McpToolResponse> => Promise.resolve(handler(callCtx));
     // 0.7.0 — For writes under an authenticated session with the identity
     // flag on, set the engine's pending commit-identity slot inside the
@@ -322,7 +338,9 @@ export async function withEngine(
 
     const runDispatch = (): Promise<McpToolResponse> =>
       kind === 'write'
-        ? poolResult.value.runExclusive(toolName, runWithIdentity)
+        ? guarded
+          ? poolResult.value.runGuardedExclusive(runWithIdentity)
+          : poolResult.value.runExclusive(toolName, runWithIdentity)
         : invokeHandler();
     // For heavy ops, the single-flight leader also takes a process-global
     // concurrency slot (followers share its result and take none). At the cap,
@@ -346,12 +364,13 @@ export async function withEngine(
         })
       : runDispatch();
 
-    if (receiptOnly && readyReference) {
+    if (strictReady && readyReference) {
       const retained = readyReference;
       receiptIsCurrent = retained.isCurrent;
       receiptOwnsSlot = true;
       readyReference = null;
       handlerPromise = handlerPromise.then(response => {
+        if (guarded) return response;
         const denied = currentReceiptAccess();
         if (denied) return denied;
         if (receiptAbort?.signal.aborted) return mcpError('REQUEST_TIMEOUT', 'Receipt observation cancelled');
@@ -408,7 +427,7 @@ export async function withEngine(
       );
     }
 
-    if (receiptOnly) {
+    if (strictReady && !guarded) {
       const denied = currentReceiptAccess();
       if (denied) return finalize(denied);
       if (!timedOut && receiptIsCurrent && !receiptIsCurrent()) {

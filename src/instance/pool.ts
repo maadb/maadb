@@ -81,12 +81,15 @@ export class EnginePool {
     if (this.reloadInFlight || this.evicting.has(name) || !engine?.isReceiptReady()) {
       return singleErr('RECEIPT_ENGINE_NOT_READY', 'Receipt requires an already-loaded ready engine');
     }
+    const boundPath = project.path;
+    const boundRoot = engine.getProjectRoot();
     this.acquire(name);
     this.receiptRefs.set(name, (this.receiptRefs.get(name) ?? 0) + 1);
     let released = false;
     return ok({ engine,
       isCurrent: () => !this.reloadInFlight && !this.evicting.has(name)
-        && this.engines.get(name) === engine && getProject(this.instance, name) === project && engine.isReceiptReady(),
+        && this.engines.get(name) === engine && getProject(this.instance, name) === project && project.path === boundPath
+        && engine.getProjectRoot() === boundRoot && engine.isReceiptReady(),
       release: () => {
         if (released) return;
         released = true;
