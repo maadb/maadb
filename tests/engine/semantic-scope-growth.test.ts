@@ -7,7 +7,7 @@ const scope = { docType: 'note', filters: { access: 'public', amount: { op: 'bet
 
 describe('scope eligibility beyond 2000 documents', () => {
   it('finds old evidence independently of indexing order, with exact zero model calls', async () => {
-    const f = scopeFixture(2105);
+    const f = scopeFixture(2105, { inMemory: true });
     try {
       const embed = vi.spyOn(f.ctx.embeddingProvider!, 'embed');
       // Reproduce the former candidate exclusion using the original capped backend query.
@@ -38,7 +38,7 @@ describe('scope eligibility beyond 2000 documents', () => {
   });
 
   it('keeps older vector evidence eligible and discloses saturation on a full page', async () => {
-    const f = scopeFixture(2105);
+    const f = scopeFixture(2105, { inMemory: true });
     try {
       const batch = f.sem.takeEmbedBatch(3000);
       f.sem.putBlockEmbeddings(batch.map(b => ({ ...b,
@@ -60,7 +60,7 @@ describe('scope eligibility beyond 2000 documents', () => {
   });
 
   it('discloses an empty scoped vector page when out-of-scope neighbors fill the budget', async () => {
-    const f = scopeFixture(1002);
+    const f = scopeFixture(1002, { inMemory: true });
     try {
       for (const b of f.sem.takeEmbedBatch(2000)) {
         if (b.docId !== 'old') f.backend.putFieldIndex(docId(b.docId), [
@@ -83,7 +83,7 @@ describe('scope eligibility beyond 2000 documents', () => {
   });
 
   it('shares multi-value inequality semantics and scopes pending-embedding metadata', async () => {
-    const f = scopeFixture(1);
+    const f = scopeFixture(1, { inMemory: true });
     try {
       f.backend.putFieldIndex(docId('old'), [
         { name: 'access', value: 'public', numericValue: null, type: 'string' },
@@ -101,7 +101,7 @@ describe('scope eligibility beyond 2000 documents', () => {
   });
 
   it('reports simultaneous fallback, lexical saturation and pending embeddings', async () => {
-    const f = scopeFixture(80);
+    const f = scopeFixture(80, { inMemory: true });
     try {
       vi.spyOn(f.ctx.embeddingProvider!, 'embed').mockRejectedValue(new Error('offline'));
       const r = await semanticSearch(f.ctx, { query: 'routine', mode: 'hybrid', k: 1, ...scope });
