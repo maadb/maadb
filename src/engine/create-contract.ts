@@ -3,9 +3,9 @@ import { lstatSync } from 'node:fs';
 import yaml from 'js-yaml';
 import { createRequire } from 'node:module';
 import { z } from 'zod';
-import { loadSchemas } from '../schema/loader.js';
+import { loadSchemasFromSnapshot } from '../schema/loader.js';
 import { buildSubtypeMap, DEFAULT_SUBTYPE_MAP, PRIMITIVES, docType, schemaRef, type Registry, type SchemaStore } from '../types.js';
-import { canonicalJson, rawSha256, readWorkingReceipt } from './document-receipt.js';
+import { canonicalJson, rawSha256, readWorkingReceipt, readWorkingReceiptSnapshot } from './document-receipt.js';
 import { isSafeProjectRelativePath, isSafeSchemaRef, isWritePathContainedIn } from './pathguard.js';
 import { ReceiptError } from '../git/exact-blob.js';
 import type { JsonValue } from './document-receipt-types.js';
@@ -43,15 +43,20 @@ export async function freshCreateContract(ctx: EngineContext, type: string, sign
   contract: CreateContract; registry: Registry; schemaStore: SchemaStore;
 }> {
   const sources: Record<string, string> = Object.create(null) as Record<string, string>;
+  const capturedBytes = new Map<string, Buffer>();
+  const cachedFiles: SchemaStore['cachedFiles'] = new Map();
   let total = 0;
   const read = async (relative: string): Promise<string> => {
     if (Object.hasOwn(sources, relative)) return sources[relative]!;
     if (Object.keys(sources).length >= 129) throw new ReceiptError('SCHEMA_INVALID', 'Too many contract dependencies');
-    const bytes = await readWorkingReceipt(ctx.projectRoot, relative, signal);
+    const captured = await readWorkingReceiptSnapshot(ctx.projectRoot, relative, signal);
+    const { bytes } = captured;
     total += bytes.length;
     if (total > 256 * 1024) throw new ReceiptError('RESPONSE_TOO_LARGE', 'Schema dependency snapshot exceeds 256 KiB');
     const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
     sources[relative] = text;
+    capturedBytes.set(relative, bytes);
+    cachedFiles.set(path.join(ctx.projectRoot, relative), { mtimeMs: captured.mtimeMs, size: captured.size });
     return text;
   };
   const parsed = registryDefinition.parse(parseSource(await read('_registry/object_types.yaml')));
@@ -90,9 +95,14 @@ export async function freshCreateContract(ctx: EngineContext, type: string, sign
     if (def.template) await read(def.template);
   }
   if (!registry.types.has(docType(type))) throw new ReceiptError('UNKNOWN_TYPE', 'Unknown contract document type');
-  // The shared schema loader performs the complete constraint validation. Reads
-  // are bracketed by bounded byte snapshots, never an mtime/size-only cache.
-  const loaded = await loadSchemas(ctx.projectRoot, registry);
+  // Validate exactly the bounded captured sources, with no disk-reader fallback.
+  // Both effective identity and document preparation use this validated store.
+  // Decode like the legacy disk reader (including BOMs); capture already checked
+  // UTF-8 validity. Keep the existing source projection and parser behavior.
+  const schemaSources = new Map([...registry.types.values()].map(def =>
+    [def.schemaRef, capturedBytes.get(`_schema/${def.schemaRef}.yaml`)!.toString('utf8')] as const));
+  const loaded = await loadSchemasFromSnapshot(registry, schemaSources, { signal, cachedFiles });
+  if (signal?.aborted) throw new ReceiptError('REQUEST_TIMEOUT', 'Schema snapshot validation cancelled');
   if (!loaded.ok) throw new ReceiptError('SCHEMA_INVALID', 'Fresh schema validation failed');
   for (const [relative, expected] of Object.entries(sources)) {
     const actual = await readWorkingReceipt(ctx.projectRoot, relative, signal);

@@ -143,13 +143,23 @@ not a hash of the executable or installed dependency binaries.
 
 Each observation reads dependencies afresh with bounded reads, regular-file
 and path checks, and before/after handle and pathname identity checks. The
-shared schema validator builds a fresh effective store. Full byte rereads
-bracket that load; guarded create compares another complete observation before
-publication. It does not rely on mtime/size cache freshness or the legacy
+shared schema validator builds a fresh effective store exclusively from the
+captured source text; it never reopens schema files through the legacy disk
+loader. Both the effective identity and prepared document use that store.
+Bounded byte rereads then check those same dependencies for changes; guarded
+create compares another complete observation before publication. Cancellation
+is checked during capture, between schema validations, and during rereads.
+It does not rely on mtime/size cache freshness or the legacy
 loader's fallback to stale schemas. Same-size edits with restored mtime are
 detected. Missing, unreadable, malformed, changing, or unsupported schema
 dependencies fail closed. Strict observation also rejects malformed registry
 and schema top-level shapes tolerated by legacy loading.
+
+Cache metadata from the same bounded handles supports later receipt freshness
+checks and legacy schema reloads. It is never used to admit guarded operations,
+which always take fresh bounded snapshots. Rereads detect observed
+changes; they do not lock out external filesystem writers or make the dependency
+set a filesystem transaction.
 
 ## Content identity: document-content-v1
 

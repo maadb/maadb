@@ -4,10 +4,15 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import * as fs from 'node:fs/promises';
+import * as schemaLoader from '../../src/schema/loader.js';
 import { MaadEngine, contentDigest, canonicalJson, type GuardedCreateRequest } from '../../src/engine.js';
+import type { EngineContext } from '../../src/engine/context.js';
 import { docId, docType } from '../../src/types.js';
 import type { HistoryRuntime } from '../../src/history/types.js';
 import { GitLayer } from '../../src/git/index.js';
+
+vi.mock('node:fs/promises', async importOriginal => ({ ...await importOriginal<typeof import('node:fs/promises')>() }));
 
 let root: string;
 let engine: MaadEngine;
@@ -76,6 +81,138 @@ afterEach(async () => {
 });
 
 describe('guarded create admission', () => {
+  const preservedStores = async () => {
+    await engine.getDocument(docId('nt-missing'), 'hot');
+    const ctx = (engine as unknown as { ctx(): EngineContext }).ctx();
+    const files = snapshot();
+    const stats = ctx.backend.getStats();
+    const history = engine.health().history;
+    const begin = vi.spyOn(ctx.journal, 'begin');
+    return () => {
+      const current = (engine as unknown as { ctx(): EngineContext }).ctx();
+      expect(current.registry).toBe(ctx.registry);
+      expect(current.schemaStore).toBe(ctx.schemaStore);
+      expect(current.backend.getStats()).toEqual(stats);
+      expect(current.backend.getDocument(docId('nt-one'))).toBeFalsy();
+      expect(engine.health().history).toEqual(history);
+      expect(snapshot()).toEqual(files);
+      expect(begin).not.toHaveBeenCalled();
+    };
+  };
+
+  it('uses captured schema text for contract and preparation without an unbounded loader read', async () => {
+    const req = await request();
+    // An intermediate legacy read must never get a chance to consume this
+    // oversized alternate schema, even if bounded rereads see the original.
+    const alternate = schema.replace('type: string', 'type: string\n    max_length: 1') + '#' + 'x'.repeat(300 * 1024);
+    expect(Buffer.byteLength(alternate)).toBeGreaterThan(256 * 1024);
+    const original = fs.readFile;
+    const read = vi.spyOn(fs, 'readFile').mockImplementation(async (...args) =>
+      String(args[0]) === schemaPath() ? alternate : original(...args));
+    expect((await contract()).schemaDigest).toBe(req.expectedSchemaDigest);
+    const result = await engine.createGuarded(req);
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    expect(read.mock.calls.filter(args => String(args[0]) === schemaPath())).toHaveLength(0);
+    expect(readFileSync(target(), 'utf8')).toBe('---\ndoc_id: nt-one\ndoc_type: note\nschema: note.v1\ntitle: Hello\n---\n');
+  });
+
+  it.each(['schema', 'total'])('rejects oversized %s capture before admission without activating stores', async kind => {
+    const req = await request();
+    if (kind === 'schema') writeFileSync(schemaPath(), schema + '#' + 'x'.repeat(256 * 1024));
+    else {
+      writeFileSync(schemaPath(), schema + '#' + 'x'.repeat(140 * 1024));
+      writeFileSync(registryPath(), registry + '#' + 'x'.repeat(140 * 1024));
+    }
+    const preserved = await preservedStores();
+    const read = vi.spyOn(fs, 'readFile').mockRejectedValue(new Error('No unbounded reads'));
+    const observed = await engine.createContract({ contract: 'create-contract-v1', docType: 'note' });
+    expect(!observed.ok && observed.errors[0]!.code).toBe('RESPONSE_TOO_LARGE');
+    const result = await engine.createGuarded(req);
+    expect(!result.ok && result.errors[0]!.code).toBe('RESPONSE_TOO_LARGE');
+    expect(read).not.toHaveBeenCalled(); preserved();
+  });
+
+  it('retains the legacy schema parser rejection for a captured BOM', async () => {
+    const req = await request(); writeFileSync(schemaPath(), '\uFEFF' + schema);
+    const preserved = await preservedStores();
+    const observed = await engine.createContract({ contract: 'create-contract-v1', docType: 'note' });
+    expect(!observed.ok && observed.errors[0]!.code).toBe('SCHEMA_INVALID');
+    const result = await engine.createGuarded(req);
+    expect(!result.ok && result.errors[0]!.code).toBe('SCHEMA_INVALID');
+    preserved();
+  });
+
+  it.each(['oversized', 'changed'])('rejects %s dependencies on the bounded verification reread', async kind => {
+    const req = await request(); const preserved = await preservedStores();
+    const original = fs.open;
+    let changed = false;
+    vi.spyOn(fs, 'open').mockImplementation(async (...args: Parameters<typeof fs.open>) => {
+      const handle = await original(...args);
+      if (String(args[0]) === schemaPath() && !changed) {
+        const close = handle.close.bind(handle);
+        vi.spyOn(handle, 'close').mockImplementation(async () => {
+          await close(); changed = true;
+          writeFileSync(schemaPath(), kind === 'oversized' ? schema + '#' + 'x'.repeat(300 * 1024) : schema + '# changed\n');
+        });
+      }
+      return handle;
+    });
+    const result = await engine.createGuarded(req);
+    expect(changed).toBe(true);
+    expect(!result.ok && result.errors[0]!.code).toBe(kind === 'oversized' ? 'RESPONSE_TOO_LARGE' : 'SCHEMA_CONTRACT_CHANGED');
+    // Undo only the synthetic external writer's edit before comparing stores.
+    writeFileSync(schemaPath(), schema); preserved();
+  });
+
+  it.each(['grow', 'cancel'])('bounds consumption and closes the schema handle on %s during capture', async action => {
+    const req = await request(); const preserved = await preservedStores();
+    const controller = new AbortController(); const original = fs.open;
+    let consumed = false; let closed = false;
+    vi.spyOn(fs, 'open').mockImplementation(async (...args: Parameters<typeof fs.open>) => {
+      const handle = await original(...args);
+      if (String(args[0]) === schemaPath()) {
+        const read = handle.read.bind(handle); const close = handle.close.bind(handle);
+        handle.read = (async (...readArgs: Parameters<typeof read>) => {
+          const result = await read(...readArgs);
+          if (!consumed) {
+            consumed = true;
+            if (action === 'grow') writeFileSync(schemaPath(), schema + '#' + 'x'.repeat(300 * 1024));
+            else controller.abort();
+          }
+          return result;
+        }) as typeof handle.read;
+        vi.spyOn(handle, 'close').mockImplementation(async () => { await close(); closed = true; });
+      }
+      return handle;
+    });
+    const result = await engine.createGuarded(req, { signal: controller.signal });
+    expect(consumed).toBe(true); expect(closed).toBe(true);
+    expect(!result.ok && result.errors[0]!.code).toBe(action === 'grow' ? 'RECEIPT_OBSERVATION_CHANGED' : 'REQUEST_TIMEOUT');
+    writeFileSync(schemaPath(), schema); preserved();
+  });
+
+  it('cancels during shared snapshot validation without rereading or activating stores', async () => {
+    const req = await request(); const preserved = await preservedStores();
+    const controller = new AbortController(); const original = schemaLoader.loadSchemasFromSnapshot;
+    const open = vi.spyOn(fs, 'open');
+    const validate = vi.spyOn(schemaLoader, 'loadSchemasFromSnapshot').mockImplementation((...args) => {
+      const pending = original(...args); controller.abort(); return pending;
+    });
+    const result = await engine.createGuarded(req, { signal: controller.signal });
+    expect(!result.ok && result.errors[0]!.code).toBe('REQUEST_TIMEOUT');
+    expect(validate).toHaveBeenCalledTimes(1);
+    expect(open).toHaveBeenCalledTimes(2); // registry and schema capture only
+    preserved();
+  });
+
+  it('reloads later legacy schema edits after a guarded snapshot is admitted', async () => {
+    expect((await engine.createGuarded(await request())).ok).toBe(true);
+    writeFileSync(schemaPath(), schema.replace('type: string', 'type: string\n    max_length: 1'));
+    const result = await engine.createDocument(docType('note'), { title: 'Too long' }, '', 'nt-two');
+    expect(result.ok).toBe(false);
+    expect(readdirSync(path.join(root, 'notes'))).toEqual(['nt-one.md']);
+  });
+
   it('matches an independent digest, publishes explicit empty body once, and reconciles by receipt', async () => {
     const req = await request();
     const before = snapshot(); await contract(); expect(snapshot()).toEqual(before);
