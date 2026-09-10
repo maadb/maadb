@@ -1,10 +1,14 @@
 ---
 enabled: true
-current: 0.16.0
+current: 0.17.0
 dev_flow: formal
 ---
 
 # Version History
+
+## 0.17.0 - 2026-09-10
+
+Add versioned guarded document creation with schema, history-mode, authorization and expected-content checks before writing.
 
 ## 0.16.0 - 2026-09-09
 
