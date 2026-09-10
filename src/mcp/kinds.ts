@@ -19,6 +19,7 @@ export type OperationKind = 'read' | 'write';
 // Tools that flow through withEngine and do not mutate git / SQLite /
 // in-memory cache / filesystem state.
 export const READ_TOOLS: ReadonlySet<string> = new Set([
+  'maad_document_receipt',
   'maad_get',
   'maad_query',
   'maad_search',

@@ -1,10 +1,15 @@
 import { describe, it, expect } from 'vitest';
-import { getToolsForRole, parseRole } from '../../src/mcp/roles.js';
+import { getMinRoleForTool, getToolsForRole, parseRole } from '../../src/mcp/roles.js';
 
 describe('MCP roles', () => {
-  it('reader gets 19 tools', () => {
+  it('requires reader role for the document receipt', () => {
+    expect(getMinRoleForTool('maad_document_receipt')).toBe('reader');
+  });
+
+  it('reader gets 20 tools', () => {
     const tools = getToolsForRole('reader');
-    expect(tools.size).toBe(19);
+    expect(tools.size).toBe(20);
+    expect(tools.has('maad_document_receipt')).toBe(true);
     expect(tools.has('maad_summary')).toBe(true);
     expect(tools.has('maad_get')).toBe(true);
     expect(tools.has('maad_aggregate')).toBe(true);
@@ -19,9 +24,10 @@ describe('MCP roles', () => {
     expect(tools.has('maad_delete')).toBe(false);
   });
 
-  it('writer gets 24 tools (reader + create, update, validate, bulk_create, bulk_update)', () => {
+  it('writer gets 25 tools (reader + create, update, validate, bulk_create, bulk_update)', () => {
     const tools = getToolsForRole('writer');
-    expect(tools.size).toBe(24);
+    expect(tools.size).toBe(25);
+    expect(tools.has('maad_document_receipt')).toBe(true);
     expect(tools.has('maad_create')).toBe(true);
     expect(tools.has('maad_update')).toBe(true);
     expect(tools.has('maad_validate')).toBe(true);
@@ -29,9 +35,10 @@ describe('MCP roles', () => {
     expect(tools.has('maad_reindex')).toBe(false);
   });
 
-  it('admin gets 41 tools (all)', () => {
+  it('admin gets 42 tools (all)', () => {
     const tools = getToolsForRole('admin');
-    expect(tools.size).toBe(41);
+    expect(tools.size).toBe(42);
+    expect(tools.has('maad_document_receipt')).toBe(true);
     expect(tools.has('maad_delete')).toBe(true);
     expect(tools.has('maad_reindex')).toBe(true);
     expect(tools.has('maad_reload')).toBe(true);
