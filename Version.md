@@ -1,10 +1,14 @@
 ---
 enabled: true
-current: 0.17.0
+current: 0.18.0
 dev_flow: formal
 ---
 
 # Version History
+
+## 0.18.0 - 2026-09-11
+
+Add compact, complete contract and receipt delivery with independent response budgets and safe schema preparation reuse. Preserve live guarded-write checks and exact v1 digests. Clients verify complete pages before accepting schema or document evidence.
 
 ## 0.17.0 - 2026-09-10
 
