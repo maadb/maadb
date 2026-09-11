@@ -28,7 +28,7 @@ import { getKindForTool, isEngineLess } from './kinds.js';
 import { getHeavyOpGuard, heavyOpKey } from './heavy-ops.js';
 import { isCommitIdentityEnabled, type CommitIdentity } from '../git/commit.js';
 import { composeEffectiveRole } from '../auth/resolve.js';
-import { responseMaxBytes } from './response.js';
+import { responseMaxBytes, contractResponseMaxBytes, responseBytes } from './response.js';
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 
@@ -94,8 +94,20 @@ export async function withEngine(
   const emitRequestId = process.env.MAAD_EMIT_REQUEST_ID === 'true';
   const finalize = (response: McpToolResponse): McpToolResponse => {
     let stamped = emitRequestId ? attachMeta(response, { request_id: requestId }) : response;
-    if (strictReady && Buffer.byteLength(JSON.stringify(stamped), 'utf8') > Math.min(1024 * 1024, responseMaxBytes())) {
-      stamped = mcpError('RESPONSE_TOO_LARGE', 'Complete receipt response exceeds response cap');
+    const cap = strictReady ? contractResponseMaxBytes() : responseMaxBytes();
+    const bytes = responseBytes(stamped);
+    // Final metadata and escaping are part of every engine-bound result budget.
+    // Never replace an existing failure, or suggest replay after publication.
+    if (inspectResponse(stamped).result === 'ok' && bytes > cap) {
+      const write = getKindForTool(toolName) === 'write';
+      stamped = mcpErrorWithDetails('RESPONSE_TOO_LARGE', 'Complete MCP result exceeds response cap', {
+        tool: toolName, observedBytes: bytes, capBytes: cap, accounting: 'mcp-result-utf8',
+        writeOutcome: write ? 'unknown_reconcile' : 'read_only',
+        hint: write ? 'A write may have occurred. Reconcile by document receipt; never automatically replay.'
+          : strictReady ? 'Retry this read with delivery.format=compact-json-v1 and a bounded maxBytes; collect and verify all pages.'
+          : 'Narrow field projection, add filters, or paginate with cursor',
+      });
+      if (emitRequestId) stamped = attachMeta(stamped, { request_id: requestId });
     }
     const latencyMs = Date.now() - startedMs;
     const { result, errorCode } = inspectResponse(stamped);

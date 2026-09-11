@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { InstanceCtx } from '../ctx.js';
+import { deliveryInput, deliverComplete } from '../complete-delivery.js';
 import { withEngine } from '../with-session.js';
 import { createContractRequestSchema, guardedCreateRequestSchema } from '../../engine/guarded-create.js';
 import type { GuardedCreateRequest } from '../../engine/guarded-create-types.js';
@@ -11,19 +12,22 @@ import { getRateLimiter } from '../rate-limit.js';
 import { logWriteAudit, logValidationWarning } from '../../logging.js';
 import { notifyWrite } from '../notifications.js';
 
-export const createContractInput = createContractRequestSchema.extend({ project: z.string().optional() }).strict();
+export const createContractInput = createContractRequestSchema.extend({ project: z.string().optional(), delivery: deliveryInput.optional() }).strict();
 export const guardedCreateInput = guardedCreateRequestSchema.extend({ project: z.string().optional() }).strict();
 
 export function registerContract(server: McpServer, ctx: InstanceCtx): number {
   server.registerTool('maad_create_contract', {
-    description: 'Read a complete versioned schema contract and effective history mode from an already-bound ready project.',
+    description: 'Read a complete versioned schema contract and effective history mode from an already-bound ready project. Optional compact-json-v1 delivery returns lossless, digest-bound pages; verify all pages before accepting a contract.',
     inputSchema: createContractInput,
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
   }, async (args, extra) => withEngine(ctx, extra, 'maad_create_contract', args, async call => {
-    return resultToResponse(await call.engine.createContract({ contract: args.contract, docType: args.docType }, {
+    const result = await call.engine.createContract({ contract: args.contract, docType: args.docType }, {
       ...(call.signal ? { signal: call.signal } : {}),
       ...(call.validateAccess ? { validateAccess: call.validateAccess } : {}),
-    }), 'maad_create_contract');
+    });
+    if (!result.ok || !args.delivery) return resultToResponse(result, 'maad_create_contract');
+    return deliverComplete(result.value, args.delivery, { ...call, tool: 'maad_create_contract',
+      request: { contract: args.contract, docType: args.docType, project: call.projectName } });
   }));
   return 1;
 }

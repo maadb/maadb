@@ -265,11 +265,12 @@ Bounds are fail-closed, with no partial contract response:
 | Canonical complete schema contract | 512 KiB |
 | Canonical create request and generated document | 256 KiB each |
 | Canonicalization | Depth 64, 65,536 visited nodes, 1 MiB encoded scalar budget |
-| MCP envelope | Smaller of configured response cap and 1 MiB |
+| MCP result | `MAAD_CONTRACT_RESPONSE_MAX_BYTES`: 128 KiB default, 1 MiB hard ceiling |
 
-The MCP payload and concurrency caps also apply. A contract exceeding the
-normal response cap is rejected; configure sufficient response capacity only
-when needed. Non-finite numbers, undefined, bigint, functions, cycles, sparse
+The MCP payload and concurrency caps also apply. Legacy full responses exceeding
+the contract allowance are rejected. Use [lossless bounded complete delivery](complete-delivery.md)
+for compact setup and larger contracts or receipts. The ordinary query budget
+remains separate; see that guide for configuration migration. Non-finite numbers, undefined, bigint, functions, cycles, sparse
 or decorated arrays, accessors, hidden properties, symbols, and custom
 prototypes are rejected for direct engine input as well as unsupported JSON
 content encountered during parsing.

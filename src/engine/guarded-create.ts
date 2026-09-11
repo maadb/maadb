@@ -55,7 +55,7 @@ export async function guardedCreate(ctx: EngineContext, request: GuardedCreateRe
   try {
     const initial = check();
     if (initial) return initial;
-    const snapshot = await freshCreateContract(ctx, frozen.docType, options.signal);
+    const snapshot = await freshCreateContract(ctx, frozen.docType, options.signal, ctx.contractPreparationCache);
     if (snapshot.contract.schemaDigest !== frozen.expectedSchemaDigest) {
       return singleErr('SCHEMA_CONTRACT_CHANGED', 'Complete schema contract differs from expectation');
     }
@@ -74,7 +74,7 @@ export async function guardedCreate(ctx: EngineContext, request: GuardedCreateRe
     // are synchronous: the final authority check has no await before publication.
     const denied = check();
     if (denied) return denied;
-    const verified = await freshCreateContract(ctx, frozen.docType, options.signal);
+    const verified = await freshCreateContract(ctx, frozen.docType, options.signal, ctx.contractPreparationCache);
     if (verified.contract.schemaDigest !== snapshot.contract.schemaDigest) return singleErr('SCHEMA_CONTRACT_CHANGED', 'Schema changed during admission');
     const final = check();
     if (final) return final;

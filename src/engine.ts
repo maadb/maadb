@@ -23,3 +23,6 @@ export type {
 
 export type { CreateContractRequest, CreateContract, GuardedCreateRequest, GuardedCreateResult, GuardedCreateOptions } from './engine/guarded-create-types.js';
 export { canonicalJson, contentDigest } from './engine/document-receipt.js';
+
+export { assembleCompleteDelivery } from './client/complete-delivery.js';
+export type { DeliveryPage } from './mcp/complete-delivery.js';

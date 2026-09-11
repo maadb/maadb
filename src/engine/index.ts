@@ -11,6 +11,7 @@ import { ok, singleErr, type Result } from '../errors.js';
 import { AsyncFifoMutex } from './mutex.js';
 import { documentReceipt } from './document-receipt.js';
 import { canonicalJson } from './document-receipt.js';
+import { ContractPreparationCache } from './contract-preparation-cache.js';
 import { freshCreateContract } from './create-contract.js';
 import { guardedCreate, admissionError, createContractRequestSchema } from './guarded-create.js';
 import type { CreateContractRequest, CreateContract, GuardedCreateRequest, GuardedCreateResult, GuardedCreateOptions } from './guarded-create-types.js';
@@ -185,6 +186,11 @@ function bootReindexEnabled(): boolean {
 }
 
 export class MaadEngine {
+  private contractPreparationCache = new ContractPreparationCache();
+  private receiptEpoch: object = {};
+
+  /** In-process observation generation; changes when runtime resources are replaced. */
+  getReceiptEpoch(): object { return this.receiptEpoch; }
   private projectRoot: string = '';
   private registry!: Registry;
   private schemaStore!: SchemaStore;
@@ -245,7 +251,7 @@ export class MaadEngine {
     return this.runGuardedExclusive(async () => {
       try {
         if (!this.isReceiptReady()) return singleErr('CREATE_ENGINE_NOT_READY', 'Create engine is not ready');
-        const snapshot = await freshCreateContract(this.ctx(), type, options.signal);
+        const snapshot = await freshCreateContract(this.ctx(), type, options.signal, this.contractPreparationCache);
         const denied = await options.validateAccess?.();
         if (denied) return { ok: false, errors: [denied] };
         if (options.signal?.aborted) return singleErr('REQUEST_TIMEOUT', 'Create contract observation cancelled');
@@ -559,6 +565,7 @@ export class MaadEngine {
       }
 
       await this.disposeResources();
+      this.contractPreparationCache.clear();
       this.registry = replacement.registry;
       this.schemaStore = replacement.schemaStore;
       this.backend = replacement.backend;
@@ -792,6 +799,8 @@ export class MaadEngine {
 
   private async disposeResources(): Promise<void> {
     this.initialized = false;
+    this.receiptEpoch = {};
+    this.contractPreparationCache.clear();
     const history = this.historyRuntime;
     this.historyRuntime = null;
     const indexer = this.semanticIndexer;
@@ -809,6 +818,7 @@ export class MaadEngine {
   private ctx(): EngineContext {
     this.assertInit();
     return {
+      contractPreparationCache: this.contractPreparationCache,
       projectRoot: this.projectRoot,
       registry: this.registry,
       schemaStore: this.schemaStore,

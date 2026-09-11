@@ -192,7 +192,10 @@ describe('guarded create admission', () => {
   });
 
   it('cancels during shared snapshot validation without rereading or activating stores', async () => {
-    const req = await request(); const preserved = await preservedStores();
+    const req = await request();
+    // Exercise a cold preparation; warm cancellation is covered separately.
+    expect((await engine.reload()).ok).toBe(true);
+    const preserved = await preservedStores();
     const controller = new AbortController(); const original = schemaLoader.loadSchemasFromSnapshot;
     const open = vi.spyOn(fs, 'open');
     const validate = vi.spyOn(schemaLoader, 'loadSchemasFromSnapshot').mockImplementation((...args) => {
@@ -339,5 +342,29 @@ describe('guarded create admission', () => {
     const fm = { doc_id: 'nt-one', doc_type: 'note', schema: 'note.v1', title: 'Hello' };
     expect(contentDigest('nt-one', 'note', fm, '')).toBe('a680267ffb809101d5d97c16b5fc62b432693e5013079d733922a5ebf066b63d');
     expect(expected({ title: 'Hello' })).toBe('a680267ffb809101d5d97c16b5fc62b432693e5013079d733922a5ebf066b63d');
+  });
+});
+
+
+describe('content-keyed preparation reuse', () => {
+  it('compiles once across setup, repeated observation and both guarded-write checks', async () => {
+    const compile = vi.spyOn(schemaLoader, 'loadSchemasFromSnapshot');
+    const req = await request();
+    const observed = await contract();
+    expect(compile).toHaveBeenCalledTimes(1);
+    // Mutating a returned contract cannot poison cached validation.
+    observed.schemaContract = null;
+    expect((await engine.createGuarded(req)).ok).toBe(true);
+    expect(compile).toHaveBeenCalledTimes(1);
+  });
+  it('discards preparation on reload and checks cancellation on a warm cache', async () => {
+    const req = await request();
+    const controller = new AbortController(); controller.abort();
+    const denied = await engine.createGuarded(req, { signal: controller.signal });
+    expect(!denied.ok && denied.errors[0]!.code).toBe('REQUEST_TIMEOUT');
+    expect((await engine.reload()).ok).toBe(true);
+    const compile = vi.spyOn(schemaLoader, 'loadSchemasFromSnapshot');
+    await contract();
+    expect(compile).toHaveBeenCalledTimes(1);
   });
 });

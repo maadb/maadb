@@ -39,6 +39,7 @@ export function newCommitFailureTracker(): CommitFailureTracker {
 }
 
 export interface EngineContext {
+  contractPreparationCache?: import('./contract-preparation-cache.js').ContractPreparationCache;
   projectRoot: string;
   registry: Registry;
   schemaStore: SchemaStore;
