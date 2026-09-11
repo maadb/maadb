@@ -16,16 +16,16 @@ const version = (createRequire(import.meta.url)('../../package.json') as { versi
 export const rawSha256 = (bytes: Buffer): string => createHash('sha256').update(bytes).digest('hex');
 
 /** Explicit serialization preserves UTF-16 key ordering even for integer-like keys. */
-export function canonicalJson(value: unknown): string {
+export function canonicalJson(value: unknown, limits = { nodes: 65536, depth: 64, scalarBytes: 1024 * 1024 }): string {
   const seen = new Set<object>();
   let nodes = 0;
   let bytes = 0;
   const encode = (v: unknown, depth: number): string => {
-    if (++nodes > 65536 || depth > 64) throw new ReceiptError('RECEIPT_CONTENT_INVALID', 'Content structure exceeds bounds');
+    if (++nodes > limits.nodes || depth > limits.depth) throw new ReceiptError('RECEIPT_CONTENT_INVALID', 'Content structure exceeds bounds');
     if (v === null || typeof v === 'boolean' || typeof v === 'string' || (typeof v === 'number' && Number.isFinite(v))) {
       const text = JSON.stringify(v);
       bytes += Buffer.byteLength(text);
-      if (bytes > 1024 * 1024) throw new ReceiptError('RESPONSE_TOO_LARGE', 'Canonical content exceeds bound');
+      if (bytes > limits.scalarBytes) throw new ReceiptError('RESPONSE_TOO_LARGE', 'Canonical content exceeds bound');
       return text;
     }
     if (typeof v !== 'object' || !v || seen.has(v)) throw new ReceiptError('RECEIPT_CONTENT_INVALID', 'Unsupported JSON content');

@@ -60,25 +60,22 @@ export function resultToResponse<T>(result: Result<T>, toolName?: string): { con
   return errorResponse(result.errors);
 }
 
-/**
- * 0.7.1 (R3) — Projected-size guard for list-returning tools. Computes the
- * byte size of the serialized response before returning; rejects with
- * RESPONSE_TOO_LARGE when over cap. Prevents silent truncation when the MCP
- * client's tool-output harness caps the response (~80KB in Claude Code).
- *
- * Cap is read lazily from MAAD_RESPONSE_MAX_BYTES each call so tests can
- * flip it via env without re-importing the module. Default 64KB gives
- * headroom below the observed Claude Code ceiling.
- *
- * Only applies to success responses — error responses are small and
- * stamping them risks hiding the original error. Returns the input
- * unchanged for errors or when under cap.
- */
+/** Ordinary read budget. UTF-8 bytes of the complete serialized MCP result. */
 export function responseMaxBytes(): number {
   const raw = process.env['MAAD_RESPONSE_MAX_BYTES'];
   if (!raw) return 65536;
   const n = Number.parseInt(raw, 10);
   return Number.isFinite(n) && n > 0 ? n : 65536;
+}
+
+/** Independent contract/receipt budget, with an unconditional 1 MiB ceiling. */
+export function contractResponseMaxBytes(): number {
+  const value = Number(process.env.MAAD_CONTRACT_RESPONSE_MAX_BYTES);
+  return Number.isSafeInteger(value) && value > 0 ? Math.min(value, 1024 * 1024) : 131072;
+}
+
+export function responseBytes(response: unknown): number {
+  return Buffer.byteLength(JSON.stringify(response), 'utf8');
 }
 
 export function guardResponseSize(
@@ -89,7 +86,7 @@ export function guardResponseSize(
   if (!first || first.type !== 'text') return response;
 
   const cap = responseMaxBytes();
-  const bytes = Buffer.byteLength(first.text, 'utf8');
+  const bytes = responseBytes(response);
   if (bytes <= cap) return response;
 
   // Only reject success responses — error responses are small and should pass through.
@@ -105,7 +102,7 @@ export function guardResponseSize(
   return errorResponse([{
     code: 'RESPONSE_TOO_LARGE',
     message: `Projected response (${bytes} bytes) exceeds cap (${cap} bytes)`,
-    details: { projectedBytes: bytes, capBytes: cap, hint, tool: context.tool },
+    details: { projectedBytes: bytes, observedBytes: bytes, capBytes: cap, accounting: 'mcp-result-utf8', hint, tool: context.tool },
   }]);
 }
 

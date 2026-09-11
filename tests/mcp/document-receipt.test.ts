@@ -129,10 +129,10 @@ describe('receipt MCP admission and lifetime', () => {
     const cancelled = await withEngine(ctx, { ...extra, signal: controller.signal }, 'maad_document_receipt', args,
       () => successResponse({ secret: 'content' }));
     expect(parse(cancelled).errors[0].code).toBe('REQUEST_TIMEOUT');
-    vi.stubEnv('MAAD_RESPONSE_MAX_BYTES', '100');
+    vi.stubEnv('MAAD_CONTRACT_RESPONSE_MAX_BYTES', '100');
     const large = await call(() => successResponse({ text: 'x'.repeat(200) }));
     expect(large.errors[0].code).toBe('RESPONSE_TOO_LARGE');
-    vi.stubEnv('MAAD_RESPONSE_MAX_BYTES', '2000000');
+    vi.stubEnv('MAAD_CONTRACT_RESPONSE_MAX_BYTES', '2000000');
     const capped = await call(() => successResponse({ text: 'x'.repeat(1024 * 1024) }));
     expect(capped.errors[0].code).toBe('RESPONSE_TOO_LARGE');
   });

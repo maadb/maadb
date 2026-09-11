@@ -25,6 +25,8 @@ MAADb stores records as markdown files with YAML frontmatter for structured fiel
 
 MAADb works as a context engine for AI agents — a place to hold the information they need to keep working, when that context still needs structure. Records are typed, relationships are queryable through MCP, and the data stays as readable markdown on disk. Common shapes: agent memory, project state, ongoing case files. For high-throughput transactional data or pure semantic retrieval at scale, purpose-built tools serve better.
 
+Guarded-write consumers can use [compact complete contracts and receipt pages](docs/complete-delivery.md), with separate query and contract response budgets.
+
 ## Quick example
 
 A record lives as markdown with a schema-validated YAML header:

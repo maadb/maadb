@@ -10,6 +10,7 @@ import { isSafeProjectRelativePath, isSafeSchemaRef, isWritePathContainedIn } fr
 import { ReceiptError } from '../git/exact-blob.js';
 import type { JsonValue } from './document-receipt-types.js';
 import type { CreateContract } from './guarded-create-types.js';
+import type { ContractPreparationCache } from './contract-preparation-cache.js';
 import type { EngineContext } from './context.js';
 
 const engineVersion = (createRequire(import.meta.url)('../../package.json') as { version: string }).version;
@@ -39,7 +40,7 @@ function effectiveContract(registry: Registry, schemas: SchemaStore): JsonValue 
 }
 
 /** No registry activation, directory creation, index rebuild, or stale fallback. */
-export async function freshCreateContract(ctx: EngineContext, type: string, signal?: AbortSignal): Promise<{
+export async function freshCreateContract(ctx: EngineContext, type: string, signal?: AbortSignal, cache?: ContractPreparationCache): Promise<{
   contract: CreateContract; registry: Registry; schemaStore: SchemaStore;
 }> {
   const sources: Record<string, string> = Object.create(null) as Record<string, string>;
@@ -85,13 +86,7 @@ export async function freshCreateContract(ctx: EngineContext, type: string, sign
     }
     registry.types.set(docType(name), { name: docType(name), path: def.path, idPrefix: def.id_prefix,
       schemaRef: schemaRef(def.schema), template: def.template ?? null });
-    const schema = parseSource(await read(`_schema/${def.schema}.yaml`));
-    // Refuse malformed top-level shapes that the legacy loader tolerates.
-    z.object({ type: z.literal(name), version: z.number().int().positive().optional(),
-      required: z.array(z.string()).optional(), fields: z.record(z.string(), z.object({ type: z.string() }).passthrough()),
-      template: z.object({ headings: z.array(z.object({ level: z.number().int().min(1).max(6),
-        text: z.string(), id: z.string().nullable().optional() }).passthrough()) }).passthrough().optional(),
-    }).passthrough().parse(schema);
+    await read(`_schema/${def.schema}.yaml`);
     if (def.template) await read(def.template);
   }
   if (!registry.types.has(docType(type))) throw new ReceiptError('UNKNOWN_TYPE', 'Unknown contract document type');
@@ -101,9 +96,26 @@ export async function freshCreateContract(ctx: EngineContext, type: string, sign
   // UTF-8 validity. Keep the existing source projection and parser behavior.
   const schemaSources = new Map([...registry.types.values()].map(def =>
     [def.schemaRef, capturedBytes.get(`_schema/${def.schemaRef}.yaml`)!.toString('utf8')] as const));
-  const loaded = await loadSchemasFromSnapshot(registry, schemaSources, { signal, cachedFiles });
+  // Identity includes every captured dependency, not mtime/size or a type-only key.
+  const preparationKey = rawSha256(Buffer.from(canonicalJson([...capturedBytes].map(([file, bytes]) => [file, rawSha256(bytes)]))));
+  let prepared = cache?.get(preparationKey, cachedFiles);
+  if (!prepared) {
+    cache?.clear();
+    for (const [name, def] of entries) {
+      const schema = parseSource(sources[`_schema/${def.schema}.yaml`]!);
+      // Refuse malformed top-level shapes that the legacy loader tolerates.
+      z.object({ type: z.literal(name), version: z.number().int().positive().optional(),
+        required: z.array(z.string()).optional(), fields: z.record(z.string(), z.object({ type: z.string() }).passthrough()),
+        template: z.object({ headings: z.array(z.object({ level: z.number().int().min(1).max(6),
+          text: z.string(), id: z.string().nullable().optional() }).passthrough()) }).passthrough().optional(),
+      }).passthrough().parse(schema);
+    }
+    const loaded = await loadSchemasFromSnapshot(registry, schemaSources, { signal, cachedFiles });
+    if (signal?.aborted) throw new ReceiptError('REQUEST_TIMEOUT', 'Schema snapshot validation cancelled');
+    if (!loaded.ok) throw new ReceiptError('SCHEMA_INVALID', 'Fresh schema validation failed');
+    prepared = loaded.value;
+  }
   if (signal?.aborted) throw new ReceiptError('REQUEST_TIMEOUT', 'Schema snapshot validation cancelled');
-  if (!loaded.ok) throw new ReceiptError('SCHEMA_INVALID', 'Fresh schema validation failed');
   for (const [relative, expected] of Object.entries(sources)) {
     const actual = await readWorkingReceipt(ctx.projectRoot, relative, signal);
     if (!actual.equals(Buffer.from(expected))) throw new ReceiptError('SCHEMA_CONTRACT_CHANGED', 'Schema changed during observation');
@@ -111,11 +123,12 @@ export async function freshCreateContract(ctx: EngineContext, type: string, sign
   const schemaContract: JsonValue = {
     projection: 'create-schema-v1', engineVersion,
     contentProjection: 'document-content-v1',
-    sources, effective: effectiveContract(registry, loaded.value),
+    sources, effective: effectiveContract(registry, prepared),
   };
   const canonical = canonicalJson(schemaContract);
   if (Buffer.byteLength(canonical) > 512 * 1024) throw new ReceiptError('RESPONSE_TOO_LARGE', 'Complete schema contract exceeds bound');
-  return { registry, schemaStore: loaded.value, contract: {
+  cache?.set(preparationKey, prepared);
+  return { registry, schemaStore: prepared, contract: {
     contract: 'create-contract-v1', docType: type, schemaDigest: rawSha256(Buffer.from(canonical)),
     schemaProjection: 'create-schema-v1', contentProjection: 'document-content-v1', schemaContract,
     effectiveHistoryMode: ctx.history?.config.effectiveMode ?? 'feed',

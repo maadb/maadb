@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { deliveryCases } from './contract-delivery-integration.cases.js';
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -176,7 +177,7 @@ describe('guarded MCP schemas, handlers and live admission', () => {
     expect((await call()).errors[0].code).toBe('RATE_LIMITED'); expect(snapshot()).toEqual(before);
   });
   it('caps complete contract responses without truncation', async () => {
-    const before = snapshot(); vi.stubEnv('MAAD_RESPONSE_MAX_BYTES', '100');
+    const before = snapshot(); vi.stubEnv('MAAD_CONTRACT_RESPONSE_MAX_BYTES', '100');
     const result = await call('maad_create_contract', contractArgs);
     expect(result.errors[0].code).toBe('RESPONSE_TOO_LARGE'); expect(snapshot()).toEqual(before);
   });
@@ -192,4 +193,16 @@ describe('guarded MCP schemas, handlers and live admission', () => {
     const receipt = await call('maad_document_receipt', { contract: 'document-persistence-v1', docType: 'note', docId: 'nt-one', expectedContentDigest: args.expectedContentDigest });
     expect(receipt.data.expectedDigestMatch).toBe(true); expect(create).toHaveBeenCalledTimes(1);
   });
+});
+
+describe('bounded complete delivery through MCP', () => deliveryCases(() => ({ root, engine, client, args })));
+
+
+it('cancels queued compact observation without returning a partial delivery', async () => {
+  const release = await hold();
+  vi.stubEnv('MAAD_REQUEST_TIMEOUT_MS', '15');
+  const result = await call('maad_create_contract', { ...contractArgs, delivery: { format: 'compact-json-v1', maxBytes: 8192 } });
+  expect(result.errors[0].code).toBe('REQUEST_TIMEOUT'); expect(result.data).toBeUndefined();
+  await release();
+  await vi.waitFor(() => expect(ctx.pool.refcountFor('one')).toBe(0));
 });
