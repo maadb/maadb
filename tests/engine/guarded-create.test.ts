@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
@@ -11,9 +11,11 @@ import type { EngineContext } from '../../src/engine/context.js';
 import { docId, docType } from '../../src/types.js';
 import type { HistoryRuntime } from '../../src/history/types.js';
 import { GitLayer } from '../../src/git/index.js';
+import { parseMatter } from '../../src/parser/matter.js';
 
 vi.mock('node:fs/promises', async importOriginal => ({ ...await importOriginal<typeof import('node:fs/promises')>() }));
 
+const TEMP_PARENT = realpathSync(tmpdir());
 let root: string;
 let engine: MaadEngine;
 const registry = 'types:\n  note:\n    path: notes\n    id_prefix: nt\n    schema: note.v1\n';
@@ -65,7 +67,7 @@ async function unchanged(req: GuardedCreateRequest, code?: string) {
   return result;
 }
 beforeEach(async () => {
-  root = mkdtempSync(path.join(tmpdir(), 'guarded-engine-'));
+  root = mkdtempSync(path.join(TEMP_PARENT, 'guarded-engine-'));
   mkdirSync(path.join(root, '_registry')); mkdirSync(path.join(root, '_schema'));
   writeFileSync(registryPath(), registry); writeFileSync(schemaPath(), schema);
   git('init'); git('config', 'user.name', 'Test'); git('config', 'user.email', 'noreply');
@@ -75,9 +77,10 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   vi.restoreAllMocks(); await engine?.close();
-  const relative = path.relative(tmpdir(), root);
-  expect(relative && !relative.startsWith('..') && !path.isAbsolute(relative)).toBeTruthy();
-  rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  const resolved = realpathSync(root);
+  expect(path.dirname(resolved)).toBe(TEMP_PARENT);
+  expect(path.basename(resolved)).toMatch(/^guarded-engine-/);
+  rmSync(resolved, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
 describe('guarded create admission', () => {
@@ -226,6 +229,81 @@ describe('guarded create admission', () => {
     expect(receipt.ok && receipt.value.expectedDigestMatch).toBe(true);
     await unchanged(req, 'DUPLICATE_DOC_ID');
   });
+  it.each<{ name: string; fields: GuardedCreateRequest['fields']; lines: string[] }>([
+    {
+      name: 'comma extra',
+      fields: { title: 'Hello', extra: ['a,b'] },
+      lines: ['extra: ["a,b"]'],
+    },
+    {
+      name: 'punctuation paths',
+      fields: {
+        title: 'Hello',
+        tags: ['src/routes/[itemId]/route.ts', 'src/a,b.ts'],
+        extra: ['a,b'],
+        scope_paths: ['src/routes/[itemId]/route.ts', 'src/a,b.ts', 'src/{draft}/route.ts'],
+      },
+      lines: [
+        'tags: ["src/routes/[itemId]/route.ts", "src/a,b.ts"]',
+        'extra: ["a,b"]',
+        'scope_paths: ["src/routes/[itemId]/route.ts", "src/a,b.ts", "src/{draft}/route.ts"]',
+      ],
+    },
+  ])('preserves $name through guarded create, reindex, reopen, and receipts', async ({ fields, lines }) => {
+    const body = '# Flow strings\n\nKeep each path intact.';
+    const req = { ...await request(), fields, body, expectedContentDigest: expected(fields, body) };
+    const frontmatter = { ...fields, doc_id: 'nt-one', doc_type: 'note', schema: 'note.v1' };
+    const raw = ['---', 'doc_id: nt-one', 'doc_type: note', 'schema: note.v1', 'title: Hello',
+      ...lines, '---', '', body, ''].join('\n');
+    const result = await engine.createGuarded(req);
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    if (!result.ok) throw new Error(JSON.stringify(result.errors));
+    expect(result.value.contentDigest).toBe(req.expectedContentDigest);
+    expect(result.value.schemaDigest).toBe(req.expectedSchemaDigest);
+    expect(result.value.writeDurable).toBe(true);
+
+    const verify = async () => {
+      expect(readFileSync(target(), 'utf8')).toBe(raw);
+      expect(parseMatter(raw).data).toStrictEqual(frontmatter);
+      const cold = await engine.getDocument(docId('nt-one'), 'cold');
+      expect(cold.ok).toBe(true);
+      if (!cold.ok) throw new Error(JSON.stringify(cold.errors));
+      expect(cold.value.frontmatter).toStrictEqual(frontmatter);
+      expect(cold.value.body).toBe(body);
+      const receipt = await engine.documentReceipt({ contract: 'document-persistence-v1', docType: 'note',
+        docId: 'nt-one', expectedContentDigest: req.expectedContentDigest }, 'example');
+      expect(receipt.ok, JSON.stringify(receipt)).toBe(true);
+      if (!receipt.ok) throw new Error(JSON.stringify(receipt.errors));
+      expect(receipt.value.status).toBe('committed_content_available');
+      expect(receipt.value.expectedDigestMatch).toBe(true);
+      expect(receipt.value.workingTree).toStrictEqual({ state: 'matches_committed',
+        rawSha256: hash(raw), contentDigest: req.expectedContentDigest });
+      expect(receipt.value.committed?.rawMarkdown).toBe(raw);
+      expect(receipt.value.committed?.rawSha256).toBe(hash(raw));
+      expect(receipt.value.committed?.frontmatter).toStrictEqual(frontmatter);
+      expect(receipt.value.committed?.body).toBe(body);
+      expect(receipt.value.committed?.contentDigest).toBe(req.expectedContentDigest);
+    };
+    await verify();
+    const reindexed = await engine.reindex({ docId: docId('nt-one'), force: true });
+    expect(reindexed.ok).toBe(true);
+    if (!reindexed.ok) throw new Error(JSON.stringify(reindexed.errors));
+    expect(reindexed.value.errors).toStrictEqual([]);
+    expect(reindexed.value.indexed).toBe(1);
+    await verify();
+    await engine.close();
+    engine = new MaadEngine();
+    expect((await engine.init(root, { semantic: false, history: { effectiveMode: 'audit', configuredMode: 'audit', modeSource: 'project', options: {}, advisories: [] } })).ok).toBe(true);
+    expect(await engine.indexAll({ force: true })).toMatchObject({ errors: [] });
+    await verify();
+  });
+
+  it('rejects the original digest after adding a lossless comma item', async () => {
+    const req = await request();
+    // This deliberately retains the old digest; the positive cases recompute it.
+    await unchanged({ ...req, fields: { ...req.fields, extra: ['a,b'] } }, 'CONTENT_DIGEST_MISMATCH');
+  });
+
   it('retains legacy auto IDs and template defaults, while guarded empty body is explicit', async () => {
     writeFileSync(schemaPath(), schema + 'template:\n  headings:\n    - level: 1\n      text: Generated\n');
     const req = await request();
