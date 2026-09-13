@@ -436,7 +436,7 @@ The agent selects the mode, and that choice lands in the audit trail — the eng
 
 Off by default — set `MAAD_SEMANTIC_ENABLE=1`. Embeddings are derived and rebuildable (canonical source stays markdown), generated async-on-write so the deterministic write/commit path is unchanged. The embedding provider is pluggable: inject one from the host, or env-construct (`MAAD_EMBED_PROVIDER=openai`, `MAAD_EMBED_MODEL`, `MAAD_OPENAI_API_KEY`). With no provider, `semantic`/`hybrid` degrade to the lexical leg (flagged in `_meta.degraded`); `exact` always works. After enabling on an existing project, run `maad reindex --embeddings` to build the index. `maad_health.embeddings` reports provider/model/dim, queue depth, embedded vs indexed blocks, and failures.
 
-The vector store is `sqlite-vec` (in the same SQLite file); the lexical leg is FTS5. `exact` needs neither a model nor a key. Scoped requests apply live-document and field filters in SQL before the candidate limit — older in-scope documents stay eligible. See [Retrieval scope](docs/retrieval-scope.md) for candidate budgets, `limitations`, and custom-backend capabilities.
+The vector store is `sqlite-vec` (in the same SQLite file); the lexical leg is FTS5. `exact` needs neither a model nor a key. Scoped lexical requests apply live-document and field filters in SQL before the candidate limit, so older in-scope documents stay eligible. Scoped vector retrieval first takes a bounded global candidate pool, then applies those filters — documents outside that pool can still be missed. See [Retrieval scope](docs/retrieval-scope.md) for candidate budgets, `limitations`, and custom-backend capabilities.
 
 ## Agent boot flow
 
