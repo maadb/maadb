@@ -15,7 +15,8 @@ MAADb stores records as markdown files with YAML frontmatter for structured fiel
 
 - **Markdown is canonical.** Open any record in any text editor — your data is exactly what's on screen, no translation layer.
 - **History policy is explicit.** Choose per-write audit commits, a Git-free feed, zero-write reads, batched commits, or annotated snapshots per project. `maad_history` shows available Git history.
-- **LLM-native.** Ships with 46 MCP tools for discovery, read, write, maintenance, and auth. Designed for agent workflows from the start.
+- **LLM-native.** Ships with 49 MCP tools for discovery, read, write, maintenance, and auth. Designed for agent workflows from the start.
+- **Host-verifiable writes.** Freeze a schema contract, create only when those expectations still hold, and read an exact document receipt. Ordinary `maad_create` remains.
 - **Optional schemas.** Add YAML schemas when you want structure, skip them when you don't. Validation runs on writes, never on old records.
 - **The index is a speed layer.** SQLite stores pointers into your markdown files. Delete it and `maad reindex` rebuilds it from the markdown — your data never depends on the index surviving.
 - **Safe under concurrent writes.** Clean shutdown, lock recovery, rate limiting, retry-safe operations all built in.
@@ -24,8 +25,6 @@ MAADb stores records as markdown files with YAML frontmatter for structured fiel
 ## Where MAADb fits
 
 MAADb works as a context engine for AI agents — a place to hold the information they need to keep working, when that context still needs structure. Records are typed, relationships are queryable through MCP, and the data stays as readable markdown on disk. Common shapes: agent memory, project state, ongoing case files. For high-throughput transactional data or pure semantic retrieval at scale, purpose-built tools serve better.
-
-Guarded-write consumers can use [compact complete contracts and receipt pages](docs/complete-delivery.md), with separate query and contract response budgets.
 
 ## Quick example
 
@@ -86,7 +85,7 @@ Runtime layout, client to storage:
 │  MCP server (one process per instance)                  │
 │    • SessionRegistry  — bind state, effective roles     │
 │    • EnginePool       — one engine per bound project    │
-│    • TokenStore       — HTTP transport only (0.7.0+)    │
+│    • TokenStore       — HTTP transport only             │
 └────────────────────────┬────────────────────────────────┘
                          │
 ┌────────────────────────▼────────────────────────────────┐
@@ -166,7 +165,7 @@ Wire up MCP in your agent (`.mcp.json` in the project directory):
 
 (Or use `node /absolute/path/to/maadb/dist/cli.js ...` if running from a checkout.)
 
-Same shape for Claude Desktop (`claude_desktop_config.json`) and OpenClaw. Any MCP-compatible agent works — stdio is the default, HTTP/SSE is available since 0.5.0.
+Same shape for Claude Desktop (`claude_desktop_config.json`) and OpenClaw. Any MCP-compatible agent works — stdio is the default; HTTP/SSE is available for hosted deployments.
 
 Restart your agent. The agent detects an empty project and enters **Architect mode** to design the schema based on your goal:
 
@@ -322,7 +321,7 @@ rotating a token, discard the old session and initialize a fresh one with the ne
 bearer. A client that previously reused one session across several tokens must now
 open one session per token.
 
-> **Known gap (still present in v0.14.0):** `maad_instance_reload` does not reload `tokens.yaml`.
+> **Known gap (still present in v0.18.0):** `maad_instance_reload` does not reload `tokens.yaml`.
 > On a deployment where SIGHUP is unavailable, a revocation written to
 > `tokens.yaml` by another process is not observed by the running server until it
 > restarts, and sessions bound to the revoked token stay live until then. Prefer
@@ -348,14 +347,21 @@ Deployment guides:
 - [Change feed — polling patterns + cadence](docs/change-feed.md)
 - [History modes — Git policy, flush, recovery, and migration](docs/history-modes.md)
 
+Host contracts:
+
+- [Guarded create](docs/guarded-create.md)
+- [Exact document receipt](docs/document-receipt.md)
+- [Complete contract and receipt delivery](docs/complete-delivery.md)
+- [Retrieval scope](docs/retrieval-scope.md)
+
 ## Access roles
 
 MCP roles control what tools an agent can use. Ceiling set per project in `instance.yaml`; assignment mechanics and three-cap composition detailed in [How roles are assigned](#how-roles-are-assigned).
 
 | Role | Tools | Use case |
 |------|-------|----------|
-| `reader` (default) | scan, summary, describe, get, query, search, related, relationship_paths, schema, aggregate, join, verify, find_orphans, changes_since, semantic_search, history, audit, subscribe, unsubscribe, instructions (check) | Read-only agents, reporting, analysis |
-| `writer` | reader + create, update, validate, bulk_create, bulk_update | Standard agents that read and write records |
+| `reader` (default) | scan, summary, describe, get, query, search, related, relationship_paths, schema, aggregate, join, verify, find_orphans, changes_since, semantic_search, document_receipt, create_contract, history, audit, subscribe, unsubscribe, instructions (check) | Read-only agents, reporting, analysis |
+| `writer` | reader + create, create_guarded, update, validate, bulk_create, bulk_update | Standard agents that read and write records |
 | `admin` | writer + delete, reindex, reload, health, flush, instructions (refresh), backup, bulk_delete, delete_where, purge_soft_deleted, repair_where, instance_reload, subscriptions, issue_token, revoke_token, rotate_token, list_tokens, show_token | Project setup, schema changes, maintenance, cleanup, auth |
 
 ## Project layout
@@ -389,14 +395,14 @@ my-project/
 All tools return `{ ok: true, data: {...} }` or `{ ok: false, errors: [...] }`. Call `maad_schema <type>` for full field definitions before writing.
 
 **Discover:** `maad_scan`, `maad_summary`, `maad_describe`, `maad_schema`
-**Read:** `maad_get`, `maad_query`, `maad_search`, `maad_related`, `maad_relationship_paths`, `maad_aggregate`, `maad_join`, `maad_verify`, `maad_find_orphans`, `maad_changes_since`, `maad_semantic_search`
-**Write:** `maad_create`, `maad_update`, `maad_bulk_create`, `maad_bulk_update`, `maad_validate`
+**Read:** `maad_get`, `maad_query`, `maad_search`, `maad_related`, `maad_relationship_paths`, `maad_aggregate`, `maad_join`, `maad_verify`, `maad_find_orphans`, `maad_changes_since`, `maad_semantic_search`, `maad_document_receipt`, `maad_create_contract`
+**Write:** `maad_create`, `maad_create_guarded`, `maad_update`, `maad_bulk_create`, `maad_bulk_update`, `maad_validate`
 **Maintain:** `maad_delete`, `maad_reindex`, `maad_reload`, `maad_health`, `maad_flush`, `maad_history`, `maad_audit`, `maad_instructions`
-**Recovery anchors (0.7.10+):** `maad_backup` — annotated git tags as snapshot points.
-**Cleanup (0.7.10+ admin, confirm-contract governed):** `maad_bulk_delete`, `maad_delete_where`, `maad_repair_where`, `maad_purge_soft_deleted` — destructive ops are dry-run by default; pass `confirm: true` to mutate. `maxRecords` cap default 100 / ceiling 1000.
-**Live updates (0.6.11+):** `maad_subscribe`, `maad_unsubscribe` — push notifications on durable writes.
+**Backup:** `maad_backup` — annotated git tags as snapshot points.
+**Cleanup (admin, confirm-contract governed):** `maad_bulk_delete`, `maad_delete_where`, `maad_repair_where`, `maad_purge_soft_deleted` — destructive ops are dry-run by default; pass `confirm: true` to mutate. `maxRecords` cap default 100 / ceiling 1000.
+**Live updates:** `maad_subscribe`, `maad_unsubscribe` — push notifications on durable writes.
 **Instance admin:** `maad_instance_reload`, `maad_subscriptions`.
-**Auth admin (0.7.0+):** `maad_issue_token`, `maad_revoke_token`, `maad_rotate_token`, `maad_list_tokens`, `maad_show_token`.
+**Auth admin:** `maad_issue_token`, `maad_revoke_token`, `maad_rotate_token`, `maad_list_tokens`, `maad_show_token`.
 
 ### Relationship retrieval
 
@@ -408,7 +414,17 @@ The versioned response contract and limits are documented in [Evidence-backed re
 
 In multi-project mode, session tools are always available pre-bind: `maad_projects`, `maad_use_project`, `maad_use_projects`, `maad_current_session`.
 
-### Semantic retrieval (0.8.0, opt-in)
+### Contracts, receipts, and guarded writes
+
+Hosts that need to freeze write expectations — rather than relying on ordinary `maad_create` — use three tools:
+
+- **`maad_create_contract`** (reader) — observe the complete schema contract, digest, and effective history mode for a type. Save the approved `schemaDigest`; do not silently adopt a new one.
+- **`maad_create_guarded`** (writer) — admit a document only when the frozen schema digest, history mode, authorization, and expected content still match.
+- **`maad_document_receipt`** (reader) — read one document's exact committed content, canonical digest, and current authorization. Receipts report local Git evidence; consumers must verify intended content.
+
+Large contracts and receipts can be delivered as compact complete pages with a separate response budget. Details: [guarded create](docs/guarded-create.md), [document receipt](docs/document-receipt.md), [complete delivery](docs/complete-delivery.md).
+
+### Semantic retrieval (opt-in)
 
 `maad_semantic_search` adds meaning-based retrieval over record bodies, indexed per block, with a 3-mode dial:
 
@@ -420,45 +436,36 @@ The agent selects the mode, and that choice lands in the audit trail — the eng
 
 Off by default — set `MAAD_SEMANTIC_ENABLE=1`. Embeddings are derived and rebuildable (canonical source stays markdown), generated async-on-write so the deterministic write/commit path is unchanged. The embedding provider is pluggable: inject one from the host, or env-construct (`MAAD_EMBED_PROVIDER=openai`, `MAAD_EMBED_MODEL`, `MAAD_OPENAI_API_KEY`). With no provider, `semantic`/`hybrid` degrade to the lexical leg (flagged in `_meta.degraded`); `exact` always works. After enabling on an existing project, run `maad reindex --embeddings` to build the index. `maad_health.embeddings` reports provider/model/dim, queue depth, embedded vs indexed blocks, and failures.
 
-The vector store is `sqlite-vec` (in the same SQLite file); the lexical leg is FTS5. `exact` needs neither a model nor a key.
+The vector store is `sqlite-vec` (in the same SQLite file); the lexical leg is FTS5. `exact` needs neither a model nor a key. Scoped lexical requests apply live-document and field filters in SQL before the candidate limit, so older in-scope documents stay eligible. Scoped vector retrieval first takes a bounded global candidate pool, then applies those filters — documents outside that pool can still be missed. See [Retrieval scope](docs/retrieval-scope.md) for candidate budgets, `limitations`, and custom-backend capabilities.
 
 ## Agent boot flow
 
 1. Agent reads `MAAD.md` → stable operating instructions
 2. Agent runs `maad_summary` → live project snapshot
 3. If empty project → reads `_skills/architect-core.md`, enters Architect mode
-4. If live project → uses MCP tools for normal operations
+4. If live but unfamiliar → reads `_skills/corpus-explorer.md` to map the corpus
+5. Typed-graph work → `_skills/graph-ontology.md` composes `maad_related`, `maad_relationship_paths`, and `maad_join`
+6. Otherwise → MCP tools for normal operations
 
 ## Current state
 
-**Current:** v0.15.0 — managed graph-ontology and corpus-explorer skills teach agents typed-graph densification and unfamiliar-project mapping using existing MCP primitives (`maad_related`, `maad_relationship_paths`, `maad_join`, …).
-
-See the [v0.15.0 release notes](docs/releases/v0.15.0.md) for highlights, verification, and migration notes.
+**Current:** v0.18.0 — compact complete contracts and receipts, with independent response budgets. Hosts freeze a schema digest, create only when those expectations still hold (`maad_create_guarded`), and verify persisted content with `maad_document_receipt`.
 
 Recent shipped scope:
-- **0.15.0** — Managed `_skills/graph-ontology.md` and `_skills/corpus-explorer.md` (MANAGED_ARTIFACTS 4 → 6)
-- **0.14.0** — Per-project `audit`, `feed`, `read`, `batch`, and `snapshot` history modes; explicit flush; crash recovery; history health telemetry
-- **0.13.0** — Evidence-backed relationship paths with deterministic bounded traversal and canonical edge evidence
-- **0.12.4** — HTTP sessions bound to the authenticated principal that opened them; revoke, rotate, reload, and expiry tear down affected sessions
-- **0.12.3** — Token-store `reload` serialized against in-flight mutations, so a SIGHUP during issue/revoke/rotate cannot drop a just-written token from the in-memory index
-- **0.12.2** — Canonical path containment for `maad_scan`; serialized token-store issue/revoke/rotate
-- **0.12.1** — Escape newlines and carriage returns in double-quoted YAML frontmatter scalars
-- **0.12.0** — Managed-instruction lifecycle (`maad instructions` / `maad_instructions`), schema string constraints (`max_length` / `soft_max_length` / `multiline`), HTTP `/mcp` Origin allowlist
-- **0.11.2** — Bounded HTTP session retention (`MAAD_SESSION_MAX`, default 128)
-- **0.11.1** — Pool-mode recovery for false-empty indexes: `maad_reindex` is the one MCP tool allowed to initialize a guarded project
-- **0.11.0** — Transactional engine lifecycle and literal zero-write read-only mode
-- **0.10.0** — Data-correctness wave: type-faithful YAML lists, soft-delete tombstone isolation, exclusive creation
-- **0.9.0** — Write-identity + filesystem-boundary enforcement
-- **0.8.x** — Semantic retrieval (`maad_semantic_search`), false-empty index guard, index-integrity pass
-- **0.7.x** — Scoped auth & identity, integrity/cleanup primitives, transport and write-path hardening
+- **0.18.0** — Compact complete delivery pages for contracts and receipts
+- **0.17.0** — Versioned guarded document creation (`maad_create_guarded`)
+- **0.16.0** — Exact document receipts (`maad_document_receipt`)
+- **0.15.2** — Scoped search keeps older in-scope evidence; retrieval limitations reported
+- **0.15.0** — Managed `_skills/graph-ontology.md` and `_skills/corpus-explorer.md`
+- **0.14.0** — Per-project `audit`, `feed`, `read`, `batch`, and `snapshot` history modes
 
-See [Version.md](Version.md) for the full release history and forward plan.
+See [Version.md](Version.md) for the full release history. Feature notes for 0.14.0 and 0.15.0 remain in [docs/releases/](docs/releases/).
 
 ## Stack
 
 - TypeScript strict, Node.js 24+ (current Active LTS)
 - 6 production dependencies: `better-sqlite3`, `gray-matter`, `js-yaml`, `simple-git`, `@modelcontextprotocol/sdk`, `pino`. Plus one **optional** dependency `sqlite-vec` (semantic retrieval) — lazily loaded only when `MAAD_SEMANTIC_ENABLE` is on; absent or failed to load ⇒ semantic disabled, engine unaffected
-- 1,274 tests at v0.15.0, Vitest — run on every push/PR across Ubuntu and Windows
+- Vitest suite on every push/PR across Ubuntu and Windows
 - MIT license, pre-1.0, actively developed
 
 ## License
