@@ -1,10 +1,14 @@
 ---
 enabled: true
-current: 0.18.0
+current: 0.18.1
 dev_flow: formal
 ---
 
 # Version History
+
+## 0.18.1 - 2026-09-25
+
+Quote list items that contain YAML flow delimiters, so values with commas or brackets keep their exact contents through create, update and reindex. Update js-yaml, hono, fast-uri and qs to clear published advisories, and bump @types/node.
 
 ## 0.18.0 - 2026-09-11
 
