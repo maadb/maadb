@@ -143,6 +143,11 @@ function serializeArrayItem(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(serializeArrayItem).join(', ')}]`;
 
   if (typeof value === 'string') {
+    // Flow delimiters are unsafe anywhere in a plain sequence item, even
+    // when the same string is safe as a standalone block scalar.
+    if (/[\[\]{},]/.test(value)) {
+      return `"${escapeDoubleQuotedScalar(value)}"`;
+    }
     return serializeField('_', value).slice(3);
   }
 
