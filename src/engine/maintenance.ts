@@ -5,7 +5,7 @@
 import { ok, singleErr, type Result } from '../errors.js';
 import type { DocId } from '../types.js';
 import { validateFrontmatter, codePointLength } from '../schema/index.js';
-import { detectPrecision, isCoarserThan } from '../schema/precision.js';
+import { detectPrecision, isCoarserThan, isFinerThan } from '../schema/precision.js';
 import type { EngineContext } from './context.js';
 import type { ValidationReport } from './types.js';
 import { readFrontmatter } from './helpers.js';
@@ -14,7 +14,8 @@ export interface ValidateOptions {
   /**
    * 0.6.7 — opt in to scanning every date field with a declared
    * store_precision and reporting any historical records whose stored value
-   * is coarser than the contract. Informational; never changes
+   * is coarser than the contract, or finer on fields that set on_finer
+   * (0.19.0). Informational; never changes
    * `valid`/`invalid` counts.
    */
   includePrecision?: boolean;
@@ -152,13 +153,20 @@ function collectPrecisionDrift(
         ? detectPrecision(value)
         : null;
     if (actual === null) continue; // malformed — structural handler's concern
-    if (!isCoarserThan(actual, fieldDef.storePrecision)) continue;
+
+    // 0.19.0 — finer values are reported only for fields that opt in with
+    // on_finer; elsewhere they are accepted by contract, not drift.
+    let direction: 'coarser' | 'finer';
+    if (isCoarserThan(actual, fieldDef.storePrecision)) direction = 'coarser';
+    else if (fieldDef.onFiner !== null && isFinerThan(actual, fieldDef.storePrecision)) direction = 'finer';
+    else continue;
 
     out.push({
       docId,
       field: fieldName,
       declared: fieldDef.storePrecision,
       actual,
+      direction,
     });
   }
   return out;

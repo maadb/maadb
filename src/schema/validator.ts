@@ -12,7 +12,7 @@ import type {
   FieldDefinition,
   FilePath,
 } from '../types.js';
-import { detectPrecision, isCoarserThan } from './precision.js';
+import { detectPrecision, isCoarserThan, isFinerThan } from './precision.js';
 
 /**
  * Validator call mode. Determines whether precision enforcement fires.
@@ -122,7 +122,8 @@ export function validateFrontmatter(
 /**
  * Precision enforcement for a single date field with a declared
  * `storePrecision`. Returns a validator entry (error or warning) when the
- * actual value is coarser than declared; null otherwise.
+ * actual value is coarser than declared, or finer than declared on a field
+ * that sets `onFiner`; null otherwise.
  *
  * - Caller is responsible for the write-mode gate.
  * - Date-object values (rare post-Phase-2 string-preserving parser) are
@@ -150,11 +151,27 @@ function checkPrecision(
       : null;
 
   if (actual === null) return null; // malformed — structural validator handles
-  if (!isCoarserThan(actual, declared)) return null; // at or finer than declared
 
   const message =
     `Value "${value instanceof Date ? value.toISOString() : String(value)}" ` +
     `is ${actual}-precision but schema declares store_precision=${declared}`;
+
+  // 0.19.0 — finer-than-declared is accepted (storage wins) unless the field
+  // opts in with on_finer. With both on_coarser and on_finer set to error,
+  // the field accepts exactly its declared precision.
+  if (isFinerThan(actual, declared)) {
+    if (fieldDef.onFiner === 'error') {
+      return { kind: 'error', entry: { field: fieldName, message, location: loc } };
+    }
+    if (fieldDef.onFiner === 'warn') {
+      return {
+        kind: 'warn',
+        entry: { field: fieldName, message, code: 'PRECISION_FINER_THAN_DECLARED', location: loc },
+      };
+    }
+    return null;
+  }
+  if (!isCoarserThan(actual, declared)) return null; // exactly declared
 
   if (fieldDef.onCoarser === 'error') {
     return {
