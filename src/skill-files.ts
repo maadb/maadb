@@ -123,13 +123,14 @@ fields:
 
 ## Date precision (0.6.7+)
 
-Date fields accept three optional hints that let the schema declare the
+Date fields accept optional hints that let the schema declare the
 precision contract instead of relying on convention:
 
 | Key | Values | Default | Effect |
 |-----|--------|---------|--------|
 | \`store_precision\` | \`year\` / \`month\` / \`day\` / \`hour\` / \`minute\` / \`second\` / \`millisecond\` | unset (lenient) | Minimum precision the engine accepts on write |
 | \`on_coarser\` | \`warn\` / \`error\` | \`warn\` when \`store_precision\` declared | Behavior when a written value is coarser than declared. \`warn\` emits a response \`_meta.warnings[]\` entry; \`error\` rejects the write. |
+| \`on_finer\` (0.19.0+) | \`warn\` / \`error\` | unset — finer values pass | Behavior when a written value is finer than declared, such as a timestamp in a \`day\` field. Requires \`store_precision\`. No truncation: \`error\` rejects the write. |
 | \`display_precision\` | same enum | unset | Consumer-side rendering hint. Engine never enforces. Must be coarser-or-equal to \`store_precision\`. |
 
 ### Example — event timestamp (rich storage, minute-level UI)
@@ -152,12 +153,24 @@ birthday:
   display_precision: day
 \`\`\`
 
+### Example — business date that must not carry a time (exact precision)
+
+\`\`\`yaml
+event_at:
+  type: date
+  store_precision: day
+  on_coarser: error            # reject year-only or month-only writes
+  on_finer: error              # reject "2026-09-24T23:41:07Z"; the writer picks the business day
+\`\`\`
+
 ### Rules
 
-- **Storage wins.** \`store_precision\` is a *minimum*, not an exact match — writing finer than declared always passes. Rule: always capture the richest precision available.
+- **Storage wins by default.** \`store_precision\` is a *minimum* — writing finer than declared passes unless the field sets \`on_finer\`. Rule: capture the richest precision available, except on fields where a finer value would be ambiguous (a business date written as a UTC timestamp can land on the wrong day). The engine never truncates; the writer owns the conversion.
+- **Exact precision.** Set both \`on_coarser: error\` and \`on_finer: error\` to accept only the declared precision.
+- **JS Date values** passed through the programmatic API count as \`millisecond\` precision.
 - **Write-time only.** Precision enforcement fires only on \`maad_create\`, \`maad_update\`, and \`maad_bulk_*\`. Reads, reindex, and \`maad_validate\` (without \`includePrecision\`) never judge historical data.
 - **Update-neighbor safe.** Updating a field that isn't the declared-precision date never fires a warning on the unchanged historical date — schemas can tighten precision without breaking records that predate the contract.
-- **Audit with \`maad_validate includePrecision: true\`** to plan migrations. Returns \`precisionDrift[]\` — informational, never counted as invalid.
+- **Audit with \`maad_validate includePrecision: true\`** to plan migrations. Returns \`precisionDrift[]\` with a \`direction\` of \`coarser\` or \`finer\` (finer only on fields that set \`on_finer\`) — informational, never counted as invalid.
 - Absent keys = pre-0.6.7 lenient behavior. Fully backward compatible.
 
 ## Structural string constraints (0.12.0+)
