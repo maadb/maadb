@@ -55,6 +55,7 @@ The returned `data` is a `complete-json-v1` delivery page:
 
 | Field | Meaning |
 | --- | --- |
+| `delivery` | Always `complete-json-v1` |
 | `encoding` | `shape-json-v1`, the lossless encoding below |
 | `snapshotId` | Opaque identity for this complete observation |
 | `digest` | SHA-256 of canonical JSON of the entire expanded v1 result data |

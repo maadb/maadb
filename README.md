@@ -321,7 +321,7 @@ rotating a token, discard the old session and initialize a fresh one with the ne
 bearer. A client that previously reused one session across several tokens must now
 open one session per token.
 
-> **Known gap (still present in v0.18.0):** `maad_instance_reload` does not reload `tokens.yaml`.
+> **Known gap (still present in v0.18.1):** `maad_instance_reload` does not reload `tokens.yaml`.
 > On a deployment where SIGHUP is unavailable, a revocation written to
 > `tokens.yaml` by another process is not observed by the running server until it
 > restarts, and sessions bound to the revoked token stay live until then. Prefer
@@ -449,9 +449,10 @@ The vector store is `sqlite-vec` (in the same SQLite file); the lexical leg is F
 
 ## Current state
 
-**Current:** v0.18.0 — compact complete contracts and receipts, with independent response budgets. Hosts freeze a schema digest, create only when those expectations still hold (`maad_create_guarded`), and verify persisted content with `maad_document_receipt`.
+**Current:** v0.18.1 — compact complete contracts and receipts, with independent response budgets. Hosts freeze a schema digest, create only when those expectations still hold (`maad_create_guarded`), and verify persisted content with `maad_document_receipt`.
 
 Recent shipped scope:
+- **0.18.1** — List items with commas or brackets round-trip exactly; dependency security updates
 - **0.18.0** — Compact complete delivery pages for contracts and receipts
 - **0.17.0** — Versioned guarded document creation (`maad_create_guarded`)
 - **0.16.0** — Exact document receipts (`maad_document_receipt`)
