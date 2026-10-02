@@ -1,7 +1,8 @@
 # Rich Skills Pack — Managed-Instruction Surface Plan
 
-Status: proposal. Companion to [`README.md`](README.md) and
-[`architecture.md`](architecture.md).
+Status: **implemented in 0.15.0 — design archive.** Both skills were promoted
+into `MANAGED_ARTIFACTS` (`src/instructions/manifest.ts`). Companion to
+[`README.md`](README.md) and [`architecture.md`](architecture.md).
 
 **Audience:** the maintainer deciding whether to promote the two skill drafts
 into `MANAGED_ARTIFACTS`, and whoever implements that promotion later.

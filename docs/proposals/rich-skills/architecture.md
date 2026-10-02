@@ -1,8 +1,10 @@
 # Rich Skills Pack — Architecture and Placement
 
-Status: proposal. Companion to [`README.md`](README.md). Decides **where each
-skill lives** and what that placement costs, using the three placement tiers
-already implied by the engine's design.
+Status: **design archive.** The managed skills it placed shipped in 0.15.0;
+runtime source of truth is `src/skills/` and `src/instructions/manifest.ts`.
+Companion to [`README.md`](README.md). Decides **where each skill lives** and
+what that placement costs, using the three placement tiers already implied by
+the engine's design.
 
 ## The three placement tiers
 

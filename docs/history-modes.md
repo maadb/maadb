@@ -23,6 +23,12 @@ already initialized, readable project with the registry, schemas, Markdown,
 and index needed to serve reads. Initialize or repair the project under a
 write-enabled mode before switching it to `read`.
 
+The effective mode also affects the host contracts. `maad_create_contract`
+reports it, `maad_create_guarded` rejects with `HISTORY_MODE_MISMATCH` when it
+is not in the caller's `allowedHistoryModes`, and `maad_document_receipt`
+returns `history_unavailable` under `feed`. See [Guarded create](guarded-create.md)
+and [Exact document receipt](document-receipt.md).
+
 ## Configuration
 
 Set the mode on each project in `instance.yaml`:
@@ -55,7 +61,7 @@ Valid modes are `audit`, `feed`, `read`, `batch`, and `snapshot`.
 
 Both values must be positive integers. If both are present, the first boundary
 reached starts the flush. If neither is present, use an explicit flush; pending
-writes are also handled by shutdown and startup recovery. In v0.14.0 the
+writes are also handled by shutdown and startup recovery. The
 options are still validated when supplied with `audit`, `feed`, or `read`, but
 those modes do not use them. Omit the options for those modes so the
 configuration communicates its actual policy.

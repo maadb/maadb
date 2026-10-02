@@ -76,19 +76,32 @@ Single deterministic pass. One input, one output. No composition, no judgment.
 | `aggregate` | Group by field + optional metric (count/sum/avg/min/max) |
 | `join` | Query + follow refs + project fields from both sides |
 | `verify` | Fact-check a field value or document count — grounded/not-grounded + source |
-| `create` | Write new record + index + git commit |
-| `update` | Modify record + reindex + git commit (frontmatter guarded) |
-| `delete` | Remove record (soft/hard) + git commit |
-| `bulk_create` | Create multiple records + single git commit + read-back verification |
-| `bulk_update` | Update multiple records + single git commit + read-back verification |
-| `validate` | Check record(s) against schema |
+| `find_orphans` | Records whose ref fields point at document IDs missing from the index |
+| `semantic_search` | Block-level retrieval: `exact` (BM25), `semantic` (vector), or `hybrid` (RRF) |
+| `create_contract` | Complete schema contract + digest + effective history mode for a type |
+| `document_receipt` | One document's exact committed content, canonical digest, and current authorization |
+| `create` | Write new record + index + record history per the project's history mode |
+| `create_guarded` | `create`, admitted only if the frozen schema digest, history mode, authorization, and expected content still match |
+| `update` | Modify record + reindex + record history (frontmatter guarded) |
+| `delete` | Remove record (soft/hard) + record history |
+| `bulk_create` | Create multiple records + one history entry + read-back verification |
+| `bulk_update` | Update multiple records + one history entry + read-back verification |
+| `bulk_delete` / `delete_where` | Destructive deletes by ID list or filter — dry-run unless `confirm: true` |
+| `repair_where` | Repair records matching a filter (prune orphan refs, fix schema drift) — dry-run unless `confirm: true` |
+| `purge_soft_deleted` | Permanently remove soft-deleted records past the retention threshold — dry-run unless `confirm: true` |
+| `validate` | Check record(s) against schema; optional precision and constraint audits |
 | `reindex` | Rebuild index from markdown |
 | `reload` | Reload registry + schemas without restart |
-| `health` | Engine status, recovery actions, provenance mode |
+| `health` | Engine status, recovery actions, provenance, history, sessions, and runtime state |
+| `flush` | Commit pending `batch` / `snapshot` history now |
+| `backup` | Annotated Git tag as a snapshot point |
+| `instructions` | Check (any role) or refresh (admin) the managed `MAAD.md` and `_skills/` files |
 | `parse` | Parse one file, return structure |
 | `history` | Git log for one document |
 | `audit` | Git log for project (date-inclusive) |
-| `changes_since` | Opaque-cursor delta feed — records modified since a cursor point, ordered on `(updated_at, doc_id)` |
+| `changes_since` | Opaque-cursor delta feed — records modified since a cursor point, ordered on `(updatedAt, docId)` |
+
+"Record history" depends on the project's history mode (0.14.0+): `audit` commits every write, `batch` and `snapshot` defer commits until a threshold or `flush`, `feed` never commits, and `read` rejects writes with `PROJECT_READ_ONLY`. See [History modes](history-modes.md).
 
 ### Tier 2 — Deterministic Composite
 

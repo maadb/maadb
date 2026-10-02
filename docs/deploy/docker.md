@@ -14,35 +14,29 @@ Reference guide for running `maad serve --transport http` in a container behind 
 maad-deploy/
   compose.yaml
   Dockerfile                 # build from the maadb source tree, or pull npm
-  instance.yaml              # mounted read-only
-  data/                      # project directories — mounted read-write
+  data/                      # mounted read-write at /data
+    instance.yaml            # instance declaration
+    _auth/tokens.yaml        # token registry (created by `auth issue-token`)
     proj-a/
     proj-b/
-  secrets/
-    maad_auth_token          # docker secret, chmod 600
   letsencrypt/               # traefik ACME persistence
 ```
 
-## 1. Generate a bearer token
+The token registry lives next to `instance.yaml`, at `<instance-root>/_auth/tokens.yaml`. Keep `data/` out of git and readable only by the deploy user.
+
+## 1. Issue a bearer token
+
+HTTP transport requires `_auth/tokens.yaml` with at least one active token; the server refuses to start without it (`TOKENS_FILE_MISSING` / `TOKENS_FILE_EMPTY`). Build the image (step 2) first, then issue a token with a one-shot container that shares the data volume:
 
 ```bash
-mkdir -p secrets
-openssl rand -base64 48 | tr -d '=' | tr '+/' '-_' > secrets/maad_auth_token
-chmod 600 secrets/maad_auth_token
+docker compose run --rm maad node dist/cli.js --instance /data/instance.yaml \
+  auth issue-token --role=admin --name='primary-gateway' --projects='*' --agent=gateway-agent
+# → maad_pat_<32hex> on stdout, printed once. The registry stores only its SHA-256 hash.
 ```
 
-Never put the token in `compose.yaml` or in an env file checked into git. Docker secrets mount the file at `/run/secrets/<name>` inside the container with correct permissions.
+Give the plaintext to the client as its `Authorization: Bearer <token>` header. The server itself holds no secret: don't set `MAAD_AUTH_TOKEN` on the server. That variable belonged to the single-bearer mode removed in 0.7.0, and setting it without a registry fails boot with `LEGACY_BEARER_REMOVED`.
 
-**0.7.0+:** HTTP transport requires `_auth/tokens.yaml` (in the instance root) with at least one active token. Legacy single-bearer mode was hard-removed in 0.7.0 — generate tokens via `maad auth issue-token` after the container is built but before first start. Example:
-
-```bash
-# Inside the container (or from a one-shot admin container sharing the volume):
-node /opt/maad/dist/cli.js --instance /mnt/brains/instance.yaml auth issue-token \
-  --role=admin --name='primary-gateway' --projects='*' --agent=gateway-agent
-# Plaintext printed once; store it as the client's bearer.
-```
-
-Hot-reload on tokens.yaml edits: `docker compose kill -s SIGHUP maad` (SIGHUP reloads both instance.yaml and tokens.yaml in-place without restart).
+Apply token changes with `docker compose kill -s SIGHUP maad`. SIGHUP reloads both `instance.yaml` and `tokens.yaml` in place, without a restart.
 
 ## 2. Dockerfile
 
@@ -50,14 +44,14 @@ Multi-stage build — install + build in a heavier image, copy only runtime arti
 
 ```dockerfile
 # Dockerfile
-FROM node:22-bookworm-slim AS build
+FROM node:24-bookworm-slim AS build
 WORKDIR /src
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
 RUN npm run build && npm prune --omit=dev
 
-FROM node:22-bookworm-slim AS runtime
+FROM node:24-bookworm-slim AS runtime
 RUN apt-get update \
  && apt-get install -y --no-install-recommends git ca-certificates tini \
  && rm -rf /var/lib/apt/lists/*
@@ -82,10 +76,11 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:7733/healthz').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
 ```
 
-Build:
+The repository does not ship a Dockerfile; this one is a reference. Build it from a checkout of the release tag you want to run:
 
 ```bash
-docker build -t maadb:0.12.3 .
+git checkout v0.18.1
+docker build -t maadb:0.18.1 .
 ```
 
 ## 3. Compose stack with traefik
@@ -114,7 +109,7 @@ services:
       - ./letsencrypt:/letsencrypt
 
   maad:
-    image: maadb:0.12.3
+    image: maadb:0.18.1
     restart: unless-stopped
     environment:
       MAAD_TRANSPORT: http
@@ -130,16 +125,9 @@ services:
       # page calls /mcp directly; non-browser clients send no Origin and pass
       MAAD_LOG_LEVEL: info
       MAAD_AUDIT_PATH: /data/logs/audit.log
-    # Docker secrets materialize at /run/secrets/<name>. Read the token from
-    # that file via MAAD_AUTH_TOKEN_FILE-style pattern, or shell-wrap to export
-    # it. Example below uses a small entrypoint wrapper.
-    secrets:
-      - maad_auth_token
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - 'export MAAD_AUTH_TOKEN="$(cat /run/secrets/maad_auth_token)" && exec /usr/bin/tini -- node dist/cli.js serve'
+    # No secret on the server: clients present bearers, and the engine checks
+    # them against /data/_auth/tokens.yaml.
     volumes:
-      - ./instance.yaml:/data/instance.yaml:ro
       - ./data:/data
     labels:
       - traefik.enable=true
@@ -159,10 +147,6 @@ services:
       timeout: 5s
       start_period: 10s
       retries: 3
-
-secrets:
-  maad_auth_token:
-    file: ./secrets/maad_auth_token
 ```
 
 Start:
@@ -175,7 +159,7 @@ docker compose logs -f maad
 ## 4. Smoke test
 
 ```bash
-TOKEN=$(cat secrets/maad_auth_token)
+TOKEN='<plaintext from auth issue-token>'
 
 # Liveness — no auth required
 curl -fsS https://maad.example.com/healthz
@@ -228,11 +212,11 @@ Added projects register lazily (first tool call on the new project boots its eng
 
 ## 7. Rotating the token
 
-Prefer registry rotation (no container recreate). Issue returns new plaintext once; the old secret stops authenticating after reload:
+Rotation needs no container recreate. It returns the new plaintext once; the old token stops authenticating after the reload:
 
 ```bash
-# From a one-shot admin container sharing the instance volume, or the built image:
-node /opt/maad/dist/cli.js --instance /data/instance.yaml auth rotate-token --id=tok-<id>
+docker compose run --rm maad node dist/cli.js --instance /data/instance.yaml \
+  auth rotate-token --id=tok-<id>
 docker compose kill -s SIGHUP maad
 ```
 
@@ -240,7 +224,7 @@ Distribute the new plaintext to clients out-of-band. Revoke at end-of-life with 
 
 **The SIGHUP is what applies the change.** From 0.12.4, the reload also closes every live HTTP session bound to the rotated or revoked token, terminating its SSE stream; those clients get `SESSION_NOT_FOUND` and must `initialize` again with the new bearer. Until the SIGHUP lands, the old secret keeps authenticating and its sessions stay live — `maad_instance_reload` is not a substitute here, because it does not reload `tokens.yaml`.
 
-If you also keep a Docker secret file for a client process, update that file and recreate only the client — the engine itself authenticates against `_auth/tokens.yaml`, not the secret file.
+If a client process keeps its bearer in a Docker secret, update that secret and recreate only the client. The engine authenticates against `_auth/tokens.yaml`, not against client secrets.
 
 ## Multi-tenant hosting with X-Maad-Pin-Project (0.6.8+)
 
@@ -288,10 +272,10 @@ If you run with `MAAD_PROJECT` instead of `MAAD_INSTANCE`, the engine logs `pin_
 
 ## Gotchas
 
-- **Token required at boot.** `--transport http` without `MAAD_AUTH_TOKEN` fails with `AUTH_TOKEN_REQUIRED`. Don't forget the `export` line in the entrypoint wrapper.
+- **Token registry required at boot.** `--transport http` without `_auth/tokens.yaml` fails with `TOKENS_FILE_MISSING`; a registry with no active token fails with `TOKENS_FILE_EMPTY`. Issue a token (step 1) before the first `docker compose up`.
 - **Bind host inside the container.** `MAAD_HTTP_HOST=0.0.0.0` is correct here — the container's network namespace is isolated and traefik is the only ingress. The loopback-only warning doesn't apply behind Docker's userland networking.
 - **SSE and proxy buffering.** Traefik doesn't buffer response bodies by default, but some orchestrators insert a second proxy. If `tools/list` hangs after `initialize` returns, look for buffering in the ingress chain. The `flushinterval=100ms` label above helps.
 - **Git inside the container.** The engine needs git for its audit trail — the Dockerfile installs git in the runtime image. Bind-mounted project dirs must include `.git/`. First boot on an empty dir will `git init` automatically.
-- **tini as PID 1.** Without it, `docker stop` sends SIGTERM to node but node may not propagate it through the shell wrapper. tini makes the drain → exit cycle reliable.
+- **tini as PID 1.** Node as PID 1 doesn't get default signal handling, so `docker stop` may not trigger a clean drain. tini forwards SIGTERM and makes the drain → exit cycle reliable.
 - **Non-root UID mapping.** The image runs as UID 10001. If your host project directories are owned by a different UID, either chown them or adjust the `maad` user in the Dockerfile before building.
 - **HEALTHCHECK during drain.** `/healthz` returns 503 `SHUTTING_DOWN` while draining — orchestrators will mark the container unhealthy and stop routing traffic to it during restart. That's intentional.
