@@ -294,9 +294,11 @@ export class SqliteBackend implements MaadBackend {
 
   // --- Read operations -----------------------------------------------------
 
-  getDocument(docId: DocId): DocumentRecord | null {
+  getDocument(docId: DocId, opts?: { includeDeleted?: boolean | undefined }): DocumentRecord | null {
     const row = this.db.prepare(
-      'SELECT * FROM documents WHERE doc_id = ? AND deleted = 0',
+      opts?.includeDeleted
+        ? 'SELECT * FROM documents WHERE doc_id = ?'
+        : 'SELECT * FROM documents WHERE doc_id = ? AND deleted = 0',
     ).get(docId as string) as RawDocRow | undefined;
 
     return row ? rowToDocument(row) : null;
@@ -674,6 +676,20 @@ export class SqliteBackend implements MaadBackend {
     ).all(dt as string, limit) as Array<{ doc_id: string }>;
 
     return rows.map(r => toDocId(r.doc_id));
+  }
+
+  listDocIdsByPrefix(prefix: string): DocId[] {
+    // Range walk on the doc_id primary-key index. IDs sharing a prefix are
+    // contiguous in BINARY order, so the walk stops at the first non-match:
+    // O(log n + matches), with no cap and no doc_type or deleted filter.
+    const ids: DocId[] = [];
+    const rows = this.db.prepare('SELECT doc_id FROM documents WHERE doc_id >= ? ORDER BY doc_id')
+      .iterate(prefix) as IterableIterator<{ doc_id: string }>;
+    for (const row of rows) {
+      if (!row.doc_id.startsWith(prefix)) break;
+      ids.push(toDocId(row.doc_id));
+    }
+    return ids;
   }
 
   listChangesSince(opts: {

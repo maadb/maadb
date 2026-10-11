@@ -52,10 +52,12 @@ export function prepareCreateDocument(
   const schema = ctx.schemaStore.getSchemaForType(dt);
   if (!schema) return singleErr('SCHEMA_NOT_FOUND', `No schema for type "${dt as string}"`);
 
-  // Sampling existing IDs is only needed for the sequence strategy; explicit
-  // IDs and usable name/title slugs never consult it.
+  // Sequence allocation scans every indexed ID under the year prefix — other
+  // doc_types sharing the prefix and soft-deleted tombstones included — so no
+  // retired or foreign ID is reissued. Explicit IDs and usable name/title
+  // slugs never consult it.
   const id = customDocId ?? generateDocId(regType.idPrefix, fields,
-    () => ctx.backend.getSampleDocIds(dt, 10000).map(existing => existing as string));
+    seqPrefix => ctx.backend.listDocIdsByPrefix(seqPrefix).map(existing => existing as string));
 
   // 0.7.6 — reject hostile docIds at the boundary. Only
   // customDocId can carry attacker-controlled content; auto-generated IDs are
@@ -70,8 +72,13 @@ export function prepareCreateDocument(
     );
   }
 
-  if (ctx.backend.getDocument(toDocId(id))) {
-    return singleErr('DUPLICATE_DOC_ID', `Document "${id}" already exists`);
+  // Tombstones count: upserting over a soft-deleted row would orphan its
+  // `_deleted_` file and drop the record before purge.
+  const occupied = ctx.backend.getDocument(toDocId(id), { includeDeleted: true });
+  if (occupied) {
+    return singleErr('DUPLICATE_DOC_ID', occupied.deleted
+      ? `Document "${id}" already exists as a soft-deleted record`
+      : `Document "${id}" already exists`);
   }
 
   const frontmatter: Record<string, unknown> = {
@@ -573,10 +580,11 @@ export async function bulkCreate(
       continue;
     }
 
-    // Lazy: explicit IDs and slugs skip the scan. Sequence IDs still re-sample
-    // per record (plus this batch's successes) so allocation is unchanged.
-    const id = rec.docId ?? generateDocId(regType.idPrefix, rec.fields, () => [
-      ...ctx.backend.getSampleDocIds(dt, 10000).map(existing => existing as string),
+    // Lazy: explicit IDs and slugs skip the scan. Sequence IDs re-scan the
+    // complete prefix range per record (plus this batch's successes), exactly
+    // as createDocument does.
+    const id = rec.docId ?? generateDocId(regType.idPrefix, rec.fields, seqPrefix => [
+      ...ctx.backend.listDocIdsByPrefix(seqPrefix).map(existing => existing as string),
       ...succeeded.map(s => s.docId),
     ]);
 
@@ -587,8 +595,12 @@ export async function bulkCreate(
       continue;
     }
 
-    if (ctx.backend.getDocument(toDocId(id))) {
-      failed.push({ index: i, docId: id, error: `Document "${id}" already exists` });
+    const occupied = ctx.backend.getDocument(toDocId(id), { includeDeleted: true });
+    if (occupied) {
+      const error = occupied.deleted
+        ? `Document "${id}" already exists as a soft-deleted record`
+        : `Document "${id}" already exists`;
+      failed.push({ index: i, docId: id, error });
       continue;
     }
 
