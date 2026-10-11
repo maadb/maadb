@@ -52,8 +52,10 @@ export function prepareCreateDocument(
   const schema = ctx.schemaStore.getSchemaForType(dt);
   if (!schema) return singleErr('SCHEMA_NOT_FOUND', `No schema for type "${dt as string}"`);
 
-  const existingIds = ctx.backend.getSampleDocIds(dt, 10000).map(id => id as string);
-  const id = customDocId ?? generateDocId(regType.idPrefix, fields, existingIds);
+  // Sampling existing IDs is only needed for the sequence strategy; explicit
+  // IDs and usable name/title slugs never consult it.
+  const id = customDocId ?? generateDocId(regType.idPrefix, fields,
+    () => ctx.backend.getSampleDocIds(dt, 10000).map(existing => existing as string));
 
   // 0.7.6 — reject hostile docIds at the boundary. Only
   // customDocId can carry attacker-controlled content; auto-generated IDs are
@@ -571,11 +573,12 @@ export async function bulkCreate(
       continue;
     }
 
-    const existingIds = [
-      ...ctx.backend.getSampleDocIds(dt, 10000).map(id => id as string),
+    // Lazy: explicit IDs and slugs skip the scan. Sequence IDs still re-sample
+    // per record (plus this batch's successes) so allocation is unchanged.
+    const id = rec.docId ?? generateDocId(regType.idPrefix, rec.fields, () => [
+      ...ctx.backend.getSampleDocIds(dt, 10000).map(existing => existing as string),
       ...succeeded.map(s => s.docId),
-    ];
-    const id = rec.docId ?? generateDocId(regType.idPrefix, rec.fields, existingIds);
+    ]);
 
     // 0.7.6 — same boundary check as createDocument.
     const idRejection = checkDocIdSafe(id);
