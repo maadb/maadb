@@ -1,8 +1,9 @@
-import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
 import path from 'node:path';
 import { existsSync, rmSync, cpSync } from 'node:fs';
 import { MaadEngine } from '../../src/engine.js';
 import { docId, docType } from '../../src/types.js';
+import { SqliteBackend } from '../../src/backend/sqlite/index.js';
 
 // Use a temp copy of the fixture to avoid mutating it
 const FIXTURE_SRC = path.resolve(__dirname, '../fixtures/simple-crm');
@@ -360,5 +361,127 @@ describe('bulkUpdate', () => {
     expect(result.value.succeeded).toHaveLength(1);
     expect(result.value.failed).toHaveLength(1);
     expect(result.value.failed[0]!.error).toContain('not found');
+  });
+});
+
+describe('lazy ID sampling', () => {
+  const year = new Date().getFullYear();
+  const notePattern = new RegExp(`^note-${year}-\\d{3}$`);
+  const seqOf = (id: string): number => parseInt(id.slice(`note-${year}-`.length), 10);
+  const noteFields = { case: 'cas-2026-001', author: 'tester', noted_at: '2026-10-11' };
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('createDocument skips sampling for explicit IDs and usable slugs', async () => {
+    const sample = vi.spyOn(SqliteBackend.prototype, 'getSampleDocIds');
+
+    const explicit = await engine.createDocument(
+      docType('client'), { name: 'Lazy Explicit', status: 'active' }, undefined, 'cli-lazy-explicit',
+    );
+    expect(explicit.ok).toBe(true);
+    if (!explicit.ok) return;
+    expect(explicit.value.docId).toBe('cli-lazy-explicit');
+
+    const slug = await engine.createDocument(docType('client'), { name: 'Lazy Slug Co', status: 'active' });
+    expect(slug.ok).toBe(true);
+    if (!slug.ok) return;
+    expect(slug.value.docId).toBe('cli-lazy-slug-co');
+
+    expect(sample).not.toHaveBeenCalled();
+  });
+
+  it('duplicate explicit and slug IDs still fail with DUPLICATE_DOC_ID without sampling', async () => {
+    const sample = vi.spyOn(SqliteBackend.prototype, 'getSampleDocIds');
+
+    const explicit = await engine.createDocument(
+      docType('client'), { name: 'Someone Else', status: 'active' }, undefined, 'cli-acme',
+    );
+    expect(explicit.ok).toBe(false);
+    if (explicit.ok) return;
+    expect(explicit.errors[0]!.code).toBe('DUPLICATE_DOC_ID');
+
+    const slug = await engine.createDocument(docType('client'), { name: 'Acme', status: 'active' });
+    expect(slug.ok).toBe(false);
+    if (slug.ok) return;
+    expect(slug.errors[0]!.code).toBe('DUPLICATE_DOC_ID');
+
+    expect(sample).not.toHaveBeenCalled();
+  });
+
+  it('createDocument samples once per sequence ID and honours explicit sequence-shaped IDs', async () => {
+    const sample = vi.spyOn(SqliteBackend.prototype, 'getSampleDocIds');
+
+    const explicit = await engine.createDocument(docType('case_note'), noteFields, 'explicit', `note-${year}-900`);
+    expect(explicit.ok).toBe(true);
+    expect(sample).not.toHaveBeenCalled();
+
+    const next = await engine.createDocument(docType('case_note'), noteFields, 'sequence');
+    expect(next.ok).toBe(true);
+    if (!next.ok) return;
+    expect(next.value.docId).toBe(`note-${year}-901`);
+    expect(sample).toHaveBeenCalledTimes(1);
+    expect(sample).toHaveBeenCalledWith(docType('case_note'), 10000);
+  });
+
+  it('bulkCreate samples only for sequence records and preserves mixed allocation', async () => {
+    const sample = vi.spyOn(SqliteBackend.prototype, 'getSampleDocIds');
+
+    const result = await engine.bulkCreate([
+      { docType: 'client', fields: { name: 'Bulk Lazy Explicit', status: 'active' }, docId: 'cli-bulk-lazy-explicit' },
+      { docType: 'client', fields: { name: 'Bulk Lazy Slug', status: 'active' } },
+      { docType: 'nonexistent', fields: { name: 'Bad Type' } },
+      { docType: 'case_note', fields: noteFields, body: 'bulk a' },
+      { docType: 'client', fields: { name: 'Dup', status: 'active' }, docId: 'cli-acme' },
+      { docType: 'case_note', fields: { case: 'cas-2026-001', noted_at: '2026-10-11' }, body: 'missing author' },
+      { docType: 'case_note', fields: noteFields, body: 'bulk b' },
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const { succeeded, failed } = result.value;
+    expect(succeeded.map(s => s.index)).toEqual([0, 1, 3, 6]);
+    expect(failed.map(f => f.index)).toEqual([2, 4, 5]);
+    expect(succeeded[0]!.docId).toBe('cli-bulk-lazy-explicit');
+    expect(succeeded[1]!.docId).toBe('cli-bulk-lazy-slug');
+    expect(failed[1]!.error).toContain('already exists');
+
+    const noteA = succeeded[2]!.docId;
+    const noteB = succeeded[3]!.docId;
+    expect(noteA).toMatch(notePattern);
+    expect(seqOf(noteB)).toBe(seqOf(noteA) + 1);
+    // The invalid sequence record was offered the next ID but did not consume it.
+    expect(failed[2]!.docId).toBe(noteB);
+
+    // Only the three sequence-strategy records sample; explicit, slug and
+    // rejected-type records do not.
+    expect(sample).toHaveBeenCalledTimes(3);
+  });
+
+  it('bulkCreate preserves earlier explicit IDs across types sharing a prefix', async () => {
+    const registry = engine.getRegistry();
+    const contactType = docType('contact');
+    const original = registry.types.get(contactType);
+    if (!original) throw new Error('Missing contact fixture registration');
+    registry.types.set(contactType, { ...original, idPrefix: 'note' });
+    const sample = vi.spyOn(SqliteBackend.prototype, 'getSampleDocIds');
+    try {
+      const result = await engine.bulkCreate([
+        { docType: 'contact', fields: { name: 'Explicit shared prefix' }, docId: `note-${year}-950` },
+        { docType: 'case_note', fields: noteFields },
+        { docType: 'contact', fields: { name: '!!!' } },
+      ]);
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.failed).toEqual([]);
+      expect(result.value.succeeded.map(s => s.docId)).toEqual([
+        `note-${year}-950`, `note-${year}-951`, `note-${year}-952`,
+      ]);
+      expect(sample).toHaveBeenCalledTimes(2);
+      expect(sample).toHaveBeenNthCalledWith(1, docType('case_note'), 10000);
+      expect(sample).toHaveBeenNthCalledWith(2, contactType, 10000);
+    } finally {
+      registry.types.set(contactType, original);
+    }
   });
 });
