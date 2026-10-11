@@ -1,10 +1,14 @@
 ---
 enabled: true
-current: 0.18.1
+current: 0.18.2
 dev_flow: formal
 ---
 
 # Version History
+
+## 0.18.2 - 2026-10-11
+
+Avoid unnecessary existing-ID scans when creating documents with explicit IDs or usable name/title slugs, including bulk creates. Sequential ID allocation and duplicate checks remain unchanged.
 
 ## 0.18.1 - 2026-09-25
 
