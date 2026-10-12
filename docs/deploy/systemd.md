@@ -16,6 +16,7 @@ Reference guide for running `maad serve --transport http` under systemd behind a
 /opt/maad/
   maadb/                 # built engine (git clone or npm install)
   instance.yaml          # multi-project declaration, or use --project
+  _auth/tokens.yaml      # token registry (created by `auth issue-token`)
   data/                  # your project directories
     proj-a/
     proj-b/
@@ -35,18 +36,18 @@ sudo chown -R maad:maad /opt/maad /var/log/maad
 sudo chown root:maad /etc/maad && sudo chmod 750 /etc/maad
 ```
 
-## 2. Generate a bearer token
+## 2. Issue a bearer token
 
-**0.7.0+:** HTTP transport requires `_auth/tokens.yaml` (in the instance root) with at least one active token. Legacy single-bearer mode (`MAAD_AUTH_TOKEN` as a shared secret) was hard-removed in 0.7.0 — see [`docs/archive/0.7.0-scoped-auth.md`](../archive/0.7.0-scoped-auth.md) for the design archive.
+HTTP transport requires `_auth/tokens.yaml` in the instance root (the directory holding `instance.yaml`) with at least one active token. The server refuses to start without it (`TOKENS_FILE_MISSING` / `TOKENS_FILE_EMPTY`). The 0.7.0 design is archived in [`docs/archive/0.7.0-scoped-auth.md`](../archive/0.7.0-scoped-auth.md).
 
-Issue a bearer from the build host using the CLI. Plaintext is returned ONCE; the server persists only the SHA-256 hash.
+Issue a bearer with the CLI. The plaintext is printed once; the registry stores only its SHA-256 hash.
 
 ```bash
-node /opt/maad/maadb/dist/cli.js --instance /opt/maad/instance.yaml auth issue-token \
+sudo -u maad node /opt/maad/maadb/dist/cli.js --instance /opt/maad/instance.yaml auth issue-token \
   --role=admin --name='primary-gateway' --projects='*' --agent=gateway-agent
 ```
 
-Output on stdout is the plaintext `maad_pat_<32hex>`. Capture it; store it securely on the client side (e.g. another env var in a gateway's deployment). Set it as the client's `Authorization: Bearer <plaintext>` header — or, if the client is itself a MAADb engine connecting to another, set its `MAAD_AUTH_TOKEN` env var to the plaintext. The env key stays the same; it's still a bearer — just validated against the registry now.
+Output on stdout is the plaintext `maad_pat_<32hex>`. Store it securely on the client side and send it as the client's `Authorization: Bearer <plaintext>` header. The server holds no secret of its own.
 
 Rotate without losing the slot via `maad auth rotate-token --id=tok-<id>` (returns new plaintext, revokes old). Revoke at end-of-life via `maad auth revoke-token --id=tok-<id>`. List active tokens via `maad auth list-tokens`.
 
@@ -63,11 +64,9 @@ MAAD_HTTP_HOST=127.0.0.1
 MAAD_HTTP_PORT=7733
 MAAD_INSTANCE=/opt/maad/instance.yaml
 
-# 0.7.0+ — MAAD_AUTH_TOKEN is only set on CLIENTS (e.g. a gateway) as the
-# plaintext bearer they present. The server's tokens.yaml at
-# <instance-root>/_auth/tokens.yaml is the source of truth. If the server
-# sees MAAD_AUTH_TOKEN set without a companion tokens.yaml it refuses to
-# start with LEGACY_BEARER_REMOVED (hard-removed in 0.7.0).
+# Do not set MAAD_AUTH_TOKEN here. Bearers are checked against
+# <instance-root>/_auth/tokens.yaml; MAAD_AUTH_TOKEN without that registry
+# fails boot with LEGACY_BEARER_REMOVED (single-bearer mode, removed in 0.7.0).
 # MAAD_COMMIT_IDENTITY=true (default) appends role/token/agent lines to git
 # commit messages; set to "false" to opt out.
 
@@ -91,12 +90,14 @@ MAAD_LOG_LEVEL=info
 MAAD_AUDIT_PATH=/var/log/maad/audit.log
 ```
 
-Permissions matter: the token leaks if this file is world-readable.
+Create it readable by the service group only:
 
 ```bash
-sudo install -o root -g maad -m 0640 env.example /etc/maad/env
+sudo install -o root -g maad -m 0640 /dev/null /etc/maad/env
 sudo $EDITOR /etc/maad/env
 ```
+
+The token registry needs the same care: keep `/opt/maad/_auth/` owned by `maad` and not world-readable.
 
 ## 4. systemd unit
 
@@ -160,7 +161,7 @@ journalctl -u maad -f
 **Hot-reload after editing `instance.yaml`:**
 
 ```bash
-# Edit /etc/maad/instance.yaml to add / remove projects, then:
+# Edit /opt/maad/instance.yaml to add / remove projects, then:
 sudo systemctl reload maad
 
 # Or invoke the MCP tool from an admin session (HTTP transport):
@@ -285,7 +286,7 @@ The client sets `MAAD_TOKEN` in its environment. Never commit the token into a c
 
 ```bash
 # From the server (no TLS, direct loopback)
-TOKEN=$(sudo awk -F= '/^MAAD_AUTH_TOKEN=/{print $2}' /etc/maad/env)
+TOKEN='<plaintext from auth issue-token>'
 
 curl -sS -X POST http://127.0.0.1:7733/mcp \
   -H "Authorization: Bearer $TOKEN" \
@@ -362,8 +363,8 @@ If you run `--project /path` (not `--instance`) the engine logs `pin_ignored_leg
 
 ## Gotchas
 
-- **Token required at boot.** `--transport http` without `MAAD_AUTH_TOKEN` fails with `AUTH_TOKEN_REQUIRED`. This is intentional.
+- **Token registry required at boot.** `--transport http` without `_auth/tokens.yaml` fails with `TOKENS_FILE_MISSING`; a registry with no active token fails with `TOKENS_FILE_EMPTY`. This is intentional.
 - **Binding non-loopback.** If you set `MAAD_HTTP_HOST=0.0.0.0`, the engine logs a warning recommending a reverse proxy. Exposing the engine directly to the network is allowed but means clients talk to it without TLS unless you add it yourself.
 - **SSE proxy buffering.** Most proxies buffer by default. `proxy_buffering off` in nginx is the common miss — symptoms are "client connects but tools/list hangs."
-- **Rotation = restart.** Since the token is a single process-level secret, rotation today is a config edit + `systemctl restart maad`. Drain is bounded by `MAAD_SHUTDOWN_TIMEOUT_MS` (10s default).
+- **Rotation needs a reload, not a restart.** `maad auth rotate-token` plus `systemctl reload maad` applies it (step 2). `maad_instance_reload` alone does not reload `tokens.yaml`. A full restart drains within `MAAD_SHUTDOWN_TIMEOUT_MS` (10s default).
 - **Graceful shutdown returns 503.** Requests during the drain window get `SHUTTING_DOWN`. `/healthz` reflects the same state so liveness probes fail-fast during restart.
