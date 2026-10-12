@@ -1,10 +1,16 @@
 ---
 enabled: true
-current: 0.18.2
+current: 0.18.3
 dev_flow: formal
 ---
 
 # Version History
+
+## 0.18.3 - 2026-10-11
+
+Fix sequence ID collisions by considering all indexed IDs under the current year prefix, across document types and including soft-deleted records. Allocation no longer depends on a 10,000-document sample.
+
+Creating a document with an existing soft-deleted ID, including a name-derived slug, now returns DUPLICATE_DOC_ID instead of replacing the deleted record's index entry. IDs remain reserved while their soft-deleted index rows exist. Purge or hard delete releases those IDs, as does rebuilding a wiped index; normal maad reindex preserves the reservations. Cross-process allocation races remain outside this fix.
 
 ## 0.18.2 - 2026-10-11
 
