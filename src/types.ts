@@ -260,6 +260,9 @@ export interface FieldDefinition {
   // Null when unset: field behaves as it did pre-0.6.7 (fully lenient).
   storePrecision: import('./schema/precision.js').Precision | null;
   onCoarser: 'warn' | 'error' | null;
+  // 0.19.0 — opt-in check for values finer than storePrecision. Null (the
+  // default) keeps the storage-wins rule: finer values pass silently.
+  onFiner: 'warn' | 'error' | null;
   displayPrecision: import('./schema/precision.js').Precision | null;
   // 0.12.0 structural constraints — only meaningful on `type: string` fields.
   // Null when unset (pre-constraint behavior). Lengths measure Unicode code
