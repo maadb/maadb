@@ -68,12 +68,13 @@ export const GIT_IDENTITY_ENV_KEYS: readonly string[] = [
 
 /**
  * Env vars simple-git refuses to pass to a spawned git process unless an
- * allowUnsafe* flag is set. Mirrors the map in @simple-git/argv-parser's
- * parseEnv (keys are matched case-insensitively). The engine never needs any
- * of them — it runs local plumbing commands that must never open an editor,
- * pager, ssh connection, or credential prompt — but several (EDITOR, VISUAL,
- * PAGER, GIT_ASKPASS) are present in every interactive shell and on GitHub
- * Actions runners, so they must be stripped rather than passed through.
+ * allowUnsafe* flag is set: the non-`git_` entries of the map in
+ * @simple-git/argv-parser's parseEnv (`git_` keys are covered by the prefix
+ * check in buildGitEnv; keys are matched case-insensitively). The engine never
+ * needs any of them — it runs local plumbing commands that must never open an
+ * editor, pager, ssh connection, or credential prompt — but several (EDITOR,
+ * VISUAL, PAGER, GIT_ASKPASS) are present in every interactive shell and on
+ * GitHub Actions runners, so they must be stripped rather than passed through.
  */
 const UNSAFE_GIT_ENV_KEYS = new Set([
   'editor', 'visual', 'pager', 'prefix', 'ssh_askpass',
