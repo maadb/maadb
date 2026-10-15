@@ -16,7 +16,7 @@ import type {
   DiffResult,
   SnapshotResult,
 } from '../types.js';
-import { autoCommit, buildGitEnv, type CommitOptions, type CommitOutcome } from './commit.js';
+import { autoCommit, buildGitEnv, GIT_IDENTITY_ENV_KEYS, type CommitOptions, type CommitOutcome } from './commit.js';
 import { getHistory, getAudit } from './log.js';
 import { getDiff } from './diff.js';
 import { getSnapshot } from './snapshot.js';
@@ -30,7 +30,9 @@ export class GitLayer {
 
   constructor(projectRoot: string) {
     this.projectRoot = projectRoot;
-    this.git = simpleGit(projectRoot);
+    // simple-git 4 blocks explicitly supplied GIT_* env keys unless they are
+    // allowed here; the engine passes only the commit identity (buildGitEnv).
+    this.git = simpleGit({ baseDir: projectRoot, allowEnvironment: GIT_IDENTITY_ENV_KEYS });
   }
 
   async isRepo(): Promise<boolean> {
