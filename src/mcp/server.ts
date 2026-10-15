@@ -21,6 +21,7 @@ import { initMemoryPressureWatcher, readMemoryPressureEnv, stopMemoryPressureWat
 import { initLogging, readLoggingEnv, logOpsChannelReady } from '../logging.js';
 import { installSignalHandlers } from './shutdown.js';
 import { installReloadSignalHandler } from './reload-signal.js';
+import { startTokensWatch, DEFAULT_TOKENS_POLL_MS } from './tokens-watch.js';
 import { getRateLimiter } from './rate-limit.js';
 import { registerShutdownHooks } from './lifecycle.js';
 import { logger } from '../engine/logger.js';
@@ -59,6 +60,12 @@ export interface HttpServeOptions {
   idleMs: number;
   /** Maximum simultaneously retained HTTP sessions. Oldest activity is evicted at capacity. */
   maxSessions?: number | undefined;
+  /**
+   * How often to check tokens.yaml for out-of-process changes (ms). Changed
+   * registries are reloaded and sessions bound to inactive tokens torn down.
+   * 0 disables the check. Default 5000.
+   */
+  tokensPollMs?: number | undefined;
   /**
    * 0.12.0 — Exact browser origins allowed on /mcp (MCP Origin validation).
    * Empty/omitted denies any request that presents an Origin header; requests
@@ -285,17 +292,19 @@ export async function startServer(opts: ServeOptions): Promise<void> {
 
     // Principal-binding enforcement: token revoke/rotate/reload immediately
     // tears down sessions bound to no-longer-active tokens (SSE streams
-    // included). The transport's sweeper provides the backstop for expiry
-    // and out-of-process tokens.yaml edits.
+    // included). The transport's sweeper is the backstop for expiry; the
+    // tokens watcher picks up out-of-process tokens.yaml edits.
     ctx.onTokensChanged = (excludeSessionId?: string) => {
       handle.evictInvalidTokenSessions(excludeSessionId);
     };
+    const stopTokensWatch = startTokensWatch(ctx, opts.http.tokensPollMs ?? DEFAULT_TOKENS_POLL_MS);
 
     installSignalHandlers(
       { pool, rateLimiter: getRateLimiter() },
       {
         finalCleanup: async () => {
           stopMemoryPressureWatcher();
+          stopTokensWatch();
           try { await handle.close(); } catch { /* best-effort */ }
         },
       },

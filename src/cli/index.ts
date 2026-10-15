@@ -107,6 +107,13 @@ function parseIntEnv(val: string | undefined, fallback: number): number {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
+/** Like parseIntEnv, but 0 is a valid value (used where 0 means "disabled"). */
+function parseNonNegativeIntEnv(val: string | undefined, fallback: number): number {
+  if (val === undefined || val === '') return fallback;
+  const n = Number.parseInt(val, 10);
+  return Number.isFinite(n) && n >= 0 ? n : fallback;
+}
+
 async function cmdServe(): Promise<void> {
   let role: string | undefined = process.env['MAAD_ROLE'];
   let dryRun = false;
@@ -120,6 +127,7 @@ async function cmdServe(): Promise<void> {
   let keepAliveTimeoutMs: number = parseIntEnv(process.env['MAAD_HTTP_KEEPALIVE_TIMEOUT_MS'], 5_000);
   let idleMs: number = parseIntEnv(process.env['MAAD_SESSION_IDLE_MS'], 1_800_000);
   let maxSessions: number = parseIntEnv(process.env['MAAD_SESSION_MAX'], 128);
+  let tokensPollMs: number = parseNonNegativeIntEnv(process.env['MAAD_TOKENS_POLL_MS'], 5_000);
   // 0.12.0 — Origin allowlist for /mcp. Env is comma-separated; repeatable
   // --http-allowed-origin flags, when present, replace the env list.
   const envAllowedOrigins: string[] = splitOriginList(process.env['MAAD_HTTP_ALLOWED_ORIGINS'] ?? '');
@@ -150,6 +158,7 @@ async function cmdServe(): Promise<void> {
     else if (a === '--http-keepalive-timeout' && next) keepAliveTimeoutMs = parseIntEnv(next, keepAliveTimeoutMs);
     else if (a === '--session-idle-ms' && next) idleMs = parseIntEnv(next, idleMs);
     else if (a === '--session-max' && next) maxSessions = parseIntEnv(next, maxSessions);
+    else if (a === '--tokens-poll-ms' && next) tokensPollMs = parseNonNegativeIntEnv(next, tokensPollMs);
     else if (a === '--http-allowed-origin' && next) cliAllowedOrigins.push(next);
     else if (a === '--trust-proxy') trustProxy = true;
     else if (a === '--auth-token' && next) authToken = next;
@@ -198,6 +207,7 @@ async function cmdServe(): Promise<void> {
         trustProxy,
         idleMs,
         maxSessions,
+        tokensPollMs,
         allowedOrigins,
         authToken,
         ...(transport === 'unix' ? { socketPath, socketMode } : {}),
@@ -270,13 +280,16 @@ serve HTTP options (when --transport http or --transport unix):
   --http-port <port>                Bind port for http (default: 7733)
   --unix-socket <path>              Unix socket path (required for unix transport)
   --unix-socket-mode <octal>        Socket file mode (default: 660)
-  --auth-token <token>              Bearer token (required for http/unix; prefer MAAD_AUTH_TOKEN env)
+  --auth-token <token>              Removed in 0.7.0 — http/unix authenticate against
+                                    <instance-root>/_auth/tokens.yaml (see: maad auth)
   --http-max-body <bytes>           Max request body bytes (default: 1048576)
   --http-headers-timeout <ms>       node:http headersTimeout (default: 10000)
   --http-request-timeout <ms>       node:http requestTimeout (default: 60000)
   --http-keepalive-timeout <ms>     node:http keepAliveTimeout (default: 5000)
   --session-idle-ms <ms>            Per-session idle eviction threshold (default: 1800000 = 30 min)
   --session-max <count>              Maximum retained HTTP sessions (default: 128)
+  --tokens-poll-ms <ms>              Check interval for out-of-process tokens.yaml changes;
+                                     0 disables (default: 5000)
   --http-allowed-origin <origin>     Exact browser origin allowed on /mcp (repeatable;
                                      default: none — any request presenting an Origin
                                      header is rejected 403. Non-browser clients are
@@ -294,9 +307,11 @@ Environment Variables:
   MAAD_HTTP_PORT                    HTTP bind port (default: 7733)
   MAAD_UNIX_SOCKET                  Unix socket path (required when MAAD_TRANSPORT=unix)
   MAAD_UNIX_SOCKET_MODE             Socket file mode in octal (default: 660)
-  MAAD_AUTH_TOKEN                   Bearer token for HTTP/UDS transport (required)
+  MAAD_AUTH_TOKEN                   Removed in 0.7.0; setting it without tokens.yaml fails boot
   MAAD_SESSION_IDLE_MS              Per-session idle eviction threshold (default: 1800000)
   MAAD_SESSION_MAX                  Maximum retained HTTP sessions (default: 128)
+  MAAD_TOKENS_POLL_MS               Check interval for out-of-process tokens.yaml changes;
+                                    0 disables (default: 5000)
   MAAD_HTTP_ALLOWED_ORIGINS         Comma-separated exact origins allowed on /mcp
                                     (CLI --http-allowed-origin flags override this)
   MAAD_HTTP_MAX_BODY                HTTP max body bytes (default: 1048576)

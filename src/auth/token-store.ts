@@ -18,7 +18,7 @@
 // ============================================================================
 
 import { existsSync } from 'node:fs';
-import { readFile, writeFile, rename, mkdir, unlink } from 'node:fs/promises';
+import { readFile, writeFile, rename, mkdir, unlink, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, randomBytes } from 'node:crypto';
 import yaml from 'js-yaml';
@@ -87,6 +87,14 @@ export class TokenStore {
    */
   private mutations: Promise<unknown> = Promise.resolve();
 
+  /**
+   * Stat signature (mtime, size, file id) of tokens.yaml as last loaded or
+   * written by this store. `reloadIfChanged` compares against it so edits made
+   * by another process (e.g. `maad auth revoke-token`) are picked up without a
+   * restart or signal. Null until first observed.
+   */
+  private observedSignature: string | null = null;
+
   private constructor(
     private filePath: string,
     private registryName: string | undefined,
@@ -117,6 +125,9 @@ export class TokenStore {
   static async load(instanceRoot: string): Promise<Result<TokenStore>> {
     const filePath = path.join(instanceRoot, TOKENS_FILE_RELATIVE);
     const store = new TokenStore(filePath, undefined);
+    // Signature before content: a write landing between the two is detected
+    // as a change on the next check rather than missed.
+    store.observedSignature = await fileSignature(filePath);
 
     if (!existsSync(filePath)) return ok(store);
 
@@ -173,6 +184,9 @@ export class TokenStore {
 
   /** Unlocked body of `reload`. Callers must already hold the mutation chain. */
   private async reloadInner(): Promise<Result<{ total: number; active: number }>> {
+    // Recorded on failure too, so an invalid file is reported once rather than
+    // on every change check; the next edit to the file is retried.
+    this.observedSignature = await fileSignature(this.filePath);
     if (!existsSync(this.filePath)) {
       // File was removed — empty the store. Same boot semantics as an
       // absent file (HTTP transport keeps running; next lookup misses).
@@ -212,6 +226,21 @@ export class TokenStore {
       this.byId.set(record.id, record);
     }
     return ok({ total: this.records.length, active: this.activeCount() });
+  }
+
+  /**
+   * Reload only if tokens.yaml changed on disk since this store last loaded or
+   * wrote it. Cheap enough to poll: one stat when nothing changed. Serialized
+   * with issue/revoke/rotate like `reload`.
+   */
+  async reloadIfChanged(): Promise<
+    { changed: false } | { changed: true; result: Result<{ total: number; active: number }> }
+  > {
+    return this.runExclusive(async () => {
+      const current = await fileSignature(this.filePath);
+      if (current === this.observedSignature) return { changed: false as const };
+      return { changed: true as const, result: await this.reloadInner() };
+    });
   }
 
   /** Optional human label recorded at the top of tokens.yaml. */
@@ -405,7 +434,25 @@ export class TokenStore {
       return singleErr('TOKENS_FILE_INVALID',
         `Failed to persist tokens.yaml at ${this.filePath}: ${e instanceof Error ? e.message : String(e)}`);
     }
+    // Our own write is already reflected in memory; don't re-read it as an
+    // external change.
+    this.observedSignature = await fileSignature(this.filePath);
     return ok(undefined);
+  }
+}
+
+/**
+ * Change signature for tokens.yaml: mtime, size, and file id. Atomic
+ * temp-file + rename writes produce a new file id, so a rewrite is detected
+ * even when mtime resolution is coarse and the size is unchanged.
+ */
+async function fileSignature(filePath: string): Promise<string> {
+  try {
+    const s = await stat(filePath);
+    return `${s.mtimeMs}:${s.size}:${s.ino}`;
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    return code === 'ENOENT' ? 'absent' : `unreadable:${code ?? 'unknown'}`;
   }
 }
 

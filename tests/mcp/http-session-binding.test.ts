@@ -20,10 +20,17 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import pino from 'pino';
 import { createRequire } from 'node:module';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { startHttpTransport, type HttpTransportHandle } from '../../src/mcp/transport/http.js';
 import { initLogging } from '../../src/logging.js';
 import { SessionRegistry, type SessionCloseReason } from '../../src/instance/session.js';
-import type { InstanceConfig } from '../../src/instance/config.js';
+import { loadInstance, type InstanceConfig } from '../../src/instance/config.js';
+import { EnginePool } from '../../src/instance/pool.js';
+import type { InstanceCtx } from '../../src/mcp/ctx.js';
+import { registerReload } from '../../src/mcp/tools/instance.js';
+import { TokenStore } from '../../src/auth/token-store.js';
 import { makeTokenFixture, type TokenFixture } from '../support/token-fixture.js';
 
 const require = createRequire(import.meta.url);
@@ -84,10 +91,14 @@ function authHeaders(bearer?: string): Record<string, string> {
   return headers;
 }
 
-async function initSession(port: number, bearer?: string): Promise<string> {
+async function initSession(
+  port: number,
+  bearer?: string,
+  extraHeaders: Record<string, string> = {},
+): Promise<string> {
   const res = await fetch(`http://127.0.0.1:${port}/mcp`, {
     method: 'POST',
-    headers: authHeaders(bearer),
+    headers: { ...authHeaders(bearer), ...extraHeaders },
     body: JSON.stringify(INIT_BODY),
   });
   expect(res.status).toBe(200);
@@ -102,6 +113,24 @@ async function callToolsList(port: number, sid: string, bearer?: string): Promis
     method: 'POST',
     headers: { ...authHeaders(bearer), 'mcp-session-id': sid },
     body: JSON.stringify({ jsonrpc: '2.0', id: 42, method: 'tools/list' }),
+  });
+}
+
+async function callTool(
+  port: number,
+  sid: string,
+  bearer: string,
+  name: string,
+): Promise<Response> {
+  return fetch(`http://127.0.0.1:${port}/mcp`, {
+    method: 'POST',
+    headers: { ...authHeaders(bearer), 'mcp-session-id': sid },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: 43,
+      method: 'tools/call',
+      params: { name, arguments: {} },
+    }),
   });
 }
 
@@ -214,10 +243,90 @@ describe('HTTP session principal binding — cross-token reuse rejection', () =>
 describe('HTTP session principal binding — revocation / rotation / expiry teardown', () => {
   let fixture: TokenFixture | null = null;
   let started: Started | undefined;
+  let reloadRoot: string | null = null;
 
   afterEach(async () => {
     if (started) { await started.handle.close(); started = undefined; }
     if (fixture) { await fixture.cleanup(); fixture = null; }
+    if (reloadRoot) {
+      await rm(reloadRoot, { recursive: true, force: true }).catch(() => {});
+      reloadRoot = null;
+    }
+  });
+
+  it('instance reload responds before its out-of-process-revoked caller is torn down', async () => {
+    fixture = await makeTokenFixture();
+    reloadRoot = await mkdtemp(path.join(tmpdir(), 'maad-http-reload-'));
+    const projectPath = path.join(reloadRoot, 'alpha');
+    await mkdir(projectPath, { recursive: true });
+    const configPath = path.join(reloadRoot, 'instance.yaml');
+    await writeFile(
+      configPath,
+      `name: reload-test\nprojects:\n  - name: alpha\n    path: ${projectPath.replace(/\\/g, '/')}\n    role: admin\n`,
+      'utf8',
+    );
+    const loaded = await loadInstance(configPath);
+    expect(loaded.ok).toBe(true);
+    if (!loaded.ok) return;
+
+    const sessions = new SessionRegistry(loaded.value);
+    const closeEvents: Array<{ sid: string; reason: SessionCloseReason }> = [];
+    sessions.registerCloseHandler((sid, reason) => { closeEvents.push({ sid, reason }); });
+    const ctx: InstanceCtx = {
+      instance: loaded.value,
+      pool: new EnginePool(loaded.value),
+      sessions,
+      tokens: fixture.store,
+    };
+    const handle = await startHttpTransport({
+      host: '127.0.0.1', port: 0, maxBodyBytes: 4096,
+      headersTimeoutMs: 10_000, requestTimeoutMs: 60_000, keepAliveTimeoutMs: 5_000,
+      trustProxy: false, idleMs: 1_800_000,
+      sessions,
+      instance: loaded.value,
+      tokens: fixture.store,
+      serverFactory: () => {
+        const server = new McpServer({ name: 'maad-reload-test', version: pkg.version });
+        registerReload(server, ctx);
+        return server;
+      },
+    });
+    const addr = handle.httpServer.address();
+    if (typeof addr !== 'object' || addr === null) throw new Error('no address');
+    started = { handle, port: addr.port, sessions, closeEvents };
+    ctx.onTokensChanged = (excludeSessionId?: string) => {
+      handle.evictInvalidTokenSessions(excludeSessionId);
+    };
+
+    const sid = await initSession(started.port, fixture.plaintext, {
+      'x-maad-pin-project': 'alpha',
+    });
+    const writer = await TokenStore.load(fixture.tmpRoot);
+    expect(writer.ok).toBe(true);
+    if (!writer.ok) return;
+    const revoked = await writer.value.revoke(fixture.record.id);
+    expect(revoked.ok).toBe(true);
+    expect(fixture.store.lookupById(fixture.record.id)?.revokedAt).toBeUndefined();
+
+    const reloadResponse = await callTool(
+      started.port,
+      sid,
+      fixture.plaintext,
+      'maad_instance_reload',
+    );
+    expect(reloadResponse.status).toBe(200);
+    expect(await reloadResponse.text()).toMatch(/ok.{1,4}true/);
+    expect(fixture.store.lookupById(fixture.record.id)?.revokedAt).toBeDefined();
+    expect(started.handle.activeSessionCount()).toBe(1);
+
+    // The response completed, but the reloaded registry fences the bearer on
+    // its next request. The next unexcluded pass performs final teardown.
+    const next = await callToolsList(started.port, sid, fixture.plaintext);
+    expect(next.status).toBe(401);
+    await next.text();
+    expect(started.handle.evictInvalidTokenSessions()).toBe(1);
+    expect(started.handle.activeSessionCount()).toBe(0);
+    expect(started.closeEvents).toContainEqual({ sid, reason: 'auth' });
   });
 
   it('revoke + evict destroys the bound session with reason=auth; old bearer gets 401', async () => {
