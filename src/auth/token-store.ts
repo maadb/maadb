@@ -184,12 +184,26 @@ export class TokenStore {
 
   /** Unlocked body of `reload`. Callers must already hold the mutation chain. */
   private async reloadInner(): Promise<Result<{ total: number; active: number }>> {
-    // Recorded on failure too, so an invalid file is reported once rather than
-    // on every change check; the next edit to the file is retried.
-    this.observedSignature = await fileSignature(this.filePath);
+    // Signature handling differs by failure kind:
+    //   - I/O failures (stat or read — e.g. EBUSY/EPERM from an antivirus scan
+    //     or sharing lock right after another process writes) keep the previous
+    //     signature, so the next change check retries. Recording the new one
+    //     would leave a revoked token live until the file changed again.
+    //   - Parse/shape failures record the new signature: the content itself is
+    //     bad, so it is reported once and retried on the next edit.
+    const previousSignature = this.observedSignature;
+    const signature = await fileSignature(this.filePath);
+    if (signature.startsWith('unreadable:')) {
+      return singleErr('TOKENS_FILE_INVALID',
+        `Failed to stat tokens file ${this.filePath}: ${signature.slice('unreadable:'.length)}`);
+    }
+    this.observedSignature = signature;
     if (!existsSync(this.filePath)) {
       // File was removed — empty the store. Same boot semantics as an
       // absent file (HTTP transport keeps running; next lookup misses).
+      // A delete-then-recreate edit observed mid-way fails closed: every
+      // bearer is rejected until the recreated file is seen, at most one
+      // change-check interval later.
       this.records = [];
       this.byHash.clear();
       this.byId.clear();
@@ -200,6 +214,7 @@ export class TokenStore {
     try {
       raw = await readFile(this.filePath, 'utf8');
     } catch (e) {
+      this.observedSignature = previousSignature; // I/O failure: retry on the next check
       return singleErr('TOKENS_FILE_INVALID',
         `Failed to re-read tokens file ${this.filePath}: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -424,8 +439,13 @@ export class TokenStore {
     }
 
     const tmp = `${this.filePath}.${randomBytes(6).toString('hex')}.tmp`;
+    let ownSignature: string;
     try {
       await writeFile(tmp, yamlText, { encoding: 'utf8', mode: 0o600 });
+      // Signature of our own content, taken before the rename: a same-volume
+      // rename keeps mtime, size and file id. Stat'ing the target afterwards
+      // would credit a write by another process in that gap to us and hide it.
+      ownSignature = await fileSignature(tmp);
       await rename(tmp, this.filePath);
     } catch (e) {
       // Best-effort sweep so a failed persist doesn't strand a temp file
@@ -436,7 +456,7 @@ export class TokenStore {
     }
     // Our own write is already reflected in memory; don't re-read it as an
     // external change.
-    this.observedSignature = await fileSignature(this.filePath);
+    this.observedSignature = ownSignature;
     return ok(undefined);
   }
 }

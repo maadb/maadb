@@ -28,12 +28,25 @@ export function startTokensWatch(ctx: InstanceCtx, intervalMs: number): () => vo
   if (store == null || !(intervalMs > 0)) return () => {};
 
   let inFlight = false;
+  // I/O failures are retried every tick; log a failure only when it differs
+  // from the previous one so a persistent lock doesn't flood the ops log.
+  let lastFailure: string | null = null;
   const tick = async (): Promise<void> => {
     if (inFlight) return; // a slow reload never overlaps the next tick
     inFlight = true;
     try {
       const check = await store.reloadIfChanged();
-      if (check.changed) applyTokensReload(ctx, 'watch', check.result);
+      if (!check.changed) return;
+      if (check.result.ok) {
+        lastFailure = null;
+        applyTokensReload(ctx, 'watch', check.result);
+        return;
+      }
+      const failure = check.result.errors.map(e => `${e.code}:${e.message}`).join('|');
+      if (failure !== lastFailure) {
+        lastFailure = failure;
+        applyTokensReload(ctx, 'watch', check.result);
+      }
     } catch (e) {
       getOpsLog().warn(
         { event: 'tokens_watch_failed', message: e instanceof Error ? e.message : String(e) },
