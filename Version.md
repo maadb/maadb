@@ -1,10 +1,14 @@
 ---
 enabled: true
-current: 0.18.3
+current: 0.18.4
 dev_flow: formal
 ---
 
 # Version History
+
+## 0.18.4 - 2026-10-17
+
+Security dependency updates: simple-git 4.0.2 and refreshed lockfile entries (including proxy-addr), and the MCP SDK 1.32.1. Out-of-process token revocations now apply without a restart.
 
 ## 0.18.3 - 2026-10-11
 
