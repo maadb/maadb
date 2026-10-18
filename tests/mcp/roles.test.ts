@@ -12,7 +12,7 @@ describe('MCP roles', () => {
     expect(getMinRoleForTool('maad_document_receipt')).toBe('reader');
   });
 
-  it('reader gets 21 tools', () => {
+  it('reader gets 22 tools', () => {
     const tools = getToolsForRole('reader');
     expect(tools.size).toBe(22);
     expect(tools.has('maad_document_receipt')).toBe(true);
@@ -30,7 +30,7 @@ describe('MCP roles', () => {
     expect(tools.has('maad_delete')).toBe(false);
   });
 
-  it('writer gets 27 tools (reader + create, update, validate, bulk_create, bulk_update)', () => {
+  it('writer gets 28 tools (reader + create, update, validate, bulk_create, bulk_update)', () => {
     const tools = getToolsForRole('writer');
     expect(tools.size).toBe(28);
     expect(tools.has('maad_document_receipt')).toBe(true);
@@ -41,7 +41,7 @@ describe('MCP roles', () => {
     expect(tools.has('maad_reindex')).toBe(false);
   });
 
-  it('admin gets 44 tools (all)', () => {
+  it('admin gets 45 tools (all)', () => {
     const tools = getToolsForRole('admin');
     expect(tools.size).toBe(45);
     expect(tools.has('maad_document_receipt')).toBe(true);
