@@ -173,8 +173,20 @@ export async function withEngine(
       `Session is not bound to project "${projectName}".`));
   }
   roleForLog = effectiveRole;
+  // Fail closed: a tool with no role assignment in roles.ts is refused rather
+  // than left callable by every role. A tool missing from kinds.ts as well is
+  // a registration bug and keeps its more specific MISSING_OPERATION_KIND code.
   const minRole = getMinRoleForTool(toolName);
-  if (minRole && !roleSatisfies(effectiveRole, minRole)) {
+  if (minRole === null) {
+    if (getKindForTool(toolName) === null && !isEngineLess(toolName)) {
+      return finalize(mcpError('MISSING_OPERATION_KIND',
+        `Tool "${toolName}" has no OperationKind registered in src/mcp/kinds.ts. ` +
+        `Every engine-bound tool must be listed as read or write.`));
+    }
+    return finalize(mcpError('INSUFFICIENT_ROLE',
+      `Tool ${toolName} has no role assignment and cannot be called.`));
+  }
+  if (!roleSatisfies(effectiveRole, minRole)) {
     return finalize(mcpError('INSUFFICIENT_ROLE',
       `Tool ${toolName} requires role "${minRole}" but session has "${effectiveRole}" for project "${projectName}".`));
   }
