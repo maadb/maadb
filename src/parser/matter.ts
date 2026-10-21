@@ -28,7 +28,19 @@ const stringPreservingYamlEngine = {
   stringify: (obj: object) => yaml.dump(obj),
 };
 
-const MATTER_OPTIONS = { engines: { yaml: stringPreservingYamlEngine } } as const;
+// gray-matter selects the parser from a language tag after the opening
+// delimiter (, ), and its built-in JavaScript engine
+// evaluates the block. Frontmatter is untrusted file content, so refuse that
+// engine outright; the 'js' tag resolves to the same 'javascript' entry.
+const refuseCodeEngine = {
+  parse: (): never => {
+    throw new Error('Executable frontmatter engines are not supported; use YAML');
+  },
+};
+
+const MATTER_OPTIONS = {
+  engines: { yaml: stringPreservingYamlEngine, javascript: refuseCodeEngine },
+} as const;
 
 export function parseMatter(raw: string): matter.GrayMatterFile<string> {
   return matter(raw, MATTER_OPTIONS);

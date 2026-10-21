@@ -83,3 +83,19 @@ body`;
     expect(result.data['role']).toBe('admin');
   });
 });
+
+describe('parseMatter — executable frontmatter engines are refused', () => {
+  const g = globalThis as { __matterCodeRan?: number };
+
+  it.each(['js', 'javascript', 'JS', 'JavaScript'])('does not evaluate ---%s frontmatter', (lang) => {
+    g.__matterCodeRan = 0;
+    const raw = `---${lang}\n(globalThis.__matterCodeRan = 1, { title: 'x' })\n---\nbody`;
+    expect(() => parseMatter(raw)).toThrow(/Executable frontmatter engines/);
+    expect(g.__matterCodeRan).toBe(0);
+  });
+
+  it('still parses plain and explicitly tagged YAML', () => {
+    expect(parseMatter('---\na: 1\n---\n').data['a']).toBe(1);
+    expect(parseMatter('---yaml\na: 2\n---\n').data['a']).toBe(2);
+  });
+});
