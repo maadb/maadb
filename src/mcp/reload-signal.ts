@@ -43,31 +43,6 @@ export function installReloadSignalHandler(ctx: InstanceCtx): void {
           'sighup_reload_failed',
         );
       }
-      // 0.7.0 — reload tokens.yaml too. Independent of instance reload; a
-      // failure here doesn't roll back the instance reload. Captures of
-      // ctx.tokens elsewhere (the HTTP transport closure) stay valid because
-      // TokenStore.reload mutates the existing instance in-place.
-      // Loose null check (`!= null`) catches both null and undefined — test
-      // harnesses sometimes pass partial ctx objects without a tokens field.
-      if (ctx.tokens != null) {
-        const tokensResult = await ctx.tokens.reload();
-        if (!tokensResult.ok) {
-          const first = tokensResult.errors[0];
-          getOpsLog().warn(
-            { event: 'sighup_tokens_reload_failed', code: first?.code, message: first?.message },
-            'sighup_tokens_reload_failed',
-          );
-        } else {
-          getOpsLog().info(
-            { event: 'tokens_reload', total: tokensResult.value.total, active: tokensResult.value.active },
-            'tokens_reload',
-          );
-          // Reload may have revoked/removed tokens that live sessions are
-          // bound to — tear those sessions down now rather than on the
-          // transport sweeper's next tick.
-          ctx.onTokensChanged?.();
-        }
-      }
     })();
   };
   process.on('SIGHUP', signalHandler);

@@ -32,6 +32,8 @@ import { loadInstance, type InstanceConfig } from '../../src/instance/config.js'
 import { performInstanceReload } from '../../src/mcp/instance-reload.js';
 import { validatePinHeader } from '../../src/mcp/transport/pin.js';
 import type { InstanceCtx } from '../../src/mcp/ctx.js';
+import { TokenStore } from '../../src/auth/token-store.js';
+import { makeTokenFixture, type TokenFixture } from '../support/token-fixture.js';
 
 function syntheticInstance(): InstanceConfig {
   return {
@@ -79,12 +81,92 @@ async function rewriteYaml(configPath: string, projects: Array<{ name: string; p
 
 describe('maad_instance_reload + SIGHUP', () => {
   let fixture: { tmpRoot: string; configPath: string; projectPaths: Map<string, string> } | null = null;
+  let tokenFixture: TokenFixture | null = null;
 
   afterEach(async () => {
     if (fixture) {
       await rm(fixture.tmpRoot, { recursive: true, force: true }).catch(() => {});
       fixture = null;
     }
+    if (tokenFixture) {
+      await tokenFixture.cleanup();
+      tokenFixture = null;
+    }
+  });
+
+  it.each(['tool', 'sighup'] as const)('%s reload observes an out-of-process token addition', async (source) => {
+    fixture = await makeTempInstance([{ name: 'alpha' }]);
+    tokenFixture = await makeTokenFixture();
+    const ctx = await loadCtx(fixture.configPath);
+    ctx.tokens = tokenFixture.store;
+
+    const writer = await TokenStore.load(tokenFixture.tmpRoot);
+    expect(writer.ok).toBe(true);
+    if (!writer.ok) return;
+    const added = await writer.value.issue({
+      role: 'reader',
+      projects: [{ name: 'alpha' }],
+    });
+    expect(added.ok).toBe(true);
+    if (!added.ok) return;
+    expect(ctx.tokens.lookupById(added.value.record.id)).toBeUndefined();
+
+    let changedCalls = 0;
+    ctx.onTokensChanged = () => { changedCalls++; };
+    const result = await performInstanceReload(ctx, source);
+
+    expect(result.ok).toBe(true);
+    expect(ctx.tokens.lookupById(added.value.record.id)).toEqual(added.value.record);
+    expect(changedCalls).toBe(1);
+  });
+
+  it('token reload failure does not roll back a successful instance reload or fire onTokensChanged', async () => {
+    fixture = await makeTempInstance([{ name: 'alpha' }]);
+    tokenFixture = await makeTokenFixture();
+    const ctx = await loadCtx(fixture.configPath);
+    ctx.tokens = tokenFixture.store;
+
+    const { mkdir } = await import('node:fs/promises');
+    const betaPath = path.join(fixture.tmpRoot, 'beta');
+    await mkdir(betaPath, { recursive: true });
+    await rewriteYaml(fixture.configPath, [
+      { name: 'alpha', path: fixture.projectPaths.get('alpha')! },
+      { name: 'beta', path: betaPath },
+    ]);
+    await writeFile(ctx.tokens.path(), 'tokens: [invalid', 'utf8');
+
+    let changedCalls = 0;
+    ctx.onTokensChanged = () => { changedCalls++; };
+    const result = await performInstanceReload(ctx, 'tool');
+
+    expect(result.ok).toBe(true);
+    expect(ctx.instance.projects.map(p => p.name).sort()).toEqual(['alpha', 'beta']);
+    expect(ctx.tokens.lookupById(tokenFixture.record.id)).toEqual(tokenFixture.record);
+    expect(changedCalls).toBe(0);
+  });
+
+  it('tokens still reload when the instance reload fails', async () => {
+    fixture = await makeTempInstance([{ name: 'alpha' }]);
+    tokenFixture = await makeTokenFixture();
+    const ctx = await loadCtx(fixture.configPath);
+    ctx.tokens = tokenFixture.store;
+
+    const writer = await TokenStore.load(tokenFixture.tmpRoot);
+    expect(writer.ok).toBe(true);
+    if (!writer.ok) return;
+    const revoked = await writer.value.revoke(tokenFixture.record.id);
+    expect(revoked.ok).toBe(true);
+    await writeFile(fixture.configPath, 'this is: [not valid: yaml', 'utf8');
+
+    let changedCalls = 0;
+    ctx.onTokensChanged = () => { changedCalls++; };
+    const result = await performInstanceReload(ctx, 'tool');
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors[0]?.code).toBe('INSTANCE_RELOAD_FAILED');
+    expect(ctx.tokens.lookupById(tokenFixture.record.id)?.revokedAt).toBeDefined();
+    expect(changedCalls).toBe(1);
   });
 
   // --- AC #10 Synthetic instances -------------------------------------------

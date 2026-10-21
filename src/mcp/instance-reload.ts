@@ -1,23 +1,21 @@
 // ============================================================================
-// Instance reload orchestrator — shared by maad_instance_reload tool and the
-// SIGHUP handler. Re-parses the instance config from disk, delegates the diff
-// + eviction to EnginePool.reloadInstance, then propagates the new config to
-// SessionRegistry and cancels / prunes sessions whose projects were removed.
+// Reload orchestrator shared by maad_instance_reload and SIGHUP. It reloads
+// instance config and tokens from disk with independent failure handling.
 //
 // Both call sites (tool handler, SIGHUP handler) invoke this with a `source`
 // string that flows into the audit event so operators can tell apart
 // operator-initiated reloads from OS-signal reloads.
 //
-// Failure modes never leave the runtime half-applied: diff mutations are
-// detected + rejected before any eviction, and the instance ref swap happens
-// only after the pool has finished its part.
+// Instance diff mutations are rejected before eviction, and its reference
+// swap happens only after the pool finishes. Token state swaps only after a
+// successful token parse. A failure on either side does not undo the other.
 // ============================================================================
 
 import type { Result } from '../errors.js';
 import { ok, singleErr } from '../errors.js';
 import type { InstanceCtx } from './ctx.js';
 import { loadInstance, type InstanceConfig } from '../instance/config.js';
-import { logInstanceReload, logInstanceReloadProgress } from '../logging.js';
+import { getOpsLog, logInstanceReload, logInstanceReloadProgress } from '../logging.js';
 
 export type InstanceReloadSource = 'tool' | 'sighup';
 
@@ -30,9 +28,15 @@ export interface InstanceReloadResult {
   durationMs: number;
 }
 
+export interface InstanceReloadOptions {
+  /** Keep the invoking HTTP session alive long enough to carry the response. */
+  excludeSessionId?: string;
+}
+
 /**
- * Run a full instance reload from the config file recorded on the live
- * InstanceConfig. Emits progress + audit log lines around the critical steps.
+ * Reload the instance config and token registry from their recorded files.
+ * The returned Result describes the instance-config outcome; token failures
+ * are logged and do not roll back a successful instance reload.
  *
  * Error codes that flow back to the caller (tool wraps them as MCP responses):
  *   - INSTANCE_RELOAD_SYNTHETIC  (synthetic instance, no config file)
@@ -41,6 +45,51 @@ export interface InstanceReloadResult {
  *   - INSTANCE_MUTATION_UNSUPPORTED (existing project path/role changed)
  */
 export async function performInstanceReload(
+  ctx: InstanceCtx,
+  source: InstanceReloadSource,
+  options: InstanceReloadOptions = {},
+): Promise<Result<InstanceReloadResult>> {
+  const instanceResult = await reloadInstanceConfig(ctx, source);
+
+  // Token reload is independent of the instance result. A failure on either
+  // side must not prevent the other reload from taking effect.
+  if (ctx.tokens != null) {
+    applyTokensReload(ctx, source, await ctx.tokens.reload(), options.excludeSessionId);
+  }
+
+  return instanceResult;
+}
+
+export type TokensReloadSource = InstanceReloadSource | 'watch';
+
+/**
+ * Log a token-registry reload and, on success, tear down sessions bound to
+ * tokens that are no longer active. Shared by explicit reloads and the
+ * tokens.yaml change watcher. A failed reload leaves the previous registry in
+ * place and evicts nothing.
+ */
+export function applyTokensReload(
+  ctx: InstanceCtx,
+  source: TokensReloadSource,
+  result: Result<{ total: number; active: number }>,
+  excludeSessionId?: string,
+): void {
+  if (!result.ok) {
+    const first = result.errors[0];
+    getOpsLog().warn(
+      { event: 'tokens_reload_failed', source, code: first?.code, message: first?.message },
+      'tokens_reload_failed',
+    );
+    return;
+  }
+  getOpsLog().info(
+    { event: 'tokens_reload', source, total: result.value.total, active: result.value.active },
+    'tokens_reload',
+  );
+  ctx.onTokensChanged?.(excludeSessionId);
+}
+
+async function reloadInstanceConfig(
   ctx: InstanceCtx,
   source: InstanceReloadSource,
 ): Promise<Result<InstanceReloadResult>> {

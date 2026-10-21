@@ -321,12 +321,13 @@ rotating a token, discard the old session and initialize a fresh one with the ne
 bearer. A client that previously reused one session across several tokens must now
 open one session per token.
 
-> **Known gap (still present in v0.18.1):** `maad_instance_reload` does not reload `tokens.yaml`.
-> On a deployment where SIGHUP is unavailable, a revocation written to
-> `tokens.yaml` by another process is not observed by the running server until it
-> restarts, and sessions bound to the revoked token stay live until then. Prefer
-> SIGHUP (`systemctl reload maad`, `docker compose kill -s SIGHUP maad`) to apply
-> revocations.
+**Out-of-process token changes apply without a restart.** The server checks
+`tokens.yaml` for changes every 5 seconds (`MAAD_TOKENS_POLL_MS`, or
+`--tokens-poll-ms`; `0` disables). A revocation or rotation written by another
+process, such as `maad auth revoke-token`, therefore takes effect within one
+interval on every platform, including Windows where there is no SIGHUP, and
+closes every session bound to the affected token. SIGHUP and
+`maad_instance_reload` also reload `tokens.yaml` immediately.
 
 Per the MCP Streamable HTTP spec, `/mcp` validates the `Origin` header as a
 DNS-rebinding defense. Requests without an `Origin` header — every normal MCP
@@ -338,7 +339,7 @@ browser-originated requests; no wildcards, no implicit localhost. Only
 deployments where a web page calls `/mcp` directly need entries — a browser
 talking to your app's backend, which then calls MAADb, does not.
 
-Hot-reload tokens + instance config on edits: `sudo systemctl reload maad` (or `docker compose kill -s SIGHUP maad`). Rotate tokens via `maad auth rotate-token --id=tok-<id>`; revoke via `maad auth revoke-token --id=tok-<id>` — both take effect on the reload, and any live session bound to the affected token is closed at that moment. Full auth primitives: [`docs/archive/0.7.0-scoped-auth.md`](docs/archive/0.7.0-scoped-auth.md).
+Hot-reload tokens + instance config on edits: `sudo systemctl reload maad` (or `docker compose kill -s SIGHUP maad`). Rotate tokens via `maad auth rotate-token --id=tok-<id>`; revoke via `maad auth revoke-token --id=tok-<id>` — both take effect on the next reload or token-file check, and any live session bound to the affected token is closed at that moment. Full auth primitives: [`docs/archive/0.7.0-scoped-auth.md`](docs/archive/0.7.0-scoped-auth.md).
 
 Deployment guides:
 
@@ -449,9 +450,12 @@ The vector store is `sqlite-vec` (in the same SQLite file); the lexical leg is F
 
 ## Current state
 
-**Current:** v0.18.1 — compact complete contracts and receipts, with independent response budgets. Hosts freeze a schema digest, create only when those expectations still hold (`maad_create_guarded`), and verify persisted content with `maad_document_receipt`.
+**Current:** v0.18.4 — compact complete contracts and receipts, with independent response budgets. Hosts freeze a schema digest, create only when those expectations still hold (`maad_create_guarded`), and verify persisted content with `maad_document_receipt`.
 
 Recent shipped scope:
+- **0.18.4** — Security dependency updates; out-of-process token revocations apply without a restart
+- **0.18.3** — Sequence ID allocation considers all indexed IDs, including soft-deleted records
+- **0.18.2** — Fewer unnecessary existing-ID scans on create
 - **0.18.1** — List items with commas or brackets round-trip exactly; dependency security updates
 - **0.18.0** — Compact complete delivery pages for contracts and receipts
 - **0.17.0** — Versioned guarded document creation (`maad_create_guarded`)

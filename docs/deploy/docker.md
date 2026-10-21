@@ -79,8 +79,8 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 The repository does not ship a Dockerfile; this one is a reference. Build it from a checkout of the release tag you want to run:
 
 ```bash
-git checkout v0.18.1
-docker build -t maadb:0.18.1 .
+git checkout v0.18.4
+docker build -t maadb:0.18.4 .
 ```
 
 ## 3. Compose stack with traefik
@@ -109,7 +109,7 @@ services:
       - ./letsencrypt:/letsencrypt
 
   maad:
-    image: maadb:0.18.1
+    image: maadb:0.18.4
     restart: unless-stopped
     environment:
       MAAD_TRANSPORT: http
@@ -222,7 +222,7 @@ docker compose kill -s SIGHUP maad
 
 Distribute the new plaintext to clients out-of-band. Revoke at end-of-life with `auth revoke-token --id=tok-<id>` and the same SIGHUP.
 
-**The SIGHUP is what applies the change.** From 0.12.4, the reload also closes every live HTTP session bound to the rotated or revoked token, terminating its SSE stream; those clients get `SESSION_NOT_FOUND` and must `initialize` again with the new bearer. Until the SIGHUP lands, the old secret keeps authenticating and its sessions stay live — `maad_instance_reload` is not a substitute here, because it does not reload `tokens.yaml`.
+**The SIGHUP is what applies the change.** From 0.12.4, the reload also closes every live HTTP session bound to the rotated or revoked token, terminating its SSE stream; those clients get `SESSION_NOT_FOUND` and must `initialize` again with the new bearer. The server also polls `tokens.yaml` every 5 seconds (`MAAD_TOKENS_POLL_MS`; `0` disables), so a change written by another process applies within one interval even without a SIGHUP, and `maad_instance_reload` reloads it immediately.
 
 If a client process keeps its bearer in a Docker secret, update that secret and recreate only the client. The engine authenticates against `_auth/tokens.yaml`, not against client secrets.
 

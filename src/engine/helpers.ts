@@ -73,7 +73,18 @@ export async function readBlockContent(projectRoot: string, doc: DocumentRecord,
   return lines.slice(contentStart, contentEnd).join('\n').trim();
 }
 
-export function generateDocId(prefix: string, fields: Record<string, unknown>, existingIds?: string[]): string {
+/**
+ * Lazily yields existing doc IDs; only invoked when the sequence strategy runs.
+ * Receives the year-scoped sequence prefix (`<prefix>-<YYYY>-`) so a backend
+ * can return that complete ID range instead of a sample.
+ */
+export type ExistingDocIdSupplier = (sequencePrefix: string) => readonly string[];
+
+export function generateDocId(
+  prefix: string,
+  fields: Record<string, unknown>,
+  existingIds?: readonly string[] | ExistingDocIdSupplier,
+): string {
   const nameOrTitle = fields['name'] ?? fields['title'];
 
   // Slug strategy: use name/title if available
@@ -92,11 +103,13 @@ export function generateDocId(prefix: string, fields: Record<string, unknown>, e
   const year = new Date().getFullYear();
   const seqPrefix = `${prefix}-${year}-`;
   let maxSeq = 0;
+  const ids = typeof existingIds === 'function' ? existingIds(seqPrefix) : existingIds;
 
-  if (existingIds) {
-    for (const id of existingIds) {
+  if (ids) {
+    for (const id of ids) {
       if (id.startsWith(seqPrefix)) {
         const seqStr = id.slice(seqPrefix.length);
+        // Numeric, not lexicographic: "1000" must outrank "999".
         const num = parseInt(seqStr, 10);
         if (!isNaN(num) && num > maxSeq) maxSeq = num;
       }

@@ -1,10 +1,24 @@
 ---
 enabled: true
-current: 0.18.1
+current: 0.18.4
 dev_flow: formal
 ---
 
 # Version History
+
+## 0.18.4 - 2026-10-17
+
+Security dependency updates: simple-git 4.0.2 and refreshed lockfile entries (including proxy-addr), and the MCP SDK 1.32.1. Out-of-process token revocations now apply without a restart.
+
+## 0.18.3 - 2026-10-11
+
+Fix sequence ID collisions by considering all indexed IDs under the current year prefix, across document types and including soft-deleted records. Allocation no longer depends on a 10,000-document sample.
+
+Creating a document with an existing soft-deleted ID, including a name-derived slug, now returns DUPLICATE_DOC_ID instead of replacing the deleted record's index entry. IDs remain reserved while their soft-deleted index rows exist. Purge or hard delete releases those IDs, as does rebuilding a wiped index; normal maad reindex preserves the reservations. Cross-process allocation races remain outside this fix.
+
+## 0.18.2 - 2026-10-11
+
+Avoid unnecessary existing-ID scans when creating documents with explicit IDs or usable name/title slugs, including bulk creates. Sequential ID allocation and duplicate checks remain unchanged.
 
 ## 0.18.1 - 2026-09-25
 

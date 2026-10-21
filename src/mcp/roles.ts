@@ -11,6 +11,8 @@ const READER_TOOLS = [
   'maad_verify', 'maad_find_orphans', 'maad_changes_since', 'maad_semantic_search',
   'maad_history', 'maad_audit',
   'maad_subscribe', 'maad_unsubscribe',
+  // check is open to readers; refresh is admin-gated inside the tool itself.
+  'maad_instructions',
 ] as const;
 
 const WRITER_TOOLS = [
