@@ -1,0 +1,10 @@
+# Auth surface: token store, session binding, role gates and the MCP transport.
+# Changes here need a review from a code owner (see CLAUDE.md review gates).
+/src/auth/            @patchnetluis
+/src/mcp/transport/   @patchnetluis
+
+# Release and CI machinery.
+/.github/             @patchnetluis
+/package.json         @patchnetluis
+/package-lock.json    @patchnetluis
+/SECURITY.md          @patchnetluis
