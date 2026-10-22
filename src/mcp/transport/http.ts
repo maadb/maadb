@@ -130,7 +130,7 @@ function remoteAddrFor(req: IncomingMessage, trustProxy: boolean): string {
 
 type BodyRead =
   | { ok: true; parsed: unknown }
-  | { ok: false; reason: 'too_large' };
+  | { ok: false; reason: 'too_large' | 'aborted' };
 
 /**
  * Read a request body under a byte limit, whatever the transfer encoding. The
@@ -139,6 +139,8 @@ type BodyRead =
  * hands the parsed value to the SDK transport, which then does not read the
  * stream itself. Unparseable JSON yields `null`, which the transport rejects
  * as a JSON-RPC error exactly as it would an unparseable body of its own.
+ * A stream that errors or closes before `end` is a client abort: there is no
+ * one left to answer.
  */
 function readBodyLimited(req: IncomingMessage, maxBytes: number): Promise<BodyRead> {
   return new Promise(resolve => {
@@ -147,7 +149,8 @@ function readBodyLimited(req: IncomingMessage, maxBytes: number): Promise<BodyRe
     const cleanup = (): void => {
       req.off('data', onData);
       req.off('end', onEnd);
-      req.off('error', onError);
+      req.off('error', onAbort);
+      req.off('close', onAbort);
     };
     const onData = (chunk: Buffer | string): void => {
       const buf = typeof chunk === 'string' ? Buffer.from(chunk) : chunk;
@@ -168,13 +171,14 @@ function readBodyLimited(req: IncomingMessage, maxBytes: number): Promise<BodyRe
         resolve({ ok: true, parsed: null });
       }
     };
-    const onError = (): void => {
+    const onAbort = (): void => {
       cleanup();
-      resolve({ ok: true, parsed: null });
+      resolve({ ok: false, reason: 'aborted' });
     };
     req.on('data', onData);
     req.on('end', onEnd);
-    req.on('error', onError);
+    req.on('error', onAbort);
+    req.on('close', onAbort);
   });
 }
 
@@ -365,6 +369,10 @@ export async function startHttpTransport(opts: HttpTransportOptions): Promise<Ht
       let parsedBody: unknown;
       if (req.method === 'POST') {
         const body = await readBodyLimited(req, opts.maxBodyBytes);
+        if (!body.ok && body.reason === 'aborted') {
+          req.destroy();
+          return;
+        }
         if (!body.ok) {
           res.setHeader('Connection', 'close');
           res.once('finish', () => req.destroy());
