@@ -450,9 +450,13 @@ The vector store is `sqlite-vec` (in the same SQLite file); the lexical leg is F
 
 ## Current state
 
-**Current:** v0.18.0 — compact complete contracts and receipts, with independent response budgets. Hosts freeze a schema digest, create only when those expectations still hold (`maad_create_guarded`), and verify persisted content with `maad_document_receipt`.
+**Current:** v0.18.4 — compact complete contracts and receipts, with independent response budgets. Hosts freeze a schema digest, create only when those expectations still hold (`maad_create_guarded`), and verify persisted content with `maad_document_receipt`.
 
 Recent shipped scope:
+- **0.18.4** — Security dependency updates; out-of-process token revocations apply without a restart
+- **0.18.3** — Sequence ID allocation considers all indexed IDs, including soft-deleted records
+- **0.18.2** — Fewer unnecessary existing-ID scans on create
+- **0.18.1** — List items with commas or brackets round-trip exactly; dependency security updates
 - **0.18.0** — Compact complete delivery pages for contracts and receipts
 - **0.17.0** — Versioned guarded document creation (`maad_create_guarded`)
 - **0.16.0** — Exact document receipts (`maad_document_receipt`)
@@ -464,7 +468,7 @@ See [Version.md](Version.md) for the full release history. Feature notes for 0.1
 
 ## Stack
 
-- TypeScript strict, Node.js 24+ (current Active LTS)
+- TypeScript strict, Node.js 24.22.1 or later (current Active LTS)
 - 6 production dependencies: `better-sqlite3`, `gray-matter`, `js-yaml`, `simple-git`, `@modelcontextprotocol/sdk`, `pino`. Plus one **optional** dependency `sqlite-vec` (semantic retrieval) — lazily loaded only when `MAAD_SEMANTIC_ENABLE` is on; absent or failed to load ⇒ semantic disabled, engine unaffected
 - Vitest suite on every push/PR across Ubuntu and Windows
 - MIT license, pre-1.0, actively developed

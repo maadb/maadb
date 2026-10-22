@@ -1,4 +1,4 @@
-# Corpus Explorer Skill — Draft
+# Corpus Explorer Skill — Design Draft (shipped 0.15.0)
 
 > **Proposal archive** (shipped 0.15.0): managed path `_skills/corpus-explorer.md`,
 > artifact name `corpus-explorer`. Runtime source of truth is
