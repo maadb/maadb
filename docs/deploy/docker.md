@@ -44,14 +44,14 @@ Multi-stage build — install + build in a heavier image, copy only runtime arti
 
 ```dockerfile
 # Dockerfile
-FROM node:24-bookworm-slim AS build
+FROM node:24.22.1-bookworm-slim AS build
 WORKDIR /src
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
 RUN npm run build && npm prune --omit=dev
 
-FROM node:24-bookworm-slim AS runtime
+FROM node:24.22.1-bookworm-slim AS runtime
 RUN apt-get update \
  && apt-get install -y --no-install-recommends git ca-certificates tini \
  && rm -rf /var/lib/apt/lists/*

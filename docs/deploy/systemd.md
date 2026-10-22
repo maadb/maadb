@@ -4,7 +4,7 @@ Reference guide for running `maad serve --transport http` under systemd behind a
 
 ## Prerequisites
 
-- Node.js 24+
+- Node.js 24.22.1 or later
 - Git
 - A built MAADB checkout (`npm install && npm run build`) or a published npm install
 - A system user to run the service (not root)

@@ -468,7 +468,7 @@ See [Version.md](Version.md) for the full release history. Feature notes for 0.1
 
 ## Stack
 
-- TypeScript strict, Node.js 24+ (current Active LTS)
+- TypeScript strict, Node.js 24.22.1 or later (current Active LTS)
 - 6 production dependencies: `better-sqlite3`, `gray-matter`, `js-yaml`, `simple-git`, `@modelcontextprotocol/sdk`, `pino`. Plus one **optional** dependency `sqlite-vec` (semantic retrieval) — lazily loaded only when `MAAD_SEMANTIC_ENABLE` is on; absent or failed to load ⇒ semantic disabled, engine unaffected
 - Vitest suite on every push/PR across Ubuntu and Windows
 - MIT license, pre-1.0, actively developed
