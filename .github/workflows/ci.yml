@@ -38,13 +38,14 @@ jobs:
       # Markdown file. Markdown elsewhere (test fixtures) is code.
       - name: Classify changed files
         id: diff
+        # A pull request checks out its merge commit, whose first parent is the
+        # current base, so HEAD^1 gives exactly the PR's changes.
         env:
           EVENT: ${{ github.event_name }}
-          PR_BASE: ${{ github.event.pull_request.base.sha }}
           PUSH_BEFORE: ${{ github.event.before }}
         run: |
           case "$EVENT" in
-            pull_request) base="$PR_BASE" ;;
+            pull_request) base="$(git rev-parse HEAD^1)" ;;
             push) base="$PUSH_BEFORE" ;;
             *) base="" ;;
           esac
@@ -60,10 +61,12 @@ jobs:
 
   # The test jobs always run so the required checks always report; their steps
   # skip on docs-only changes. A skipped matrix job would report under an
-  # unexpanded name and leave the required checks pending.
+  # unexpanded name and leave the required checks pending, so the jobs also run
+  # when change detection fails, and then treat the change as code.
   test:
     name: test (${{ matrix.os }})
     needs: changes
+    if: ${{ !cancelled() }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -73,7 +76,7 @@ jobs:
         # on a Windows runner.
         os: [ubuntu-latest, windows-latest]
     env:
-      CODE: ${{ needs.changes.outputs.code }}
+      CODE: ${{ needs.changes.outputs.code || 'true' }}
     steps:
       - name: Docs-only change, skipping
         if: env.CODE != 'true'
@@ -113,7 +116,7 @@ jobs:
   audit:
     name: npm audit (production)
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
