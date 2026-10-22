@@ -1,20 +1,29 @@
 name: CodeQL
 
+# CodeQL is not a required check, so docs-only changes can skip the workflow.
 on:
   push:
     branches:
       - main
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
   pull_request:
     branches:
       - main
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
   schedule:
     - cron: '23 7 * * 2'
 
 permissions:
   contents: read
 
+# Same grouping as CI: pull requests cancel their older run; every other run
+# gets its own group so a queued main analysis is never dropped.
 concurrency:
-  group: codeql-${{ github.ref }}
+  group: codeql-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
