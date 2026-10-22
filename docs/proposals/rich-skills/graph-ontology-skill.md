@@ -1,4 +1,4 @@
-# Graph / Ontology Skill — Draft
+# Graph / Ontology Skill — Design Draft (shipped 0.15.0)
 
 > **Proposal archive** (shipped 0.15.0): managed path `_skills/graph-ontology.md`,
 > artifact name `graph-ontology`. Runtime source of truth is

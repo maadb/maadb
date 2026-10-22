@@ -16,13 +16,28 @@ Polling delta. Pass opaque cursor, get next page.
 
 // Subsequent
 {"name": "maad_changes_since", "arguments": {"cursor": "<opaque>", "limit": 100}}
+
+// Only some types
+{"name": "maad_changes_since", "arguments": {"cursor": "<opaque>", "docTypes": ["case", "case_event"]}}
 ```
 
-- Cursor is opaque base64url. Never parse it.
-- Ordering: `(updated_at ASC, doc_id ASC)`, strict `>`. No duplicate emissions.
-- Default page 100, max 1000.
-- Each delta carries `doc_id`, `doc_type`, `op` (`create` if version 1, else `update`), `updated_at`. Full content requires a follow-up `maad_get`.
-- Soft-deleted and hard-deleted documents are excluded from the feed. There is no dedicated `op: delete` emission.
+Each page:
+
+```json
+{
+  "changes": [
+    {"docId": "cas-2026-001", "docType": "case", "updatedAt": "2026-09-24T23:41:07.120Z", "operation": "update"}
+  ],
+  "nextCursor": "<opaque>",
+  "hasMore": false
+}
+```
+
+- Cursor is opaque base64url. Never parse it. Pass `nextCursor` back verbatim; `hasMore` says whether another page is ready now.
+- Ordering: `(updatedAt ASC, docId ASC)`, strict `>`. No duplicate emissions.
+- Default page 100, max 1000. `docTypes` restricts the feed to those types.
+- `operation` is `create` for a document at version 1, otherwise `update`. Full content requires a follow-up `maad_get`.
+- Soft-deleted and hard-deleted documents are excluded from the feed. There is no delete emission.
 
 ## When to poll
 
@@ -49,4 +64,14 @@ Required — without persistence you re-process the full feed on every restart.
 
 ## maad_subscribe
 
-Push notifications over the existing SSE channel (shipped). Same durable-write events as the change feed; manage with `maad_unsubscribe` / `maad_subscriptions`. Use `maad_changes_since` for historical catch-up on reconnect — notifications alone are not a complete history.
+Push notifications over the session's SSE channel, fired on durable writes. Each arrives as `notifications/resources/updated` with `uri=maad://records/<docId>`.
+
+```json
+{"name": "maad_subscribe", "arguments": {"docTypes": ["case"], "project": "alpha"}}
+```
+
+- Optional filters: `docTypes` (omit for all types) and `project` (defaults to the session's bound scope).
+- One subscription per session. Calling `maad_subscribe` again replaces the filter.
+- `maad_unsubscribe` releases it; admins can list active subscriptions with `maad_subscriptions`.
+
+Notifications alone are not a complete history. Use `maad_changes_since` to catch up after a reconnect.
