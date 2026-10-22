@@ -15,7 +15,7 @@ permissions:
 
 concurrency:
   group: audit-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   audit:
@@ -34,7 +34,14 @@ jobs:
       # Production dependencies are what ships in @maadb/core. Dev-only
       # advisories are tracked through Dependabot and do not fail this job.
       - name: Audit production dependencies
-        run: npm audit --omit=dev --audit-level=moderate
+        # Retry so a registry outage does not fail the job; a real finding fails
+        # all three attempts.
+        run: |
+          for attempt in 1 2 3; do
+            npm audit --omit=dev --audit-level=moderate && exit 0
+            sleep 30
+          done
+          exit 1
 
       - name: Verify registry signatures and provenance
         run: npm ci --ignore-scripts && npm audit signatures

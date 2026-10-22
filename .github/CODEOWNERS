@@ -1,5 +1,5 @@
 # Auth surface: token store, session binding, role gates and the MCP transport.
-# Changes here need a review from a code owner (see CLAUDE.md review gates).
+# Changes here need a review from a code owner.
 /src/auth/            @patchnetluis
 /src/mcp/transport/   @patchnetluis
 
