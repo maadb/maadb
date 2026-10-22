@@ -18,6 +18,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { createRequire } from 'node:module';
+import { request as httpRequest } from 'node:http';
 import { startHttpTransport, type HttpTransportHandle } from '../../src/mcp/transport/http.js';
 import { SessionRegistry } from '../../src/instance/session.js';
 import type { InstanceConfig } from '../../src/instance/config.js';
@@ -232,6 +233,65 @@ describe('R1 HTTP transport — body size cap', () => {
     expect(res.status).toBe(413);
     const body = await res.json();
     expect(body.errors[0].code).toBe('PAYLOAD_TOO_LARGE');
+  });
+
+  // A chunked request carries no Content-Length, so the header pre-check
+  // never fires; the limit has to hold on the bytes actually received.
+  function chunkedPost(port: number, chunks: string[]): Promise<{ status: number; body: string }> {
+    return new Promise((resolve, reject) => {
+      const req = httpRequest({
+        host: '127.0.0.1',
+        port,
+        path: '/mcp',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json, text/event-stream',
+          'Transfer-Encoding': 'chunked',
+        },
+      }, res => {
+        let body = '';
+        res.on('data', d => { body += String(d); });
+        res.on('end', () => resolve({ status: res.statusCode ?? 0, body }));
+      });
+      req.on('error', reject);
+      for (const c of chunks) req.write(c);
+      req.end();
+    });
+  }
+
+  it('rejects an oversized chunked body with 413 PAYLOAD_TOO_LARGE', async () => {
+    const started = await startWithAssignedPort({ maxBodyBytes: 128 });
+    handle = started.handle;
+    const json = JSON.stringify({ padding: 'x'.repeat(500) });
+    // Several chunks, none individually over the limit.
+    const parts = [json.slice(0, 100), json.slice(100, 200), json.slice(200, 300), json.slice(300)];
+
+    const res = await chunkedPost(started.port, parts);
+
+    expect(res.status).toBe(413);
+    expect(JSON.parse(res.body).errors[0].code).toBe('PAYLOAD_TOO_LARGE');
+  });
+
+  it('still accepts a chunked body inside the limit', async () => {
+    const started = await startWithAssignedPort({ maxBodyBytes: 4096 });
+    handle = started.handle;
+    const json = JSON.stringify(INIT_BODY);
+
+    const res = await chunkedPost(started.port, [json.slice(0, 40), json.slice(40)]);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toContain('"result"');
+  });
+
+  it('answers unparseable JSON with a JSON-RPC error', async () => {
+    const started = await startWithAssignedPort({ maxBodyBytes: 4096 });
+    handle = started.handle;
+
+    const res = await chunkedPost(started.port, ['{ not json']);
+
+    expect(res.status).toBe(400);
+    expect(JSON.parse(res.body).error.code).toBe(-32700);
   });
 });
 

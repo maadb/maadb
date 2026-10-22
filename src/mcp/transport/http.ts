@@ -128,6 +128,56 @@ function remoteAddrFor(req: IncomingMessage, trustProxy: boolean): string {
   return req.socket.remoteAddress ?? 'unknown';
 }
 
+type BodyRead =
+  | { ok: true; parsed: unknown }
+  | { ok: false; reason: 'too_large' };
+
+/**
+ * Read a request body under a byte limit, whatever the transfer encoding. The
+ * Content-Length pre-check cannot see a chunked body, so this counts bytes as
+ * they arrive and stops at the first chunk that crosses the limit. The caller
+ * hands the parsed value to the SDK transport, which then does not read the
+ * stream itself. Unparseable JSON yields `null`, which the transport rejects
+ * as a JSON-RPC error exactly as it would an unparseable body of its own.
+ */
+function readBodyLimited(req: IncomingMessage, maxBytes: number): Promise<BodyRead> {
+  return new Promise(resolve => {
+    const chunks: Buffer[] = [];
+    let received = 0;
+    const cleanup = (): void => {
+      req.off('data', onData);
+      req.off('end', onEnd);
+      req.off('error', onError);
+    };
+    const onData = (chunk: Buffer | string): void => {
+      const buf = typeof chunk === 'string' ? Buffer.from(chunk) : chunk;
+      received += buf.length;
+      if (received > maxBytes) {
+        cleanup();
+        req.pause();
+        resolve({ ok: false, reason: 'too_large' });
+        return;
+      }
+      chunks.push(buf);
+    };
+    const onEnd = (): void => {
+      cleanup();
+      try {
+        resolve({ ok: true, parsed: JSON.parse(Buffer.concat(chunks).toString('utf8')) });
+      } catch {
+        resolve({ ok: true, parsed: null });
+      }
+    };
+    const onError = (): void => {
+      cleanup();
+      resolve({ ok: true, parsed: null });
+    };
+    req.on('data', onData);
+    req.on('end', onEnd);
+    req.on('error', onError);
+  });
+}
+
 function writeJsonError(res: ServerResponse, status: number, code: string, message: string): void {
   if (!res.headersSent) {
     res.statusCode = status;
@@ -246,9 +296,9 @@ export async function startHttpTransport(opts: HttpTransportOptions): Promise<Ht
         return;
       }
 
-      // Body-size pre-check via Content-Length. Streaming bypass is possible but
-      // stretches the threat model — clients that chunk around this cap are
-      // already hostile, and 0.5.0's rate limiter catches sustained abuse.
+      // Body-size pre-check via Content-Length: cheap early reject for honest
+      // clients. A chunked body carries no Content-Length, so the enforced
+      // limit is the counting read further down, after auth.
       const contentLength = Number.parseInt(req.headers['content-length'] ?? '0', 10);
       if (Number.isFinite(contentLength) && contentLength > opts.maxBodyBytes) {
         writeJsonError(res, 413, 'PAYLOAD_TOO_LARGE',
@@ -308,6 +358,23 @@ export async function startHttpTransport(opts: HttpTransportOptions): Promise<Ht
         }
       }
 
+      // Read the POST body under the byte limit before routing to the SDK.
+      // Content-Length is advisory (absent on chunked bodies), so the limit
+      // that holds is the one counted here. Runs after auth, so an
+      // unauthenticated caller never gets a body buffered.
+      let parsedBody: unknown;
+      if (req.method === 'POST') {
+        const body = await readBodyLimited(req, opts.maxBodyBytes);
+        if (!body.ok) {
+          res.setHeader('Connection', 'close');
+          res.once('finish', () => req.destroy());
+          writeJsonError(res, 413, 'PAYLOAD_TOO_LARGE',
+            `Request body exceeds ${opts.maxBodyBytes} bytes`);
+          return;
+        }
+        parsedBody = body.parsed;
+      }
+
       const sessionIdHeader = req.headers['mcp-session-id'];
       const sessionId = typeof sessionIdHeader === 'string' ? sessionIdHeader : undefined;
 
@@ -348,7 +415,7 @@ export async function startHttpTransport(opts: HttpTransportOptions): Promise<Ht
         // it on outbound SSE pushes; those are server activity, not client.
         entry.lastActivityAt = Date.now();
         applyResponseHardening(res, req.method === 'GET' ? 'sse' : 'json');
-        await entry.transport.handleRequest(req, res);
+        await entry.transport.handleRequest(req, res, parsedBody);
         return;
       }
 
@@ -469,7 +536,7 @@ export async function startHttpTransport(opts: HttpTransportOptions): Promise<Ht
       await mcpServer.connect(transport as unknown as Parameters<typeof mcpServer.connect>[0]);
 
       applyResponseHardening(res, 'json');
-      await transport.handleRequest(req, res);
+      await transport.handleRequest(req, res, parsedBody);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       logger.error('mcp', 'http', `request error: ${msg}`);
