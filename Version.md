@@ -1,10 +1,16 @@
 ---
 enabled: true
-current: 0.18.4
+current: 0.18.5
 dev_flow: formal
 ---
 
 # Version History
+
+## 0.18.5 - 2026-10-22
+
+Security fixes. Frontmatter is parsed as YAML only: a Markdown file whose frontmatter names another language (such as `---js`) is rejected as a parse error and is never evaluated. Token admin tools are limited to the calling token's scope, so a token cannot issue, list, show, revoke or rotate tokens outside its own role and projects. The HTTP request body limit now applies to chunked bodies as they stream, with `413 PAYLOAD_TOO_LARGE` once crossed. Engine tools without a role assignment are refused.
+
+Requires Node.js 24.22.1 or later, which carries the Node.js October 2026 security fixes. Removes js-yaml 3 from gray-matter's dependency tree and updates hono and pino. Adds CodeQL and a production dependency audit to CI, and a security policy. No database schema changes.
 
 ## 0.18.4 - 2026-10-17
 
