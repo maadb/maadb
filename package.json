@@ -45,7 +45,7 @@
   "author": "MAADB Maintainers <noreply@maadb.ai>",
   "license": "MIT",
   "engines": {
-    "node": ">=24.0.0"
+    "node": ">=24.22.1"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.1",
