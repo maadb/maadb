@@ -30,6 +30,29 @@ function holdsWildcard(token: Pick<TokenRecord, 'projects'>): boolean {
   return token.projects.some(c => c.name === '*');
 }
 
+/**
+ * The role `token` holds on every project a `*` entry reaches, or null when it
+ * holds no wildcard. A `*` grant also reaches the projects `token` names with
+ * a reduced role, so those count too, except the ones listed in `except`: the
+ * other token names them itself, and each named entry is checked on its own.
+ */
+function wildcardReachRole(
+  token: Pick<TokenRecord, 'role' | 'projects'>,
+  except: ReadonlySet<string>,
+): Role | null {
+  let role = tokenRoleOn(token, '*');
+  if (role === null) return null;
+  for (const cap of token.projects) {
+    if (cap.name === '*' || except.has(cap.name)) continue;
+    role = minRole(role, tokenRoleOn(token, cap.name)!);
+  }
+  return role;
+}
+
+function namedProjects(token: Pick<TokenRecord, 'projects'>): Set<string> {
+  return new Set(token.projects.filter(c => c.name !== '*').map(c => c.name));
+}
+
 /** The role a requested cap would grant: its own role, capped by the global one. */
 function grantedRole(globalRole: Role, cap: ProjectCap): Role {
   return cap.role ? minRole(globalRole, cap.role) : globalRole;
@@ -46,6 +69,7 @@ export function issueExceedsScope(
   if (!roleSatisfies(issuer.role, spec.role)) {
     return `cannot issue a "${spec.role}" token from a "${issuer.role}" token`;
   }
+  const specNamed = namedProjects(spec);
   for (const cap of spec.projects) {
     const granted = grantedRole(spec.role, cap);
     if (cap.name === '*') {
@@ -54,7 +78,7 @@ export function issueExceedsScope(
       }
     }
     const held = cap.name === '*'
-      ? tokenRoleOn(issuer, '*')
+      ? wildcardReachRole(issuer, specNamed)
       : tokenRoleOn(issuer, cap.name);
     if (held === null) {
       return `the issuing token does not reach project "${cap.name}"`;
@@ -75,10 +99,10 @@ export function withinCallerScope(
   caller: Pick<TokenRecord, 'role' | 'projects'>,
   target: Pick<TokenRecord, 'projects'>,
 ): boolean {
+  const targetNamed = namedProjects(target);
   for (const cap of target.projects) {
     if (cap.name === '*') {
-      if (!holdsWildcard(caller)) return false;
-      const held = tokenRoleOn(caller, '*');
+      const held = wildcardReachRole(caller, targetNamed);
       if (held === null || !roleSatisfies(held, 'admin')) return false;
       continue;
     }

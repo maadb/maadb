@@ -58,6 +58,20 @@ describe('token scope rules', () => {
     expect(issueExceedsScope(writerToken, { role: 'admin', projects: [{ name: 'alpha' }] })).toMatch(/cannot issue/);
   });
 
+  it('counts reduced named entries when checking a wildcard', () => {
+    // Admin everywhere except "secret", where the named entry wins and grants reader.
+    const mostlyAdmin = { role: 'admin', projects: [{ name: '*' }, { name: 'secret', role: 'reader' }] } as const;
+    expect(issueExceedsScope(mostlyAdmin, { role: 'admin', projects: [{ name: '*' }] })).toMatch(/holds "reader"/);
+    expect(issueExceedsScope(mostlyAdmin, { role: 'reader', projects: [{ name: '*' }] })).toBeNull();
+    // Naming "secret" with a role the issuer holds there keeps the wildcard grant in scope.
+    expect(issueExceedsScope(mostlyAdmin, {
+      role: 'admin', projects: [{ name: '*' }, { name: 'secret', role: 'reader' }],
+    })).toBeNull();
+    expect(withinCallerScope(mostlyAdmin, { projects: [{ name: '*' }] })).toBe(false);
+    expect(withinCallerScope(mostlyAdmin, { projects: [{ name: 'beta' }] })).toBe(true);
+    expect(withinCallerScope(mostlyAdmin, { projects: [{ name: 'secret' }] })).toBe(false);
+  });
+
   it('lets a project-scoped admin act only on tokens inside its projects', () => {
     expect(withinCallerScope(alphaAdmin, { projects: [{ name: 'alpha' }] })).toBe(true);
     expect(withinCallerScope(alphaAdmin, { projects: [{ name: 'alpha' }, { name: 'beta' }] })).toBe(false);
