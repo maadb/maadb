@@ -94,8 +94,19 @@ describe('parseMatter — executable frontmatter engines are refused', () => {
     expect(g.__matterCodeRan).toBe(0);
   });
 
+  it.each(['json', 'constructor', 'valueOf'])('rejects ---%s frontmatter', (lang) => {
+    expect(() => parseMatter(`---${lang}\n{"a":1}\n---\nbody`)).toThrow(/is not supported; use YAML/);
+  });
+
+  it('rejects an unregistered language tag', () => {
+    expect(() => parseMatter('---toml\na = 1\n---\nbody')).toThrow(/not registered/);
+  });
+
   it('still parses plain and explicitly tagged YAML', () => {
     expect(parseMatter('---\na: 1\n---\n').data['a']).toBe(1);
     expect(parseMatter('---yaml\na: 2\n---\n').data['a']).toBe(2);
+    expect(parseMatter('---YML\na: 3\n---\n').data['a']).toBe(3);
+    expect(parseMatter('# no frontmatter\n').data).toEqual({});
+    expect(parseMatter('').data).toEqual({});
   });
 });

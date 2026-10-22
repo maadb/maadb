@@ -29,7 +29,7 @@ const stringPreservingYamlEngine = {
 };
 
 // gray-matter selects the parser from a language tag after the opening
-// delimiter (, ), and its built-in JavaScript engine
+// delimiter (`---js`, `---json`), and its built-in JavaScript engine
 // evaluates the block. Frontmatter is untrusted file content, so refuse that
 // engine outright; the 'js' tag resolves to the same 'javascript' entry.
 const refuseCodeEngine = {
@@ -42,6 +42,17 @@ const MATTER_OPTIONS = {
   engines: { yaml: stringPreservingYamlEngine, javascript: refuseCodeEngine },
 } as const;
 
+// Any other tag also picks an engine: gray-matter's JSON parser, or an
+// inherited Object.prototype member (`---constructor`) that yields junk data.
+// The engine has already run by the time the tag is known, which is why the
+// code engine is refused above; this check rejects the remaining non-YAML tags.
+const YAML_LANGUAGES = new Set(['yaml', 'yml']);
+
 export function parseMatter(raw: string): matter.GrayMatterFile<string> {
-  return matter(raw, MATTER_OPTIONS);
+  const parsed = matter(raw, MATTER_OPTIONS);
+  const language = parsed.language ?? 'yaml';
+  if (!YAML_LANGUAGES.has(language.toLowerCase())) {
+    throw new Error(`Frontmatter language "${language}" is not supported; use YAML`);
+  }
+  return parsed;
 }
