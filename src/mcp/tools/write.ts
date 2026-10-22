@@ -255,7 +255,7 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
     description: 'Validates one or all documents against their schemas. Returns validation report with any errors. Pass includePrecision: true to audit date fields for stored values coarser than their declared store_precision (0.6.7+). Pass includeConstraints: true to preflight string fields against declared structural constraints (max_length / soft_max_length / multiline, 0.12.0+) before enabling enforcement on existing data. Both audits are informational — never counted as invalid.',
     inputSchema: z.object({
       docId: z.string().optional().describe('Validate a specific document (all if omitted)'),
-      includePrecision: z.boolean().optional().describe('If true, report historical date values coarser than the schema\'s store_precision. Non-blocking; returns a precisionDrift array in the report.'),
+      includePrecision: z.boolean().optional().describe('If true, report historical date values coarser than the schema\'s store_precision, or finer on fields that set on_finer. Non-blocking; returns a precisionDrift array in the report, each entry with direction coarser or finer.'),
       includeConstraints: z.boolean().optional().describe('If true, report historical string values that would fail or warn under the schema\'s structural constraints. Non-blocking; returns a constraintViolations array in the report.'),
       project: z.string().optional().describe('Project name (multi-project mode only)'),
     }),

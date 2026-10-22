@@ -671,6 +671,7 @@ export function schemaInfo(ctx: EngineContext, dt: DocType): Result<SchemaInfoRe
     // 0.6.7 precision hints — already omitted when null/unset.
     if (field.storePrecision !== null) entry.storePrecision = field.storePrecision;
     if (field.onCoarser !== null) entry.onCoarser = field.onCoarser;
+    if (field.onFiner !== null) entry.onFiner = field.onFiner;
     if (field.displayPrecision !== null) entry.displayPrecision = field.displayPrecision;
     fields.push(entry);
   }

@@ -64,3 +64,7 @@ export function comparePrecision(a: Precision, b: Precision): -1 | 0 | 1 {
 export function isCoarserThan(actual: Precision, declared: Precision): boolean {
   return comparePrecision(actual, declared) < 0;
 }
+
+export function isFinerThan(actual: Precision, declared: Precision): boolean {
+  return comparePrecision(actual, declared) > 0;
+}
