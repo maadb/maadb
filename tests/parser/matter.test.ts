@@ -83,3 +83,30 @@ body`;
     expect(result.data['role']).toBe('admin');
   });
 });
+
+describe('parseMatter — executable frontmatter engines are refused', () => {
+  const g = globalThis as { __matterCodeRan?: number };
+
+  it.each(['js', 'javascript', 'JS', 'JavaScript'])('does not evaluate ---%s frontmatter', (lang) => {
+    g.__matterCodeRan = 0;
+    const raw = `---${lang}\n(globalThis.__matterCodeRan = 1, { title: 'x' })\n---\nbody`;
+    expect(() => parseMatter(raw)).toThrow(/Executable frontmatter engines/);
+    expect(g.__matterCodeRan).toBe(0);
+  });
+
+  it.each(['json', 'constructor', 'valueOf'])('rejects ---%s frontmatter', (lang) => {
+    expect(() => parseMatter(`---${lang}\n{"a":1}\n---\nbody`)).toThrow(/is not supported; use YAML/);
+  });
+
+  it('rejects an unregistered language tag', () => {
+    expect(() => parseMatter('---toml\na = 1\n---\nbody')).toThrow(/not registered/);
+  });
+
+  it('still parses plain and explicitly tagged YAML', () => {
+    expect(parseMatter('---\na: 1\n---\n').data['a']).toBe(1);
+    expect(parseMatter('---yaml\na: 2\n---\n').data['a']).toBe(2);
+    expect(parseMatter('---YML\na: 3\n---\n').data['a']).toBe(3);
+    expect(parseMatter('# no frontmatter\n').data).toEqual({});
+    expect(parseMatter('').data).toEqual({});
+  });
+});
