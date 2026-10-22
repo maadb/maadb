@@ -79,8 +79,8 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 The repository does not ship a Dockerfile; this one is a reference. Build it from a checkout of the release tag you want to run:
 
 ```bash
-git checkout v0.18.4
-docker build -t maadb:0.18.4 .
+git checkout v0.18.5
+docker build -t maadb:0.18.5 .
 ```
 
 ## 3. Compose stack with traefik
@@ -109,7 +109,7 @@ services:
       - ./letsencrypt:/letsencrypt
 
   maad:
-    image: maadb:0.18.4
+    image: maadb:0.18.5
     restart: unless-stopped
     environment:
       MAAD_TRANSPORT: http

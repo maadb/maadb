@@ -450,9 +450,10 @@ The vector store is `sqlite-vec` (in the same SQLite file); the lexical leg is F
 
 ## Current state
 
-**Current:** v0.18.4 — compact complete contracts and receipts, with independent response budgets. Hosts freeze a schema digest, create only when those expectations still hold (`maad_create_guarded`), and verify persisted content with `maad_document_receipt`.
+**Current:** v0.18.5 — security fixes: YAML-only frontmatter, token admin tools limited to the caller's token scope, and the HTTP body limit enforced on chunked requests. Requires Node.js 24.22.1 or later.
 
 Recent shipped scope:
+- **0.18.5** — YAML-only frontmatter, token tools limited to the caller's scope, chunked body limit, Node.js 24.22.1
 - **0.18.4** — Security dependency updates; out-of-process token revocations apply without a restart
 - **0.18.3** — Sequence ID allocation considers all indexed IDs, including soft-deleted records
 - **0.18.2** — Fewer unnecessary existing-ID scans on create
@@ -476,3 +477,23 @@ See [Version.md](Version.md) for the full release history. Feature notes for 0.1
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+## Dependency audit
+
+<!-- dependency-audit:start -->
+Last audit: 2026-10-22, release 0.18.5 (`npm audit` on the release lockfile).
+
+| Package | Version | Purpose | Result |
+|---|---|---|---|
+| `@modelcontextprotocol/sdk` | 1.32.1 | MCP server and transports | no known advisories |
+| `better-sqlite3` | 12.11.1 | SQLite index | no known advisories |
+| `gray-matter` | 4.0.3 | Frontmatter splitting (YAML engine only) | no known advisories |
+| `js-yaml` | 4.3.2 | YAML parsing (core schema) | no known advisories |
+| `pino` | 10.4.0 | Structured logging | no known advisories |
+| `simple-git` | 4.0.2 | Git history and audit commits | no known advisories |
+| `sqlite-vec` (optional) | 0.1.9 | Vector search for semantic retrieval | no known advisories |
+
+Full tree: 262 packages (161 production, including optional; 101 development). `npm audit`: 0 vulnerabilities in production dependencies, 0 in the full tree.
+
+gray-matter's own js-yaml 3 dependency is replaced with the js-yaml 4 version above through an npm `overrides` entry.
+<!-- dependency-audit:end -->
