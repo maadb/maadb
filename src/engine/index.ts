@@ -5,10 +5,10 @@
 
 import { existsSync, mkdirSync, statSync, readdirSync, statfsSync } from 'node:fs';
 import path from 'node:path';
-import { writeFileIfAbsent } from '../write-if-absent.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 
 import { ok, singleErr, type Result } from '../errors.js';
+import { writeFileIfAbsent } from '../write-if-absent.js';
 import { AsyncFifoMutex } from './mutex.js';
 import { documentReceipt } from './document-receipt.js';
 import { canonicalJson } from './document-receipt.js';
