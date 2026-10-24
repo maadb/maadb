@@ -450,9 +450,10 @@ The vector store is `sqlite-vec` (in the same SQLite file); the lexical leg is F
 
 ## Current state
 
-**Current:** v0.18.5 — security fixes: YAML-only frontmatter, token admin tools limited to the caller's token scope, and the HTTP body limit enforced on chunked requests. Requires Node.js 24.22.1 or later.
+**Current:** v0.18.6 — security fixes: token changes made by another process (such as `maad auth`) are no longer undone by the server, create-if-absent files are never overwritten, and dependency advisories are cleared. Requires Node.js 24.22.1 or later.
 
 Recent shipped scope:
+- **0.18.6** — Token changes from another process are kept; create-if-absent writes; zod and other dependency updates
 - **0.18.5** — YAML-only frontmatter, token tools limited to the caller's scope, chunked body limit, Node.js 24.22.1
 - **0.18.4** — Security dependency updates; out-of-process token revocations apply without a restart
 - **0.18.3** — Sequence ID allocation considers all indexed IDs, including soft-deleted records
@@ -481,7 +482,7 @@ MIT — see [LICENSE](LICENSE).
 ## Dependency audit
 
 <!-- dependency-audit:start -->
-Last audit: 2026-10-22, release 0.18.5 (`npm audit` on the release lockfile).
+Last audit: 2026-10-24, release 0.18.6 (`npm audit` on the release lockfile).
 
 | Package | Version | Purpose | Result |
 |---|---|---|---|
@@ -495,5 +496,5 @@ Last audit: 2026-10-22, release 0.18.5 (`npm audit` on the release lockfile).
 
 Full tree: 262 packages (161 production, including optional; 101 development). `npm audit`: 0 vulnerabilities in production dependencies, 0 in the full tree.
 
-gray-matter's own js-yaml 3 dependency is replaced with the js-yaml 4 version above through an npm `overrides` entry.
+gray-matter's own js-yaml 3 dependency is replaced with the js-yaml 4 version above through an npm `overrides` entry. zod 4.6.7 arrives through `@modelcontextprotocol/sdk`; 0.18.6 updated it, with body-parser 2.4.0, fast-uri 3.1.9 and ip-address 10.7.4, to clear advisories published after 0.18.5.
 <!-- dependency-audit:end -->
