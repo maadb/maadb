@@ -1,10 +1,16 @@
 ---
 enabled: true
-current: 0.18.5
+current: 0.18.6
 dev_flow: formal
 ---
 
 # Version History
+
+## 0.18.6 - 2026-10-24
+
+Security fixes. Token changes written by another process, such as a revocation made with `maad auth` while the server runs, are no longer undone by the server's next token change: each token change re-reads a changed `tokens.yaml` first, refuses to replace a file written during the update, and token changes are refused while the file is invalid. Rotate now writes the replacement token and the old token's revocation in a single update. Files created at init or boot (the registry, `.gitignore`, `CLAUDE.md`, `AGENTS.md` and managed skills) are no longer overwritten if they appear between the existence check and the write, and backup labels are trimmed without a backtracking regex.
+
+Updates zod, body-parser, fast-uri and ip-address to clear published advisories. No database schema changes.
 
 ## 0.18.5 - 2026-10-22
 
