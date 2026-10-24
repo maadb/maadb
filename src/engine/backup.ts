@@ -24,14 +24,24 @@ const LABEL_MAX_LEN = 32;
  * cap at LABEL_MAX_LEN. Returns null when the result is empty.
  */
 function sanitizeLabel(raw: string): string | null {
-  const sanitized = raw
+  const collapsed = raw
     .trim()
     .toLowerCase()
-    .replace(/[^a-z0-9-]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, LABEL_MAX_LEN)
-    .replace(/^-+|-+$/g, '');
+    .replace(/[^a-z0-9-]+/g, '-');
+  const sanitized = trimHyphens(trimHyphens(collapsed).slice(0, LABEL_MAX_LEN));
   return sanitized.length > 0 ? sanitized : null;
+}
+
+/**
+ * Strip leading and trailing hyphens. A loop rather than /-+$/, which a
+ * backtracking regex engine can run in quadratic time on a long hyphen run.
+ */
+function trimHyphens(s: string): string {
+  let start = 0;
+  let end = s.length;
+  while (start < end && s[start] === '-') start++;
+  while (end > start && s[end - 1] === '-') end--;
+  return s.slice(start, end);
 }
 
 function formatTagName(now: Date, label: string | null): string {

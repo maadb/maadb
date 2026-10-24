@@ -80,6 +80,18 @@ describe('backupCreate', () => {
     expect(result.errors[0]!.code).toBe('INVALID_FIELDS');
   });
 
+  it('strips hyphen runs at both ends, including after the cap', async () => {
+    const result = await engine.backupCreate({ label: `${'-'.repeat(50_000)}Mid Label${'-'.repeat(50_000)}` });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.tag).toMatch(/-mid-label$/);
+    // The cap can leave a trailing hyphen; it is stripped too.
+    const capped = await engine.backupCreate({ label: `${'b'.repeat(31)}-tail` });
+    expect(capped.ok).toBe(true);
+    if (!capped.ok) return;
+    expect(capped.value.tag).toMatch(new RegExp(`-${'b'.repeat(31)}$`));
+  });
+
   it('caps label at 32 chars', async () => {
     const longLabel = 'a'.repeat(50);
     const result = await engine.backupCreate({ label: longLabel });

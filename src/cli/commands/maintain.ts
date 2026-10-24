@@ -5,6 +5,7 @@
 import path from 'node:path';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { docId } from '../../types.js';
+import { writeFileIfAbsent } from '../../write-if-absent.js';
 import { GitLayer } from '../../git/index.js';
 import { generateSchemaMd } from '../../schema-md.js';
 import { generateClaudeMd, generateAgentsMd } from '../../claude-md.js';
@@ -28,27 +29,19 @@ export async function cmdInit(ctx: CliContext): Promise<void> {
     }
   }
 
-  const registryPath = path.join(root, '_registry', 'object_types.yaml');
-  if (!existsSync(registryPath)) {
-    writeFileSync(registryPath, 'types: {}\n', 'utf-8');
+  if (writeFileIfAbsent(path.join(root, '_registry', 'object_types.yaml'), 'types: {}\n')) {
     console.log('  Created _registry/object_types.yaml');
   }
 
-  const gitignorePath = path.join(root, '.gitignore');
-  if (!existsSync(gitignorePath)) {
-    writeFileSync(gitignorePath, '_backend/\n_import/\n', 'utf-8');
+  if (writeFileIfAbsent(path.join(root, '.gitignore'), '_backend/\n_import/\n')) {
     console.log('  Created .gitignore');
   }
 
   // Provider pointers — created once at init, user-owned afterward.
-  const claudeMdPath = path.join(root, 'CLAUDE.md');
-  if (!existsSync(claudeMdPath)) {
-    writeFileSync(claudeMdPath, generateClaudeMd(), 'utf-8');
+  if (writeFileIfAbsent(path.join(root, 'CLAUDE.md'), generateClaudeMd())) {
     console.log('  Created CLAUDE.md');
   }
-  const agentsMdPath = path.join(root, 'AGENTS.md');
-  if (!existsSync(agentsMdPath)) {
-    writeFileSync(agentsMdPath, generateAgentsMd(), 'utf-8');
+  if (writeFileIfAbsent(path.join(root, 'AGENTS.md'), generateAgentsMd())) {
     console.log('  Created AGENTS.md');
   }
 

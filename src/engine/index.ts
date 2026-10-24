@@ -3,8 +3,9 @@
 // Holds state, delegates to domain functions via EngineContext.
 // ============================================================================
 
-import { existsSync, mkdirSync, writeFileSync, statSync, readdirSync, statfsSync } from 'node:fs';
+import { existsSync, mkdirSync, statSync, readdirSync, statfsSync } from 'node:fs';
 import path from 'node:path';
+import { writeFileIfAbsent } from '../write-if-absent.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 
 import { ok, singleErr, type Result } from '../errors.js';
@@ -373,12 +374,13 @@ export class MaadEngine {
     // the engine at a fresh empty directory is a valid "architect mode" entry
     // point (empty registry, no schemas, empty index).
     const registryPath = path.join(this.projectRoot, '_registry', 'object_types.yaml');
-    if (!existsSync(registryPath)) {
-      if (this._readOnly) {
+    if (this._readOnly) {
+      if (!existsSync(registryPath)) {
         return singleErr('READ_ONLY', `Registry file does not exist and engine is in read-only mode: ${registryPath}`);
       }
+    } else {
       mkdirSync(path.dirname(registryPath), { recursive: true });
-      writeFileSync(registryPath, 'types: {}\n', 'utf-8');
+      writeFileIfAbsent(registryPath, 'types: {}\n');
     }
 
     const schemaDir = path.join(this.projectRoot, '_schema');

@@ -14,8 +14,9 @@
 // project dir never blocks the engine from starting.
 // ============================================================================
 
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
+import { writeFileIfAbsent } from './write-if-absent.js';
 import { MANAGED_ARTIFACTS, stampContent, checkProject } from './instructions/manifest.js';
 import { logInstructionsOutdated } from './logging.js';
 import { logger } from './engine/logger.js';
@@ -31,14 +32,19 @@ export function ensureProjectSkills(projectRoot: string): SkillsScaffoldResult {
 
   for (const artifact of MANAGED_ARTIFACTS) {
     const filePath = path.join(projectRoot, artifact.relPath);
+    // Fast path for the usual case. The write below still refuses to replace a
+    // file created after this check.
     if (existsSync(filePath)) {
       result.skipped.push(artifact.relPath);
       continue;
     }
     try {
       mkdirSync(path.dirname(filePath), { recursive: true });
-      writeFileSync(filePath, stampContent(artifact.name, artifact.generate()), 'utf-8');
-      result.created.push(artifact.relPath);
+      if (writeFileIfAbsent(filePath, stampContent(artifact.name, artifact.generate()))) {
+        result.created.push(artifact.relPath);
+      } else {
+        result.skipped.push(artifact.relPath);
+      }
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       result.errors.push({ file: artifact.relPath, message });
