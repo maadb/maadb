@@ -81,11 +81,28 @@ export class TokenStore {
    * disk while it stays live in the in-memory indexes until restart. A unique
    * temp path alone does not close that; the serialization does.
    *
-   * In-process only. Two processes mutating the same tokens.yaml can still
-   * clobber each other — the multi-process lease is not built yet, so the
-   * supported contract remains a single control-plane writer.
+   * In-process only. Across processes (the server and `maad auth`), every
+   * mutation first re-reads the file if it changed, and persist refuses to
+   * replace a file that changed after that read. A write landing between the
+   * last check and the rename can still be lost: there is no cross-process
+   * lock yet.
    */
   private mutations: Promise<unknown> = Promise.resolve();
+
+  /**
+   * Result of a reload done at the start of a mutation, not yet reported by
+   * `reloadIfChanged`. The mutation records the new signature, so without this
+   * the watcher would see no change and skip tearing down sessions bound to
+   * tokens the other process revoked.
+   */
+  private unreportedReload: Result<{ total: number; active: number }> | null = null;
+
+  /**
+   * True while the file on disk failed to parse or validate. Mutations refuse
+   * to run until a reload succeeds, so an operator's broken hand edit is
+   * reported rather than overwritten with the in-memory state.
+   */
+  private diskInvalid = false;
 
   /**
    * Stat signature (mtime, size, file id) of tokens.yaml as last loaded or
@@ -179,7 +196,10 @@ export class TokenStore {
    * authenticate until the next reload or restart.
    */
   async reload(): Promise<Result<{ total: number; active: number }>> {
-    return this.runExclusive(() => this.reloadInner());
+    return this.runExclusive(() => {
+      this.unreportedReload = null;
+      return this.reloadInner();
+    });
   }
 
   /** Unlocked body of `reload`. Callers must already hold the mutation chain. */
@@ -204,6 +224,7 @@ export class TokenStore {
       // A delete-then-recreate edit observed mid-way fails closed: every
       // bearer is rejected until the recreated file is seen, at most one
       // change-check interval later.
+      this.diskInvalid = false;
       this.records = [];
       this.byHash.clear();
       this.byId.clear();
@@ -222,14 +243,19 @@ export class TokenStore {
     try {
       data = yaml.load(raw);
     } catch (e) {
+      this.diskInvalid = true;
       return singleErr('TOKENS_FILE_INVALID',
         `tokens.yaml parse error at ${this.filePath}: ${e instanceof Error ? e.message : String(e)}`);
     }
     const shape = validateShape(data, this.filePath);
-    if (!shape.ok) return shape;
+    if (!shape.ok) {
+      this.diskInvalid = true;
+      return shape;
+    }
 
     // Swap in-place only after validation succeeds — preserves existing state
     // on parse failure.
+    this.diskInvalid = false;
     this.records = [];
     this.byHash.clear();
     this.byId.clear();
@@ -253,9 +279,34 @@ export class TokenStore {
   > {
     return this.runExclusive(async () => {
       const current = await fileSignature(this.filePath);
-      if (current === this.observedSignature) return { changed: false as const };
+      const pending = this.unreportedReload;
+      this.unreportedReload = null;
+      if (current === this.observedSignature) {
+        return pending ? { changed: true as const, result: pending } : { changed: false as const };
+      }
       return { changed: true as const, result: await this.reloadInner() };
     });
+  }
+
+  /**
+   * Start of every mutation: pick up a write by another process (`maad auth`
+   * or a hand edit) before changing anything. Without it, persist serializes
+   * this store's stale records and silently undoes that write, for example
+   * bringing back a token the operator just revoked. Refuses while the file
+   * on disk is invalid.
+   */
+  private async syncBeforeMutation(): Promise<Result<void>> {
+    const current = await fileSignature(this.filePath);
+    if (current !== this.observedSignature) {
+      const reloaded = await this.reloadInner();
+      this.unreportedReload = reloaded;
+      if (!reloaded.ok) return reloaded;
+    }
+    if (this.diskInvalid) {
+      return singleErr('TOKENS_FILE_INVALID',
+        `tokens.yaml at ${this.filePath} is invalid; fix the file before changing tokens`);
+    }
+    return ok(undefined);
   }
 
   /** Optional human label recorded at the top of tokens.yaml. */
@@ -290,7 +341,11 @@ export class TokenStore {
    * plaintext is never recoverable after this call.
    */
   async issue(spec: IssueSpec): Promise<Result<IssuedToken>> {
-    return this.runExclusive(() => this.issueInner(spec));
+    return this.runExclusive(async () => {
+      const synced = await this.syncBeforeMutation();
+      if (!synced.ok) return synced;
+      return this.issueInner(spec);
+    });
   }
 
   /** Unlocked body of `issue`. Callers must already hold the mutation chain. */
@@ -344,7 +399,11 @@ export class TokenStore {
    * an already-revoked record is a no-op and returns the existing record.
    */
   async revoke(id: TokenId): Promise<Result<TokenRecord>> {
-    return this.runExclusive(() => this.revokeInner(id));
+    return this.runExclusive(async () => {
+      const synced = await this.syncBeforeMutation();
+      if (!synced.ok) return synced;
+      return this.revokeInner(id);
+    });
   }
 
   /** Unlocked body of `revoke`. Callers must already hold the mutation chain. */
@@ -370,7 +429,11 @@ export class TokenStore {
    * revokedAt set.
    */
   async rotate(id: TokenId): Promise<Result<IssuedToken>> {
-    return this.runExclusive(() => this.rotateInner(id));
+    return this.runExclusive(async () => {
+      const synced = await this.syncBeforeMutation();
+      if (!synced.ok) return synced;
+      return this.rotateInner(id);
+    });
   }
 
   /**
@@ -446,6 +509,13 @@ export class TokenStore {
       // rename keeps mtime, size and file id. Stat'ing the target afterwards
       // would credit a write by another process in that gap to us and hide it.
       ownSignature = await fileSignature(tmp);
+      // Refuse to replace a file another process wrote after this mutation
+      // re-read it: renaming over it would drop that write.
+      if (await fileSignature(this.filePath) !== this.observedSignature) {
+        try { await unlink(tmp); } catch { /* already gone */ }
+        return singleErr('TOKENS_FILE_INVALID',
+          `tokens.yaml at ${this.filePath} changed on disk during this update; nothing was written, retry`);
+      }
       await rename(tmp, this.filePath);
     } catch (e) {
       // Best-effort sweep so a failed persist doesn't strand a temp file
