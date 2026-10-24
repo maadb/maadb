@@ -4,8 +4,9 @@
 // ============================================================================
 
 import { simpleGit, type SimpleGit } from 'simple-git';
-import { existsSync, writeFileSync, statSync, unlinkSync } from 'node:fs';
+import { existsSync, statSync, unlinkSync } from 'node:fs';
 import path from 'node:path';
+import { writeFileIfAbsent } from '../write-if-absent.js';
 
 import type {
   DocId,
@@ -71,10 +72,7 @@ export class GitLayer {
     await this.git.init();
 
     // Create .gitignore if it doesn't exist
-    const gitignorePath = path.join(this.projectRoot, '.gitignore');
-    if (!existsSync(gitignorePath)) {
-      writeFileSync(gitignorePath, '_backend/\n', 'utf-8');
-    }
+    writeFileIfAbsent(path.join(this.projectRoot, '.gitignore'), '_backend/\n');
 
     // Initial commit. Per-invocation identity env — same fragility as
     // autoCommit: a host without `git config user.name/email` would otherwise
