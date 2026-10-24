@@ -12,6 +12,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { readFile, writeFile } from 'node:fs/promises';
 import { makeTokenFixture, type TokenFixture } from '../support/token-fixture.js';
 import { TokenStore } from '../../src/auth/token-store.js';
+import type { TokenRecord } from '../../src/auth/types.js';
 
 const fsHooks = vi.hoisted(() => ({
   afterTmpWrite: null as null | (() => Promise<void>),
@@ -125,6 +126,52 @@ describe('TokenStore — writes by another process', () => {
     const retried = await server.issue({ role: 'reader', projects: [{ name: '*' }] });
     expect(retried.ok).toBe(true);
     expect((await loadStore(fixture.tmpRoot)).lookupById(fixture.record.id)?.revokedAt).toBeDefined();
+  });
+
+  it('rolls back a refused revoke, keeping the other process\'s write', async () => {
+    fixture = await makeTokenFixture();
+    const server = fixture.store;
+    const cli = await loadStore(fixture.tmpRoot);
+    let other: TokenRecord | null = null;
+    fsHooks.afterTmpWrite = async () => {
+      const issued = await cli.issue({ role: 'reader', projects: [{ name: '*' }] });
+      if (issued.ok) other = issued.value.record;
+    };
+    const revoked = await server.revoke(fixture.record.id);
+    expect(revoked.ok).toBe(false);
+    expect(server.lookupById(fixture.record.id)?.revokedAt).toBeUndefined();
+
+    const onDisk = await loadStore(fixture.tmpRoot);
+    expect(onDisk.lookupById(fixture.record.id)?.revokedAt).toBeUndefined();
+    expect(other).not.toBeNull();
+    expect(onDisk.lookupById(other!.id)).toBeDefined();
+  });
+
+  it('applies a rotate in one write, so a refused rotate leaves neither half', async () => {
+    fixture = await makeTokenFixture();
+    const server = fixture.store;
+    const cli = await loadStore(fixture.tmpRoot);
+    fsHooks.afterTmpWrite = async () => {
+      expect((await cli.issue({ role: 'reader', projects: [{ name: 'p' }] })).ok).toBe(true);
+    };
+    const rotated = await server.rotate(fixture.record.id);
+    expect(rotated.ok).toBe(false);
+
+    // The original stays active, no replacement exists, and the other
+    // process's token survived.
+    expect(server.lookupById(fixture.record.id)?.revokedAt).toBeUndefined();
+    expect(server.size()).toBe(1);
+    const onDisk = await loadStore(fixture.tmpRoot);
+    expect(onDisk.lookupById(fixture.record.id)?.revokedAt).toBeUndefined();
+    expect(onDisk.size()).toBe(2);
+    expect(onDisk.list().filter(r => r.revokedAt === undefined)).toHaveLength(2);
+
+    // A retry succeeds and revokes the original in the same write.
+    const retried = await server.rotate(fixture.record.id);
+    expect(retried.ok).toBe(true);
+    const after = await loadStore(fixture.tmpRoot);
+    expect(after.lookupById(fixture.record.id)?.revokedAt).toBeDefined();
+    expect(after.size()).toBe(3);
   });
 
   it('refuses to mutate while the file on disk is invalid, and leaves it as written', async () => {
