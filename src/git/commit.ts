@@ -183,9 +183,10 @@ export async function autoCommit(
   opts: CommitOptions,
 ): Promise<CommitOutcome> {
   try {
-    // Stage specified files
+    // Verbose staging emits output for changed paths, avoiding simple-git's
+    // extra completion delay for silent commands. Output stays in its buffer.
     try {
-      await git.add(opts.files);
+      await git.add(['--verbose', ...opts.files]);
     } catch (e) {
       return {
         status: 'failed',
