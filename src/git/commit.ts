@@ -185,8 +185,9 @@ export async function autoCommit(
   try {
     // Verbose staging emits output for changed paths, avoiding simple-git's
     // extra completion delay for silent commands. Output stays in its buffer.
+    // `--` keeps a path that starts with '-' from being read as an option.
     try {
-      await git.add(['--verbose', ...opts.files]);
+      await git.add(['--verbose', '--', ...opts.files]);
     } catch (e) {
       return {
         status: 'failed',
@@ -236,7 +237,7 @@ export async function autoCommit(
       // this merges over process.env and strips askpass vars.
       result = await git
         .env(buildGitEnv())
-        .commit(message, opts.files);
+        .commit(message, ['--', ...opts.files]);
     } catch (e) {
       // The add succeeded but the commit itself failed — worst case, since
       // the working tree is now dirty with staged but uncommitted changes.
