@@ -1,10 +1,14 @@
 ---
 enabled: true
-current: 0.18.6
+current: 0.18.7
 dev_flow: formal
 ---
 
 # Version History
+
+## 0.18.7 - 2026-10-26
+
+Faster audited writes. Staging uses `git add --verbose`, so simple-git no longer adds a fixed wait after the silent `git add` on every write in `audit` history mode. `git add` and `git commit` now pass paths after `--`, so a document path starting with `-` is committed instead of being read as an option. No dependency or database schema changes.
 
 ## 0.18.6 - 2026-10-24
 
