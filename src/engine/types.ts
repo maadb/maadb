@@ -570,6 +570,7 @@ export interface SchemaInfoResult {
     // 0.6.7 — precision hints, omitted when null/unset.
     storePrecision?: string;
     onCoarser?: 'warn' | 'error';
+    onFiner?: 'warn' | 'error';
     displayPrecision?: string;
   }>;
   // 0.7.0 — omitted when the schema has no template.
@@ -585,13 +586,15 @@ export interface ValidationReport {
    * 0.6.7 — populated only when the caller passes `includePrecision: true`.
    * Informational; never counted as invalid. Each entry reports a date
    * field whose stored precision is coarser than the schema's declared
-   * store_precision. Use to plan migrations without blocking reads.
+   * store_precision, or (0.19.0) finer on a field that sets on_finer.
+   * Use to plan migrations without blocking reads.
    */
   precisionDrift?: Array<{
     docId: DocId;
     field: string;
     declared: string;
     actual: string;
+    direction: 'coarser' | 'finer';
   }>;
   /**
    * 0.12.0 — populated only when the caller passes `includeConstraints: true`.

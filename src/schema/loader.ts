@@ -256,7 +256,7 @@ function parseSchemaDefinition(
 // engines older than the key (but carrying this gate) reject it by name.
 const KNOWN_FIELD_KEYS: ReadonlySet<string> = new Set([
   'type', 'index', 'role', 'format', 'target', 'values', 'item_type', 'default',
-  'store_precision', 'on_coarser', 'display_precision',
+  'store_precision', 'on_coarser', 'on_finer', 'display_precision',
   'max_length', 'soft_max_length', 'multiline',
 ]);
 
@@ -333,6 +333,7 @@ function parseFieldDefinition(
   // --- 0.6.7 schema precision hints (only meaningful on date fields) -----
   let storePrecision: Precision | null = null;
   let onCoarser: 'warn' | 'error' | null = null;
+  let onFiner: 'warn' | 'error' | null = null;
   let displayPrecision: Precision | null = null;
 
   if (fieldType === 'date') {
@@ -362,6 +363,23 @@ function parseFieldDefinition(
       onCoarser = 'warn';
     }
 
+    // 0.19.0 — on_finer is opt-in with no default: finer-than-declared values
+    // stay accepted unless the schema asks otherwise. Requires store_precision,
+    // since "finer" has no meaning without a declared precision.
+    const ofRaw = fd['on_finer'];
+    if (ofRaw !== undefined) {
+      if (ofRaw !== 'warn' && ofRaw !== 'error') {
+        errors.push(maadError('SCHEMA_INVALID',
+          `Schema "${schemaRef}" field "${name}" has invalid on_finer "${String(ofRaw)}". ` +
+          `Valid: warn, error`));
+      } else if (spRaw === undefined) {
+        errors.push(maadError('SCHEMA_INVALID',
+          `Schema "${schemaRef}" field "${name}" declares on_finer without store_precision`));
+      } else {
+        onFiner = ofRaw;
+      }
+    }
+
     const dpRaw = fd['display_precision'];
     if (dpRaw !== undefined) {
       if (!isPrecision(dpRaw)) {
@@ -385,7 +403,7 @@ function parseFieldDefinition(
     }
   } else {
     // Non-date fields must not declare precision keys.
-    for (const k of ['store_precision', 'on_coarser', 'display_precision']) {
+    for (const k of ['store_precision', 'on_coarser', 'on_finer', 'display_precision']) {
       if (fd[k] !== undefined) {
         errors.push(maadError('SCHEMA_INVALID',
           `Schema "${schemaRef}" field "${name}" of type "${fieldType}" cannot declare "${k}" — only valid on date fields`));
@@ -451,6 +469,7 @@ function parseFieldDefinition(
     itemType,
     storePrecision,
     onCoarser,
+    onFiner,
     displayPrecision,
     maxLength,
     softMaxLength,
