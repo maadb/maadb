@@ -5,10 +5,10 @@
 
 import type { SimpleGit } from 'simple-git';
 import { parseMatter } from '../parser/matter.js';
+import { readHistoricalFile, resolveCommit } from './historical-file.js';
 import {
   commitSha as toCommitSha,
   type DocId,
-  type CommitSha,
   type SnapshotResult,
 } from '../types.js';
 
@@ -18,58 +18,51 @@ export async function getSnapshot(
   docId: DocId,
   at: string,
 ): Promise<SnapshotResult | null> {
-  // Resolve 'at' to a commit SHA
+  const head = await resolveCommit(git, 'HEAD');
+  if (!head) return null;
+
   let sha: string;
   let timestamp: string;
-
-  if (/^[0-9a-f]{6,40}$/i.test(at)) {
-    // Already a SHA
-    sha = at;
+  if (/^[0-9a-f]{6,64}$/i.test(at)) {
+    const resolved = await resolveCommit(git, at);
+    if (!resolved) return null;
+    sha = resolved;
     try {
-      const info = await git.raw(['log', '-1', '--format=%aI', sha]);
-      timestamp = info.trim();
+      timestamp = (await git.raw(['log', '-1', '--format=%aI', sha])).trim();
     } catch {
       return null;
     }
   } else {
-    // Treat as a date — find the last commit before that date
     try {
+      // Filtering --follow with --before can hide the later rename before Git
+      // learns the old path. Walk first, then apply Git's date interpretation
+      // to the committer timestamp (the same clock used by --before).
+      const cutoffArg = (await git.raw(['rev-parse', `--until=${at}`])).trim();
+      const cutoff = /^--min-age=(\d+)$/.exec(cutoffArg);
+      if (!cutoff) return null;
       const result = await git.raw([
-        'log', '-1', `--before=${at}`, '--format=%H|%aI', '--', filePath,
+        '--literal-pathspecs', 'log', '-m', '--follow', '--find-renames',
+        '--format=%H|%aI|%ct', head, '--', filePath,
       ]);
-      if (!result.trim()) return null;
-      const parts = result.trim().split('|');
-      sha = parts[0]!;
-      timestamp = parts[1]!;
+      const entry = result.trim().split('\n')
+        .map(line => line.split('|'))
+        .find(parts => parts.length === 3 && Number(parts[2]) <= Number(cutoff[1]));
+      if (!entry) return null;
+      sha = entry[0]!;
+      timestamp = entry[1]!;
     } catch {
       return null;
     }
   }
 
-  // Read file content at that commit
-  let content: string;
-  try {
-    content = await git.show(`${sha}:${filePath}`);
-  } catch {
-    return null;
-  }
-
-  // Parse frontmatter and body
-  let frontmatter: Record<string, unknown> = {};
-  let body = content;
-  try {
-    const parsed = parseMatter(content);
-    frontmatter = parsed.data as Record<string, unknown>;
-    body = parsed.content.trim();
-  } catch {
-    // If parsing fails, return raw content as body
-  }
-
+  const historical = await readHistoricalFile(git, filePath, docId, sha, head);
+  if (!historical) return null;
+  const parsed = parseMatter(historical.content);
   return {
     docId,
     commit: toCommitSha(sha),
     timestamp,
-    frontmatter,
-    body,
+    frontmatter: parsed.data as Record<string, unknown>,
+    body: parsed.content.trim(),
   };
 }
