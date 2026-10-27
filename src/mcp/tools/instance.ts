@@ -193,7 +193,10 @@ export function registerReload(server: McpServer, ctx: InstanceCtx): number {
       }
     }
 
-    const result = await performInstanceReload(ctx, 'tool');
+    // Keep the caller alive long enough to carry this response if its bearer
+    // was revoked on disk. Its next request is still rejected by auth, and a
+    // later unexcluded eviction pass removes the retained session.
+    const result = await performInstanceReload(ctx, 'tool', { excludeSessionId: sessionId });
     if (!result.ok) return errorResponse(result.errors);
 
     return successResponse({

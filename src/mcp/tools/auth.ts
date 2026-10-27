@@ -21,6 +21,7 @@ import { roleSatisfies, type Role } from '../roles.js';
 import { maadError } from '../../errors.js';
 import { tokenId as toTokenId } from '../../auth/types.js';
 import type { ProjectCap, IssueSpec, TokenRecord } from '../../auth/types.js';
+import { issueExceedsScope, withinCallerScope } from '../../auth/scope.js';
 
 const ROLE_ENUM = z.enum(['reader', 'writer', 'admin']);
 
@@ -53,6 +54,26 @@ function requireTokenStore(ctx: InstanceCtx): ReturnType<typeof errorResponse> |
   return null;
 }
 
+/**
+ * The token this session authenticated with. Admin on the bound projects is
+ * not enough on its own: every token operation is also limited to the
+ * caller's token scope (see auth/scope.ts). A session with no token cannot
+ * be scoped, so it is refused rather than treated as unrestricted.
+ */
+function callerToken(ctx: InstanceCtx, sessionId: string): TokenRecord | ReturnType<typeof errorResponse> {
+  const token = ctx.sessions.get(sessionId)?.token;
+  if (!token) {
+    return errorResponse([maadError('INSUFFICIENT_ROLE',
+      'admin auth tools require a session authenticated with a token; this session has none.')]);
+  }
+  return token;
+}
+
+function outOfScope(id: string): ReturnType<typeof errorResponse> {
+  // Same answer as a missing id so out-of-scope tokens are not enumerable.
+  return errorResponse([maadError('TOKEN_NOT_FOUND', `No token with id ${id}`)]);
+}
+
 /** Scrub `hash` from a record before returning to clients — they never need it. */
 function sanitize(record: TokenRecord): Omit<TokenRecord, 'hash'> {
   const { hash, ...rest } = record;
@@ -81,6 +102,9 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
     const roleErr = requireAdminEverywhere(ctx, sid);
     if (roleErr) return roleErr;
 
+    const caller = callerToken(ctx, sid);
+    if (!('id' in caller)) return caller;
+
     const spec: IssueSpec = {
       role: args.role as Role,
       projects: args.projects.map(p => {
@@ -93,6 +117,11 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
     if (args.agentId !== undefined) spec.agentId = args.agentId;
     if (args.userId !== undefined) spec.userId = args.userId;
     if (args.expiresAt !== undefined) spec.expiresAt = args.expiresAt;
+
+    const exceeds = issueExceedsScope(caller, spec);
+    if (exceeds !== null) {
+      return errorResponse([maadError('INSUFFICIENT_ROLE', `Token scope exceeded: ${exceeds}.`)]);
+    }
 
     const result = await ctx.tokens!.issue(spec);
     if (!result.ok) return errorResponse(result.errors);
@@ -115,6 +144,11 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
     const roleErr = requireAdminEverywhere(ctx, sid);
     if (roleErr) return roleErr;
 
+    const caller = callerToken(ctx, sid);
+    if (!('id' in caller)) return caller;
+    const target = ctx.tokens!.lookupById(toTokenId(args.id));
+    if (target && !withinCallerScope(caller, target)) return outOfScope(args.id);
+
     const result = await ctx.tokens!.revoke(toTokenId(args.id));
     if (!result.ok) return errorResponse(result.errors);
     // Tear down sessions bound to the revoked token now — excluding this
@@ -136,6 +170,11 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
     const sid = resolveSessionId(extra);
     const roleErr = requireAdminEverywhere(ctx, sid);
     if (roleErr) return roleErr;
+
+    const caller = callerToken(ctx, sid);
+    if (!('id' in caller)) return caller;
+    const target = ctx.tokens!.lookupById(toTokenId(args.id));
+    if (target && !withinCallerScope(caller, target)) return outOfScope(args.id);
 
     const result = await ctx.tokens!.rotate(toTokenId(args.id));
     if (!result.ok) return errorResponse(result.errors);
@@ -162,12 +201,15 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
     const roleErr = requireAdminEverywhere(ctx, sid);
     if (roleErr) return roleErr;
 
-    const all = ctx.tokens!.list();
+    const caller = callerToken(ctx, sid);
+    if (!('id' in caller)) return caller;
+
+    const all = ctx.tokens!.list().filter(r => withinCallerScope(caller, r));
     const filtered = args.includeRevoked === true ? all : all.filter(r => r.revokedAt === undefined);
     return successResponse({
       tokens: filtered.map(sanitize),
       total: filtered.length,
-      activeCount: ctx.tokens!.activeCount(),
+      activeCount: all.filter(r => r.revokedAt === undefined).length,
     }, 'maad_list_tokens');
   });
 
@@ -183,8 +225,11 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
     const roleErr = requireAdminEverywhere(ctx, sid);
     if (roleErr) return roleErr;
 
+    const caller = callerToken(ctx, sid);
+    if (!('id' in caller)) return caller;
+
     const record = ctx.tokens!.lookupById(toTokenId(args.id));
-    if (!record) {
+    if (!record || !withinCallerScope(caller, record)) {
       return errorResponse([maadError('TOKEN_NOT_FOUND', `No token with id ${args.id}`)]);
     }
     return successResponse({ record: sanitize(record) }, 'maad_show_token');

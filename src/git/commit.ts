@@ -54,33 +54,46 @@ export function resolveCommitAuthor(env: NodeJS.ProcessEnv = process.env): GitCo
 }
 
 /**
- * Env vars simple-git >= 3.36.0 (CVE-2026-6951 hardening) refuses to pass to
- * a spawned git process unless an allowUnsafe* flag is set. Mirrors the map
- * in @simple-git/argv-parser's parseEnv (keys are matched case-insensitively).
- * The engine never needs any of them — it runs local plumbing commands that
- * must never open an editor, pager, ssh connection, or credential prompt —
- * but several (EDITOR, PAGER, GIT_ASKPASS) are present in every interactive
- * shell and on GitHub Actions runners, so they must be stripped rather than
- * passed through.
+ * The commit-identity env keys above. simple-git 4 guards every `GIT_*` key:
+ * ambient ones are dropped from the child env, and explicitly supplied ones
+ * throw unless listed in the instance's `allowEnvironment` option. GitLayer
+ * allows exactly these four.
+ */
+export const GIT_IDENTITY_ENV_KEYS: readonly string[] = [
+  'GIT_AUTHOR_NAME',
+  'GIT_AUTHOR_EMAIL',
+  'GIT_COMMITTER_NAME',
+  'GIT_COMMITTER_EMAIL',
+];
+
+/**
+ * Env vars simple-git refuses to pass to a spawned git process unless an
+ * allowUnsafe* flag is set: the non-`git_` entries of the map in
+ * @simple-git/argv-parser's parseEnv (`git_` keys are covered by the prefix
+ * check in buildGitEnv; keys are matched case-insensitively). The engine never
+ * needs any of them — it runs local plumbing commands that must never open an
+ * editor, pager, ssh connection, or credential prompt — but several (EDITOR,
+ * VISUAL, PAGER, GIT_ASKPASS) are present in every interactive shell and on
+ * GitHub Actions runners, so they must be stripped rather than passed through.
  */
 const UNSAFE_GIT_ENV_KEYS = new Set([
-  'editor', 'pager', 'prefix', 'ssh_askpass',
-  'git_askpass', 'git_editor', 'git_sequence_editor', 'git_pager',
-  'git_ssh', 'git_ssh_command', 'git_proxy_command',
-  'git_exec_path', 'git_external_diff', 'git_template_dir',
-  'git_config', 'git_config_global', 'git_config_system', 'git_config_count',
+  'editor', 'visual', 'pager', 'prefix', 'ssh_askpass',
 ]);
 
 /**
  * The environment for engine-spawned git processes: the parent env (PATH /
  * HOME / safe.directory must survive — simple-git's .env() REPLACES, not
- * augments) minus the unsafe keys above, with the commit identity merged
- * over it.
+ * augments) minus the unsafe keys above and every ambient `GIT_*` key, with
+ * the commit identity merged over it. simple-git 4 drops ambient `GIT_*` keys
+ * on its own, but throws if one arrives through .env(), so they are removed
+ * here; only GIT_IDENTITY_ENV_KEYS reach git.
  */
 export function buildGitEnv(): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const [key, value] of Object.entries(process.env)) {
-    if (!UNSAFE_GIT_ENV_KEYS.has(key.toLowerCase())) env[key] = value;
+    const lower = key.toLowerCase().trim();
+    if (UNSAFE_GIT_ENV_KEYS.has(lower) || lower.startsWith('git_')) continue;
+    env[key] = value;
   }
   return { ...env, ...resolveCommitAuthor() };
 }
@@ -170,9 +183,11 @@ export async function autoCommit(
   opts: CommitOptions,
 ): Promise<CommitOutcome> {
   try {
-    // Stage specified files
+    // Verbose staging emits output for changed paths, avoiding simple-git's
+    // extra completion delay for silent commands. Output stays in its buffer.
+    // `--` keeps a path that starts with '-' from being read as an option.
     try {
-      await git.add(opts.files);
+      await git.add(['--verbose', '--', ...opts.files]);
     } catch (e) {
       return {
         status: 'failed',
@@ -222,7 +237,7 @@ export async function autoCommit(
       // this merges over process.env and strips askpass vars.
       result = await git
         .env(buildGitEnv())
-        .commit(message, opts.files);
+        .commit(message, ['--', ...opts.files]);
     } catch (e) {
       // The add succeeded but the commit itself failed — worst case, since
       // the working tree is now dirty with staged but uncommitted changes.

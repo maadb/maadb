@@ -1,10 +1,40 @@
 ---
 enabled: true
-current: 0.18.1
+current: 0.18.7
 dev_flow: formal
 ---
 
 # Version History
+
+## 0.18.7 - 2026-10-26
+
+Faster audited writes. Staging uses `git add --verbose`, so simple-git no longer adds a fixed wait after the silent `git add` on every write in `audit` history mode. `git add` and `git commit` now pass paths after `--`, so a document path starting with `-` is committed instead of being read as an option. No dependency or database schema changes.
+
+## 0.18.6 - 2026-10-24
+
+Security fixes. Token changes written by another process, such as a revocation made with `maad auth` while the server runs, are no longer undone by the server's next token change: each token change re-reads a changed `tokens.yaml` first, refuses to replace a file written during the update, and token changes are refused while the file is invalid. Rotate now writes the replacement token and the old token's revocation in a single update. Files created at init or boot (the registry, `.gitignore`, `CLAUDE.md`, `AGENTS.md` and managed skills) are no longer overwritten if they appear between the existence check and the write, and backup labels are trimmed without a backtracking regex.
+
+Updates zod, body-parser, fast-uri and ip-address to clear published advisories. No database schema changes.
+
+## 0.18.5 - 2026-10-22
+
+Security fixes. Frontmatter is parsed as YAML only: a Markdown file whose frontmatter names another language (such as `---js`) is rejected as a parse error and is never evaluated. Token admin tools are limited to the calling token's scope, so a token cannot issue, list, show, revoke or rotate tokens outside its own role and projects. The HTTP request body limit now applies to chunked bodies as they stream, with `413 PAYLOAD_TOO_LARGE` once crossed. Engine tools without a role assignment are refused.
+
+Requires Node.js 24.22.1 or later, which carries the Node.js October 2026 security fixes. Removes js-yaml 3 from gray-matter's dependency tree and updates hono and pino. Adds CodeQL and a production dependency audit to CI, and a security policy. No database schema changes.
+
+## 0.18.4 - 2026-10-17
+
+Security dependency updates: simple-git 4.0.2 and refreshed lockfile entries (including proxy-addr), and the MCP SDK 1.32.1. Out-of-process token revocations now apply without a restart.
+
+## 0.18.3 - 2026-10-11
+
+Fix sequence ID collisions by considering all indexed IDs under the current year prefix, across document types and including soft-deleted records. Allocation no longer depends on a 10,000-document sample.
+
+Creating a document with an existing soft-deleted ID, including a name-derived slug, now returns DUPLICATE_DOC_ID instead of replacing the deleted record's index entry. IDs remain reserved while their soft-deleted index rows exist. Purge or hard delete releases those IDs, as does rebuilding a wiped index; normal maad reindex preserves the reservations. Cross-process allocation races remain outside this fix.
+
+## 0.18.2 - 2026-10-11
+
+Avoid unnecessary existing-ID scans when creating documents with explicit IDs or usable name/title slugs, including bulk creates. Sequential ID allocation and duplicate checks remain unchanged.
 
 ## 0.18.1 - 2026-09-25
 

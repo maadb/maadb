@@ -321,12 +321,13 @@ rotating a token, discard the old session and initialize a fresh one with the ne
 bearer. A client that previously reused one session across several tokens must now
 open one session per token.
 
-> **Known gap (still present in v0.18.0):** `maad_instance_reload` does not reload `tokens.yaml`.
-> On a deployment where SIGHUP is unavailable, a revocation written to
-> `tokens.yaml` by another process is not observed by the running server until it
-> restarts, and sessions bound to the revoked token stay live until then. Prefer
-> SIGHUP (`systemctl reload maad`, `docker compose kill -s SIGHUP maad`) to apply
-> revocations.
+**Out-of-process token changes apply without a restart.** The server checks
+`tokens.yaml` for changes every 5 seconds (`MAAD_TOKENS_POLL_MS`, or
+`--tokens-poll-ms`; `0` disables). A revocation or rotation written by another
+process, such as `maad auth revoke-token`, therefore takes effect within one
+interval on every platform, including Windows where there is no SIGHUP, and
+closes every session bound to the affected token. SIGHUP and
+`maad_instance_reload` also reload `tokens.yaml` immediately.
 
 Per the MCP Streamable HTTP spec, `/mcp` validates the `Origin` header as a
 DNS-rebinding defense. Requests without an `Origin` header — every normal MCP
@@ -338,7 +339,7 @@ browser-originated requests; no wildcards, no implicit localhost. Only
 deployments where a web page calls `/mcp` directly need entries — a browser
 talking to your app's backend, which then calls MAADb, does not.
 
-Hot-reload tokens + instance config on edits: `sudo systemctl reload maad` (or `docker compose kill -s SIGHUP maad`). Rotate tokens via `maad auth rotate-token --id=tok-<id>`; revoke via `maad auth revoke-token --id=tok-<id>` — both take effect on the reload, and any live session bound to the affected token is closed at that moment. Full auth primitives: [`docs/archive/0.7.0-scoped-auth.md`](docs/archive/0.7.0-scoped-auth.md).
+Hot-reload tokens + instance config on edits: `sudo systemctl reload maad` (or `docker compose kill -s SIGHUP maad`). Rotate tokens via `maad auth rotate-token --id=tok-<id>`; revoke via `maad auth revoke-token --id=tok-<id>` — both take effect on the next reload or token-file check, and any live session bound to the affected token is closed at that moment. Full auth primitives: [`docs/archive/0.7.0-scoped-auth.md`](docs/archive/0.7.0-scoped-auth.md).
 
 Deployment guides:
 
@@ -449,9 +450,16 @@ The vector store is `sqlite-vec` (in the same SQLite file); the lexical leg is F
 
 ## Current state
 
-**Current:** v0.18.0 — compact complete contracts and receipts, with independent response budgets. Hosts freeze a schema digest, create only when those expectations still hold (`maad_create_guarded`), and verify persisted content with `maad_document_receipt`.
+**Current:** v0.18.7 — faster audited writes: staging no longer waits on a silent `git add`, and document paths starting with `-` commit correctly. Requires Node.js 24.22.1 or later.
 
 Recent shipped scope:
+- **0.18.7** — Faster audited writes; `--` pathspecs for `git add` and `git commit`
+- **0.18.6** — Token changes from another process are kept; create-if-absent writes; zod and other dependency updates
+- **0.18.5** — YAML-only frontmatter, token tools limited to the caller's scope, chunked body limit, Node.js 24.22.1
+- **0.18.4** — Security dependency updates; out-of-process token revocations apply without a restart
+- **0.18.3** — Sequence ID allocation considers all indexed IDs, including soft-deleted records
+- **0.18.2** — Fewer unnecessary existing-ID scans on create
+- **0.18.1** — List items with commas or brackets round-trip exactly; dependency security updates
 - **0.18.0** — Compact complete delivery pages for contracts and receipts
 - **0.17.0** — Versioned guarded document creation (`maad_create_guarded`)
 - **0.16.0** — Exact document receipts (`maad_document_receipt`)
@@ -463,7 +471,7 @@ See [Version.md](Version.md) for the full release history. Feature notes for 0.1
 
 ## Stack
 
-- TypeScript strict, Node.js 24+ (current Active LTS)
+- TypeScript strict, Node.js 24.22.1 or later (current Active LTS)
 - 6 production dependencies: `better-sqlite3`, `gray-matter`, `js-yaml`, `simple-git`, `@modelcontextprotocol/sdk`, `pino`. Plus one **optional** dependency `sqlite-vec` (semantic retrieval) — lazily loaded only when `MAAD_SEMANTIC_ENABLE` is on; absent or failed to load ⇒ semantic disabled, engine unaffected
 - Vitest suite on every push/PR across Ubuntu and Windows
 - MIT license, pre-1.0, actively developed
@@ -471,3 +479,23 @@ See [Version.md](Version.md) for the full release history. Feature notes for 0.1
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+## Dependency audit
+
+<!-- dependency-audit:start -->
+Last audit: 2026-10-26, release 0.18.7 (`npm audit` on the release lockfile).
+
+| Package | Version | Purpose | Result |
+|---|---|---|---|
+| `@modelcontextprotocol/sdk` | 1.32.1 | MCP server and transports | no known advisories |
+| `better-sqlite3` | 12.11.1 | SQLite index | no known advisories |
+| `gray-matter` | 4.0.3 | Frontmatter splitting (YAML engine only) | no known advisories |
+| `js-yaml` | 4.3.2 | YAML parsing (core schema) | no known advisories |
+| `pino` | 10.4.0 | Structured logging | no known advisories |
+| `simple-git` | 4.0.2 | Git history and audit commits | no known advisories |
+| `sqlite-vec` (optional) | 0.1.9 | Vector search for semantic retrieval | no known advisories |
+
+Full tree: 262 packages (161 production, including optional; 101 development). `npm audit`: 0 vulnerabilities in production dependencies, 0 in the full tree.
+
+gray-matter's own js-yaml 3 dependency is replaced with the js-yaml 4 version above through an npm `overrides` entry. zod 4.6.7 arrives through `@modelcontextprotocol/sdk`; 0.18.6 updated it, with body-parser 2.4.0, fast-uri 3.1.9 and ip-address 10.7.4, to clear advisories published after 0.18.5.
+<!-- dependency-audit:end -->

@@ -475,36 +475,10 @@ describe('TokenStore — concurrent mutation', () => {
     expect(entries.filter(e => e.endsWith('.tmp'))).toEqual([]);
   });
 
-  // Note: with mutations serialized, the record being rolled back is always the
-  // one this call pushed, so removal by identity and removal by position agree.
-  // This asserts the invariant itself — that a failed persist leaves prior
-  // state intact — rather than the identity-vs-position distinction, which is
-  // not reachable while the mutation chain holds.
-  it('a failed persist rolls back only the failing record', async () => {
-    const loaded = await TokenStore.load(tmpRoot);
-    if (!loaded.ok) return;
-    const store = loaded.value;
-
-    const first = await store.issue({ role: 'admin', projects: [{ name: '*' }] });
-    expect(first.ok).toBe(true);
-    if (!first.ok) return;
-
-    // Force the next persist to fail by replacing _auth/ with a file, so the
-    // directory create inside persist() errors.
-    const { rm: rmPath, writeFile: write } = await import('node:fs/promises');
-    await rmPath(path.join(tmpRoot, '_auth'), { recursive: true, force: true });
-    await write(path.join(tmpRoot, '_auth'), 'not a directory', 'utf8');
-
-    const failed = await store.issue({ role: 'reader', projects: [{ name: 'p' }] });
-    expect(failed.ok).toBe(false);
-
-    // The rollback must remove the record that failed — and only that one.
-    // Removing by position instead of identity drops whichever record landed
-    // last, which is the previously committed token.
-    expect(store.lookupById(first.value.record.id)).toBeDefined();
-    expect(store.size()).toBe(1);
-    expect(store.list()[0]!.id).toBe(first.value.record.id);
-  });
+  // 'a failed persist rolls back only the failing record' lives in
+  // token-store-external-writes.test.ts: it injects the failure through a
+  // mocked rename, because removing _auth/ is now picked up as an external
+  // change before the mutation runs.
 
   it('concurrent revoke and issue both land on disk', async () => {
     const loaded = await TokenStore.load(tmpRoot);

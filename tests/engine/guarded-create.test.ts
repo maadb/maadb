@@ -394,6 +394,16 @@ describe('guarded create admission', () => {
     writeFileSync(path.join(root, 'notes/nt-orphan.md'), 'keep these bytes');
     await unchanged(orphan, 'DUPLICATE_DOC_ID');
   });
+  it('refuses to republish a soft-deleted ID and keeps its tombstone', async () => {
+    const req = await request();
+    expect((await engine.createGuarded(req)).ok).toBe(true);
+    expect((await engine.deleteDocument(docId('nt-one'), 'soft')).ok).toBe(true);
+    const refused = await unchanged(req, 'DUPLICATE_DOC_ID');
+    expect(!refused.ok && refused.errors[0]!.message).toContain('soft-deleted');
+    const tomb = engine.getBackend().getDocument(docId('nt-one'), { includeDeleted: true });
+    expect(tomb?.deleted).toBe(true);
+    expect(tomb?.filePath).toBe('notes/_deleted_nt-one.md');
+  });
   it('cancels queued work and rechecks access after schema awaits', async () => {
     const req = await request(); await engine.getDocument(docId('nt-missing'), 'hot'); const before = snapshot(); const abort = new AbortController();
     let release!: () => void;

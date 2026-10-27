@@ -4,8 +4,9 @@
 // ============================================================================
 
 import { simpleGit, type SimpleGit } from 'simple-git';
-import { existsSync, writeFileSync, statSync, unlinkSync } from 'node:fs';
+import { existsSync, statSync, unlinkSync } from 'node:fs';
 import path from 'node:path';
+import { writeFileIfAbsent } from '../write-if-absent.js';
 
 import type {
   DocId,
@@ -16,7 +17,7 @@ import type {
   DiffResult,
   SnapshotResult,
 } from '../types.js';
-import { autoCommit, buildGitEnv, type CommitOptions, type CommitOutcome } from './commit.js';
+import { autoCommit, buildGitEnv, GIT_IDENTITY_ENV_KEYS, type CommitOptions, type CommitOutcome } from './commit.js';
 import { getHistory, getAudit } from './log.js';
 import { getDiff } from './diff.js';
 import { getSnapshot } from './snapshot.js';
@@ -30,7 +31,9 @@ export class GitLayer {
 
   constructor(projectRoot: string) {
     this.projectRoot = projectRoot;
-    this.git = simpleGit(projectRoot);
+    // simple-git 4 blocks explicitly supplied GIT_* env keys unless they are
+    // allowed here; the engine passes only the commit identity (buildGitEnv).
+    this.git = simpleGit({ baseDir: projectRoot, allowEnvironment: GIT_IDENTITY_ENV_KEYS });
   }
 
   async isRepo(): Promise<boolean> {
@@ -69,10 +72,7 @@ export class GitLayer {
     await this.git.init();
 
     // Create .gitignore if it doesn't exist
-    const gitignorePath = path.join(this.projectRoot, '.gitignore');
-    if (!existsSync(gitignorePath)) {
-      writeFileSync(gitignorePath, '_backend/\n', 'utf-8');
-    }
+    writeFileIfAbsent(path.join(this.projectRoot, '.gitignore'), '_backend/\n');
 
     // Initial commit. Per-invocation identity env — same fragility as
     // autoCommit: a host without `git config user.name/email` would otherwise

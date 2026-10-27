@@ -12,9 +12,9 @@ describe('MCP roles', () => {
     expect(getMinRoleForTool('maad_document_receipt')).toBe('reader');
   });
 
-  it('reader gets 21 tools', () => {
+  it('reader gets 22 tools', () => {
     const tools = getToolsForRole('reader');
-    expect(tools.size).toBe(21);
+    expect(tools.size).toBe(22);
     expect(tools.has('maad_document_receipt')).toBe(true);
     expect(tools.has('maad_summary')).toBe(true);
     expect(tools.has('maad_get')).toBe(true);
@@ -30,9 +30,9 @@ describe('MCP roles', () => {
     expect(tools.has('maad_delete')).toBe(false);
   });
 
-  it('writer gets 27 tools (reader + create, update, validate, bulk_create, bulk_update)', () => {
+  it('writer gets 28 tools (reader + create, update, validate, bulk_create, bulk_update)', () => {
     const tools = getToolsForRole('writer');
-    expect(tools.size).toBe(27);
+    expect(tools.size).toBe(28);
     expect(tools.has('maad_document_receipt')).toBe(true);
     expect(tools.has('maad_create')).toBe(true);
     expect(tools.has('maad_update')).toBe(true);
@@ -41,9 +41,9 @@ describe('MCP roles', () => {
     expect(tools.has('maad_reindex')).toBe(false);
   });
 
-  it('admin gets 44 tools (all)', () => {
+  it('admin gets 45 tools (all)', () => {
     const tools = getToolsForRole('admin');
-    expect(tools.size).toBe(44);
+    expect(tools.size).toBe(45);
     expect(tools.has('maad_document_receipt')).toBe(true);
     expect(tools.has('maad_delete')).toBe(true);
     expect(tools.has('maad_reindex')).toBe(true);
@@ -75,5 +75,25 @@ describe('MCP roles', () => {
     expect(parseRole('reader')).toBe('reader');
     expect(parseRole('writer')).toBe('writer');
     expect(parseRole('admin')).toBe('admin');
+  });
+});
+
+describe('MCP roles — completeness', () => {
+  it('every tool routed through the session role gate has a role assignment', async () => {
+    const { readdirSync, readFileSync } = await import('node:fs');
+    const path = await import('node:path');
+    const dir = path.resolve(__dirname, '../../src/mcp/tools');
+    const gated = new Set<string>();
+    for (const file of readdirSync(dir).filter(f => f.endsWith('.ts'))) {
+      const source = readFileSync(path.join(dir, file), 'utf8');
+      for (const m of source.matchAll(/with(?:Engine|Session)\(\s*ctx,\s*extra,\s*'(maad_[a-z_]+)'/g)) gated.add(m[1]!);
+    }
+    expect(gated.size).toBeGreaterThan(30);
+    const missing = [...gated].filter(name => getMinRoleForTool(name) === null);
+    expect(missing).toEqual([]);
+  });
+
+  it('reports no role for an unknown tool, which the session gate refuses', () => {
+    expect(getMinRoleForTool('maad_not_a_tool')).toBeNull();
   });
 });

@@ -29,3 +29,24 @@ updates:
       # Major bumps require deliberate review; reject auto-PRs for them.
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "America/Los_Angeles"
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "chore(ci)"
+    # One PR per week at most for every action update.
+    groups:
+      actions:
+        patterns:
+          - "*"
+    ignore:
+      # Major bumps require deliberate review; reject auto-PRs for them.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]

@@ -33,7 +33,12 @@ export interface MaadBackend {
   putFieldIndex(docId: DocId, fields: Array<{ name: string; value: string; numericValue: number | null; type: string }>): void;
 
   // Read operations (called by MCP tools)
-  getDocument(docId: DocId): DocumentRecord | null;
+  /**
+   * Live rows only by default. `includeDeleted` also returns soft-deleted
+   * tombstones (`deleted: true`); create guards use it so a tombstone's ID is
+   * never reissued and its row never overwritten.
+   */
+  getDocument(docId: DocId, opts?: { includeDeleted?: boolean | undefined }): DocumentRecord | null;
   getDocumentsByIds(docIds: DocId[]): Map<DocId, DocumentRecord>;
   getDocumentByPath(path: FilePath): DocumentRecord | null;
   findDocuments(query: DocumentQuery): DocumentMatch[];
@@ -67,6 +72,11 @@ export interface MaadBackend {
   // Aggregation
   getSubtypeInventory(limit: number): Array<{ primitive: string; subtype: string; count: number; topValues: string[] }>;
   getSampleDocIds(docType: DocType, limit: number): DocId[];
+  /**
+   * Every indexed doc_id starting with `prefix` — any doc_type, soft-deleted
+   * rows included, never sampled or capped. Drives sequence ID allocation.
+   */
+  listDocIdsByPrefix(prefix: string): DocId[];
 
   // Maintenance
   removeDocument(docId: DocId): void;
