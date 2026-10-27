@@ -1,10 +1,14 @@
 ---
 enabled: true
-current: 0.18.7
+current: 0.19.0
 dev_flow: formal
 ---
 
 # Version History
+
+## 0.19.0 - 2026-10-26
+
+Date fields can set `on_finer: warn` or `on_finer: error` to flag or reject values finer than their `store_precision`, such as a timestamp written to a `day` field. The setting is opt-in and requires `store_precision`; the engine never truncates. `maad_schema` reports `onFiner`, and `maad_validate includePrecision: true` returns `precisionDrift[]` entries with a `direction` of `coarser` or `finer`. Engines before 0.19.0 reject schemas that use `on_finer`, so upgrade every engine that loads a schema before adding it. No dependency or database schema changes.
 
 ## 0.18.7 - 2026-10-26
 
