@@ -5,10 +5,10 @@
 
 import type { SimpleGit } from 'simple-git';
 import { parseMatter } from '../parser/matter.js';
+import { readHistoricalFile, resolveCommit } from './historical-file.js';
 import {
   commitSha as toCommitSha,
   type DocId,
-  type CommitSha,
   type DiffResult,
 } from '../types.js';
 
@@ -19,23 +19,18 @@ export async function getDiff(
   from: string,
   to?: string,
 ): Promise<DiffResult | null> {
-  const toRef = to ?? 'HEAD';
+  const head = await resolveCommit(git, 'HEAD');
+  if (!head) return null;
+  const fromSha = from === 'HEAD' ? head : await resolveCommit(git, from);
+  const toSha = to === undefined || to === 'HEAD' ? head : await resolveCommit(git, to);
+  if (!fromSha || !toSha) return null;
 
-  // Get old and new file contents
-  let oldContent: string;
-  let newContent: string;
-  try {
-    oldContent = await git.show(`${from}:${filePath}`);
-    newContent = await git.show(`${toRef}:${filePath}`);
-  } catch {
-    return null;
-  }
+  const oldFile = await readHistoricalFile(git, filePath, docId, fromSha, head);
+  const newFile = await readHistoricalFile(git, filePath, docId, toSha, head);
+  if (!oldFile || !newFile) return null;
+  const oldFm = parseMatter(oldFile.content).data as Record<string, unknown>;
+  const newFm = parseMatter(newFile.content).data as Record<string, unknown>;
 
-  // Parse frontmatter from both versions
-  const oldFm = parseFm(oldContent);
-  const newFm = parseFm(newContent);
-
-  // Diff frontmatter field by field
   const frontmatterChanges: Record<string, { from: unknown; to: unknown }> = {};
   const allKeys = new Set([...Object.keys(oldFm), ...Object.keys(newFm)]);
   for (const key of allKeys) {
@@ -46,27 +41,23 @@ export async function getDiff(
     }
   }
 
-  // Get unified diff for the body
-  let bodyDiff = '';
+  // Compare the two resolved blobs. A path-filtered tree diff can include
+  // unrelated files after renames, or report a pure move as a deletion.
+  let bodyDiff: string;
   try {
-    bodyDiff = await git.diff([`${from}..${toRef}`, '--', filePath]);
+    bodyDiff = await git.diff([
+      '--no-ext-diff', '--no-textconv',
+      `${fromSha}:${oldFile.path}`, `${toSha}:${newFile.path}`, '--',
+    ]);
   } catch {
-    bodyDiff = '';
+    return null;
   }
 
   return {
     docId,
     from: toCommitSha(from),
-    to: toCommitSha(toRef),
+    to: toCommitSha(to ?? 'HEAD'),
     frontmatterChanges,
     bodyDiff,
   };
-}
-
-function parseFm(content: string): Record<string, unknown> {
-  try {
-    return parseMatter(content).data as Record<string, unknown>;
-  } catch {
-    return {};
-  }
 }
