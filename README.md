@@ -450,9 +450,10 @@ The vector store is `sqlite-vec` (in the same SQLite file); the lexical leg is F
 
 ## Current state
 
-**Current:** v0.19.0 — date fields can set `on_finer` to warn on or reject values finer than their declared `store_precision`. Requires Node.js 24.22.1 or later.
+**Current:** v0.19.1 — historical snapshots and diffs follow committed document moves and verify document identity. Requires Node.js 24.22.1 or later.
 
 Recent shipped scope:
+- **0.19.1** — Historical snapshots and diffs across committed file moves
 - **0.19.0** — `on_finer` precision handling for date fields
 - **0.18.7** — Faster audited writes; `--` pathspecs for `git add` and `git commit`
 - **0.18.6** — Token changes from another process are kept; create-if-absent writes; zod and other dependency updates
@@ -484,7 +485,7 @@ MIT — see [LICENSE](LICENSE).
 ## Dependency audit
 
 <!-- dependency-audit:start -->
-Last audit: 2026-10-26, release 0.19.0 (`npm audit` on the release lockfile).
+Last audit: 2026-10-28, release 0.19.1 (`npm audit` on the release lockfile).
 
 | Package | Version | Purpose | Result |
 |---|---|---|---|
