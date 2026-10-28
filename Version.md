@@ -1,10 +1,14 @@
 ---
 enabled: true
-current: 0.19.0
+current: 0.19.1
 dev_flow: formal
 ---
 
 # Version History
+
+## 0.19.1 - 2026-10-28
+
+Historical snapshots and diffs now resolve a document's filename across committed moves, including rename resolutions and alternate paths on merge parents. Date snapshots follow rename history before selecting a version, and diffs compare the resolved document blobs. Identity checks prevent reused filenames from returning another document's contents; malformed frontmatter or missing historical document identity now returns a lookup error instead of raw content. Rename resolution depends on Git recognizing the move, so a simultaneous complete rewrite can defeat similarity detection. No dependency or database schema changes.
 
 ## 0.19.0 - 2026-10-26
 
