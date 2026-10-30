@@ -115,6 +115,7 @@ export class HistoryController implements HistoryRuntime {
         this.lastFlushError = null;
       } else {
         this.pending.push({ options, journalIds });
+        this.noteFailure('write', outcome);
       }
       return outcome;
     }

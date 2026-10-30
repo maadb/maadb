@@ -11,7 +11,10 @@
 // engine ack'ing writes as durable while git quietly held staged state.
 // ============================================================================
 
-import type { SimpleGit } from 'simple-git';
+import { randomUUID } from 'node:crypto';
+import { rm, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import type { CommitResult, SimpleGit } from 'simple-git';
 import type { DocId, DocType, CommitSha } from '../types.js';
 import { commitSha } from '../types.js';
 
@@ -131,13 +134,45 @@ export type CommitOutcome =
   | { status: 'noop' }
   | { status: 'failed'; code: string; message: string };
 
+/**
+ * Windows caps a command line at 32,767 characters, and bulk writes and history
+ * flushes can name thousands of paths. Past this budget, staging runs in several
+ * calls and the commit, which must stay one call, reads its paths from a file.
+ */
+const MAX_PATHSPEC_CHARS = 16_000;
+
+/** A commit subject names the change; the document holds the values. */
+const MAX_SUMMARY_CHARS = 200;
+
+function pathspecChunks(files: string[]): string[][] {
+  const chunks: string[][] = [];
+  let chunk: string[] = [];
+  let chars = 0;
+  for (const file of files) {
+    if (chunk.length > 0 && chars + file.length + 1 > MAX_PATHSPEC_CHARS) {
+      chunks.push(chunk);
+      chunk = [];
+      chars = 0;
+    }
+    chunk.push(file);
+    chars += file.length + 1;
+  }
+  chunks.push(chunk);
+  return chunks;
+}
+
+function capSummary(summary: string): string {
+  if (summary.length <= MAX_SUMMARY_CHARS) return summary;
+  return `${Array.from(summary).slice(0, MAX_SUMMARY_CHARS).join('')}…`;
+}
+
 // Format: maad:<action> <doc_id> [<doc_type>] <detail> — <summary>
 // With identity (0.7.0 MAAD_COMMIT_IDENTITY=true): title unchanged, body
 // appended with role/token/agent/user lines so `git log --grep` queries on
 // identity stay simple without polluting the summary line.
 export function formatCommitMessage(opts: CommitOptions): string {
   const detail = opts.detail ? `${opts.detail} ` : '';
-  const title = `maad:${opts.action} ${opts.docId as string} [${opts.docType as string}] ${detail}— ${opts.summary}`;
+  const title = `maad:${opts.action} ${opts.docId as string} [${opts.docType as string}] ${detail}— ${capSummary(opts.summary)}`;
   if (!opts.identity) return title;
   const lines = [`role: ${opts.identity.role}`];
   if (opts.identity.tokenId !== undefined) lines.push(`token: ${opts.identity.tokenId}`);
@@ -178,6 +213,22 @@ export function parseCommitMessage(message: string): ParsedCommitMessage | null 
   };
 }
 
+// The list lives in the Git directory, which is inside the project and is never
+// part of the working tree. NUL separators keep any path literal.
+async function commitFromPathspecFile(git: SimpleGit, message: string, files: string[]): Promise<CommitResult> {
+  const gitDir = (await git.revparse(['--absolute-git-dir'])).trim();
+  const listPath = path.join(gitDir, `maad-pathspec-${randomUUID()}`);
+  await writeFile(listPath, files.join('\0'), { encoding: 'utf-8', flag: 'wx' });
+  try {
+    return await git.env(buildGitEnv()).commit(message, [], {
+      '--pathspec-from-file': listPath,
+      '--pathspec-file-nul': null,
+    });
+  } finally {
+    await rm(listPath, { force: true });
+  }
+}
+
 export async function autoCommit(
   git: SimpleGit,
   opts: CommitOptions,
@@ -186,8 +237,9 @@ export async function autoCommit(
     // Verbose staging emits output for changed paths, avoiding simple-git's
     // extra completion delay for silent commands. Output stays in its buffer.
     // `--` keeps a path that starts with '-' from being read as an option.
+    const chunks = pathspecChunks(opts.files);
     try {
-      await git.add(['--verbose', '--', ...opts.files]);
+      for (const chunk of chunks) await git.add(['--verbose', '--', ...chunk]);
     } catch (e) {
       return {
         status: 'failed',
@@ -203,16 +255,7 @@ export async function autoCommit(
     // (operator activity, a prior failed commit) must neither trip this
     // check nor be swept into the commit below under this op's message —
     // the maad:<action> subject line is the audit trail.
-    let status;
-    try {
-      status = await git.status(['--', ...opts.files]);
-    } catch (e) {
-      return {
-        status: 'failed',
-        code: 'GIT_STATUS_FAILED',
-        message: `git status failed: ${e instanceof Error ? e.message : String(e)}`,
-      };
-    }
+    let hasStagedChange = false;
     // simple-git's StatusSummary.staged misses renames — `R` entries land in
     // `renamed[]` (with a parallel FileStatusSummary in `files[]` carrying
     // `index: 'R'`) and never appear in `staged[]`. Pre-0.7.10 this caused
@@ -222,9 +265,20 @@ export async function autoCommit(
     // than ' ' (clean) or '?' (untracked) is a real index entry the next
     // commit will pick up. The staged.length check stays as the fast path
     // (and to keep stubs that only populate `staged` working).
-    const hasStagedChange =
-      status.staged.length > 0
-      || status.files.some(f => f.index !== ' ' && f.index !== '?');
+    try {
+      for (const chunk of chunks) {
+        const status = await git.status(['--', ...chunk]);
+        hasStagedChange = status.staged.length > 0
+          || status.files.some(f => f.index !== ' ' && f.index !== '?');
+        if (hasStagedChange) break;
+      }
+    } catch (e) {
+      return {
+        status: 'failed',
+        code: 'GIT_STATUS_FAILED',
+        message: `git status failed: ${e instanceof Error ? e.message : String(e)}`,
+      };
+    }
     if (!hasStagedChange) {
       return { status: 'noop' };
     }
@@ -235,9 +289,9 @@ export async function autoCommit(
       // 0.7.3 — inject identity env so we never depend on the
       // host's `git config user.name/user.email`. See buildGitEnv for why
       // this merges over process.env and strips askpass vars.
-      result = await git
-        .env(buildGitEnv())
-        .commit(message, ['--', ...opts.files]);
+      result = chunks.length === 1
+        ? await git.env(buildGitEnv()).commit(message, ['--', ...opts.files])
+        : await commitFromPathspecFile(git, message, opts.files);
     } catch (e) {
       // The add succeeded but the commit itself failed — worst case, since
       // the working tree is now dirty with staged but uncommitted changes.

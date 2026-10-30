@@ -147,8 +147,8 @@ commit that contains the current pending Markdown state.
 
 `lastSuccessfulFlush` is an ISO 8601 timestamp or `null`. `lastFlushError` is
 either `null` or an object with `at`, `code`, `message`, and `trigger`.
-`trigger` identifies `threshold`, `timer`, `explicit`, `shutdown`, `recovery`,
-or `snapshot`.
+`trigger` identifies `write`, `threshold`, `timer`, `explicit`, `shutdown`,
+`recovery`, or `snapshot`. `write` means an `audit` mode commit failed.
 
 Treat a non-null `lastFlushError` as degraded Git durability. Markdown and the
 derived index may already contain the write while its Git boundary remains
