@@ -546,6 +546,31 @@ describe('batch boundaries and recovery', () => {
     expect(commit.mock.calls[0]![0]).toEqual(options);
   });
 
+  it('reports an audit-mode commit failure in health', async () => {
+    const root = makeRoot();
+    scaffoldProject(root);
+    await initGit(root);
+    const engine = await openEngine(root, 'audit');
+    vi.spyOn(engine.getGitLayer()!, 'commit').mockResolvedValueOnce({
+      status: 'failed',
+      code: 'GIT_ADD_FAILED',
+      message: 'simulated add failure',
+    });
+
+    await createNote(engine, 'note-audit-failure');
+
+    const failure = { code: 'GIT_ADD_FAILED', trigger: 'write' };
+    expect(engine.health().history.lastFlushError).toMatchObject(failure);
+
+    // A later success must not hide the write that is still pending.
+    await createNote(engine, 'note-audit-success');
+    expect(engine.health().history.pendingWrites).toBe(1);
+    expect(engine.health().history.lastFlushError).toMatchObject(failure);
+
+    expect((await engine.flushHistory('explicit')).outcome.status).toBe('committed');
+    expect(engine.health().history.lastFlushError).toBeNull();
+  });
+
   it('preserves journal evidence after Git failure and clears it after retry', async () => {
     const root = makeRoot();
     scaffoldProject(root);

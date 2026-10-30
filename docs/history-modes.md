@@ -147,8 +147,8 @@ commit that contains the current pending Markdown state.
 
 `lastSuccessfulFlush` is an ISO 8601 timestamp or `null`. `lastFlushError` is
 either `null` or an object with `at`, `code`, `message`, and `trigger`.
-`trigger` identifies `threshold`, `timer`, `explicit`, `shutdown`, `recovery`,
-or `snapshot`.
+`trigger` identifies `write`, `threshold`, `timer`, `explicit`, `shutdown`,
+`recovery`, or `snapshot`. `write` means an `audit` mode commit failed.
 
 Treat a non-null `lastFlushError` as degraded Git durability. Markdown and the
 derived index may already contain the write while its Git boundary remains
@@ -175,6 +175,9 @@ to handle brief file-sharing conflicts. A commit shared by many entries, such as
 a bulk write, is stored once and referenced by ID. Journals written by earlier
 versions still load and are converted on the next update; earlier engines reject
 the new format, so finish or recover pending writes before downgrading.
+
+Commits that name more paths than fit on a command line read them from a
+temporary file in the Git directory, which requires Git 2.25 or later.
 
 A line cut short at the end of the log is an append that never finished, so
 startup ignores it. Invalid JSON, malformed journal entries, a corrupt line

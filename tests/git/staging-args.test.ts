@@ -5,7 +5,7 @@
 // that wait; `--` keeps a path starting with '-' from being read as an option.
 
 import { describe, it, expect, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { simpleGit, type SimpleGit } from 'simple-git';
@@ -50,6 +50,67 @@ describe('autoCommit staging', () => {
 
     expect(outcome).toMatchObject({ status: 'committed' });
     expect(calls).toEqual([['--verbose', '--', 'note.md']]);
+  });
+
+  it('commits more paths than fit on one command line', async () => {
+    const made = await repo();
+    root = made.root;
+    // 1,000 paths of 70+ characters are well past the 32,767 Windows limit.
+    const prefix = 'x'.repeat(70);
+    const names = Array.from({ length: 1000 }, (_, i) => `${prefix}-${i}.md`);
+    const files = names.map(name => path.join(root!, name));
+    for (const file of files) writeFileSync(file, 'note\n', 'utf-8');
+    writeFileSync(path.join(root, 'stray.txt'), 'unrelated\n', 'utf-8');
+    await made.git.add('stray.txt');
+
+    const outcome = await autoCommit(made.git, {
+      action: 'create', docId: docId('bulk'), docType: docType('note'),
+      detail: 'bulk:1000', summary: 'bulk', files,
+    });
+
+    expect(outcome.status).toBe('committed');
+    const committed = (await made.git.raw(['show', '--name-only', '--pretty=format:', 'HEAD'])).trim().split('\n');
+    expect(committed.sort()).toEqual([...names].sort());
+    expect((await made.git.status()).staged).toEqual(['stray.txt']);
+    expect(readdirSync(path.join(root, '.git')).filter(name => name.startsWith('maad-pathspec-'))).toEqual([]);
+
+    const repeat = await autoCommit(made.git, {
+      action: 'update', docId: docId('bulk'), docType: docType('note'),
+      detail: '', summary: 'unchanged', files,
+    });
+    expect(repeat.status).toBe('noop');
+  });
+
+  it('caps a long summary so a large field value cannot overflow the command line', async () => {
+    const made = await repo();
+    root = made.root;
+    writeFileSync(path.join(root, 'note.md'), 'hello\n', 'utf-8');
+
+    const outcome = await autoCommit(made.git, {
+      action: 'update', docId: docId('note'), docType: docType('note'),
+      detail: 'fields:body', summary: `body: ${'\u{1F600}'.repeat(20_000)}`, files: ['note.md'],
+    });
+
+    expect(outcome.status).toBe('committed');
+    const subject = (await made.git.raw(['log', '-1', '--format=%s'])).trim();
+    expect(subject.startsWith('maad:update note [note] fields:body — body: ')).toBe(true);
+    expect(subject.endsWith('\u{1F600}…')).toBe(true);
+    expect(Array.from(subject).length).toBeLessThan(260);
+  });
+
+  it('keeps a multi-line value out of the commit body', async () => {
+    const made = await repo();
+    root = made.root;
+    writeFileSync(path.join(root, 'note.md'), 'hello\n', 'utf-8');
+
+    const outcome = await autoCommit(made.git, {
+      action: 'update', docId: docId('note'), docType: docType('note'),
+      detail: 'fields:title', summary: 'title: x\n\nrole: admin', files: ['note.md'],
+    });
+
+    expect(outcome.status).toBe('committed');
+    expect((await made.git.raw(['log', '-1', '--format=%B'])).trim())
+      .toBe('maad:update note [note] fields:title — title: x role: admin');
   });
 
   it('commits a path that starts with a dash', async () => {
