@@ -112,9 +112,10 @@ export class HistoryController implements HistoryRuntime {
       if (outcome.status !== 'failed') {
         this.journal.completeMany(journalIds);
         this.lastSuccessfulFlush = new Date().toISOString();
-        this.lastFlushError = null;
+        if (this.pending.length === 0) this.lastFlushError = null;
       } else {
         this.pending.push({ options, journalIds });
+        this.noteFailure('write', outcome);
       }
       return outcome;
     }
@@ -303,16 +304,24 @@ export class HistoryController implements HistoryRuntime {
     const missing = entries.filter(entry => !queuedIds.has(entry.id));
     if (missing.length === 0) return;
 
+    // Group by commit content: separately bound commits can be identical. The
+    // stringified form is cached because a bulk commit is shared by every entry.
+    const keys = new Map<string | undefined, string>();
     const groups = new Map<string, JournalEntry[]>();
     for (const entry of missing) {
-      const key = entry.commit ? JSON.stringify(entry.commit) : '__recovery__';
+      let key = keys.get(entry.commitId);
+      if (key === undefined) {
+        const commit = this.journal.getCommit(entry);
+        key = commit ? JSON.stringify(commit) : '__recovery__';
+        keys.set(entry.commitId, key);
+      }
       const group = groups.get(key) ?? [];
       group.push(entry);
       groups.set(key, group);
     }
     for (const group of groups.values()) {
       this.pending.push({
-        options: group[0]?.commit ?? recoveredCommit(group),
+        options: this.journal.getCommit(group[0]!) ?? recoveredCommit(group),
         journalIds: group.map(entry => entry.id),
       });
     }

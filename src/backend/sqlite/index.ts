@@ -132,6 +132,10 @@ export class SqliteBackend implements MaadBackend {
     // from SCHEMA_SQL's CREATE TABLE; existing DBs from the ALTER above) — it
     // cannot live in SCHEMA_SQL, which runs before this migration.
     this.db.exec('CREATE INDEX IF NOT EXISTS idx_documents_valid ON documents(valid, deleted)');
+    // Serve the default find order and the changes feed in index order, so a
+    // page stops at LIMIT instead of sorting every live row.
+    this.db.exec('CREATE INDEX IF NOT EXISTS idx_documents_del_updated_id ON documents(deleted, updated_at, doc_id)');
+    this.db.exec('CREATE INDEX IF NOT EXISTS idx_documents_del_indexed_id ON documents(deleted, indexed_at, doc_id)');
   }
 
   close(): void {
@@ -266,6 +270,19 @@ export class SqliteBackend implements MaadBackend {
 
     for (const f of fields) {
       insert.run(docId as string, f.name, f.value, f.numericValue, f.type);
+    }
+  }
+
+  beginBatch(): void {
+    this.db.exec('BEGIN IMMEDIATE');
+  }
+
+  commitBatch(): void {
+    try {
+      this.db.exec('COMMIT');
+    } catch (error) {
+      if (this.db.inTransaction) this.db.exec('ROLLBACK');
+      throw error;
     }
   }
 
@@ -697,14 +714,14 @@ export class SqliteBackend implements MaadBackend {
     limit: number;
     docTypes?: string[] | undefined;
   }): Array<{ docId: string; docType: string; updatedAt: string; version: number }> {
-    // Strict tuple comparison for (updated_at, doc_id) > (cursor.u, cursor.d):
-    //   updated_at > cu  OR  (updated_at = cu AND doc_id > cd)
+    // Strict tuple comparison for (updated_at, doc_id) > (cursor.u, cursor.d).
+    // The row value lets the index seek to the cursor; the OR form scans to it.
     const conditions: string[] = ['deleted = 0'];
     const params: unknown[] = [];
 
     if (opts.cursor) {
-      conditions.push('(updated_at > ? OR (updated_at = ? AND doc_id > ?))');
-      params.push(opts.cursor.updatedAt, opts.cursor.updatedAt, opts.cursor.docId);
+      conditions.push('(updated_at, doc_id) > (?, ?)');
+      params.push(opts.cursor.updatedAt, opts.cursor.docId);
     }
 
     if (opts.docTypes && opts.docTypes.length > 0) {
