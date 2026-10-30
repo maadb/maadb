@@ -170,10 +170,7 @@ function instance(projectConfig: ProjectConfig): InstanceConfig {
 }
 
 function journalEntries(root: string): unknown[] {
-  const journalPath = path.join(root, '_backend', 'journal.json');
-  return existsSync(journalPath)
-    ? (JSON.parse(readFileSync(journalPath, 'utf8')) as { entries: unknown[] }).entries
-    : [];
+  return new OperationJournal(path.join(root, '_backend')).getPending();
 }
 
 beforeEach(() => {
@@ -508,15 +505,13 @@ describe('batch boundaries and recovery', () => {
     engines.delete(first);
 
     if (format === 'pre-version-2') {
-      const journalPath = path.join(root, '_backend', 'journal.json');
-      const current = JSON.parse(readFileSync(journalPath, 'utf8')) as {
-        commits: Record<string, unknown>;
-        entries: Array<{ commitId: string }>;
-      };
-      writeFileSync(journalPath, JSON.stringify(current.entries.map(({ commitId, ...entry }) => ({
+      const backend = path.join(root, '_backend');
+      const current = new OperationJournal(backend);
+      writeFileSync(path.join(backend, 'journal.json'), JSON.stringify(current.getPending().map(({ commitId, ...entry }) => ({
         ...entry,
-        commit: current.commits[commitId],
+        commit: current.getCommit({ ...entry, commitId }),
       }))));
+      rmSync(path.join(backend, 'journal.log'), { force: true });
     }
 
     const restarted = await openEngine(root, 'batch');
