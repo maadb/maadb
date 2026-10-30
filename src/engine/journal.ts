@@ -76,21 +76,21 @@ export class OperationJournal {
   }
 
   private restore(parsed: unknown): void {
-    const invalid = new Error('Invalid operation journal entries; preserve journal.json and repair it before restarting');
+    const invalid = () => new Error('Invalid operation journal entries; preserve journal.json and repair it before restarting');
     let stored: unknown;
     const commits = new Map<string, CommitOptions>();
     if (Array.isArray(parsed)) {
       stored = parsed;
     } else {
       const file = parsed as { version?: unknown; commits?: unknown; entries?: unknown } | null;
-      if (file?.version !== JOURNAL_VERSION || !file.commits || typeof file.commits !== 'object') throw invalid;
+      if (file?.version !== JOURNAL_VERSION || !file.commits || typeof file.commits !== 'object') throw invalid();
       for (const [id, commit] of Object.entries(file.commits)) {
-        if (!isCommitOptions(commit)) throw invalid;
+        if (!isCommitOptions(commit)) throw invalid();
         commits.set(id, commit);
       }
       stored = file.entries;
     }
-    if (!Array.isArray(stored) || !stored.every(isJournalEntry)) throw invalid;
+    if (!Array.isArray(stored) || !stored.every(isJournalEntry)) throw invalid();
 
     const interned = new Map<string, string>();
     const entries = stored.map(({ commit, ...entry }) => {
@@ -104,24 +104,22 @@ export class OperationJournal {
         }
         return { ...entry, commitId };
       }
-      if (entry.commitId !== undefined && !commits.has(entry.commitId)) throw invalid;
+      if (entry.commitId !== undefined && !commits.has(entry.commitId)) throw invalid();
       return entry;
     });
     this.entries = entries;
     this.commits = commits;
   }
 
-  private serialize(): string {
-    const live = new Map<string, CommitOptions>();
-    for (const { commitId } of this.entries) {
-      if (commitId !== undefined) live.set(commitId, this.commits.get(commitId)!);
+  private pruneCommits(): void {
+    const live = new Set(this.entries.map(entry => entry.commitId));
+    for (const id of this.commits.keys()) {
+      if (!live.has(id)) this.commits.delete(id);
     }
-    this.commits = live;
-    return JSON.stringify({ version: JOURNAL_VERSION, commits: Object.fromEntries(live), entries: this.entries }, null, 2);
   }
 
   private save(): void {
-    const next = this.serialize();
+    const next = JSON.stringify({ version: JOURNAL_VERSION, commits: Object.fromEntries(this.commits), entries: this.entries }, null, 2);
     try {
       atomicWriteSync(this.journalPath, next, process.platform === 'win32' ? 5 : 0);
       this.persisted = next;
@@ -175,6 +173,7 @@ export class OperationJournal {
     }
     if (!changed) return;
     this.commits.set(commitId, { ...commit, files: [...commit.files] });
+    this.pruneCommits();
     this.save();
   }
 
@@ -197,6 +196,7 @@ export class OperationJournal {
 
   complete(id: string): void {
     this.entries = this.entries.filter(e => e.id !== id);
+    this.pruneCommits();
     this.save();
   }
 
@@ -206,6 +206,7 @@ export class OperationJournal {
     const next = this.entries.filter(e => !completed.has(e.id));
     if (next.length === this.entries.length) return;
     this.entries = next;
+    this.pruneCommits();
     this.save();
   }
 
@@ -259,6 +260,7 @@ export class OperationJournal {
       this.entries = opts.retainIndexed
         ? this.entries.filter(entry => entry.status === 'indexed')
         : [];
+      this.pruneCommits();
       this.save();
     }
 
