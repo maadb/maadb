@@ -52,6 +52,44 @@ describe('exact committed blob', () => {
     expect(result?.bytes.toString()).toBe('first\r\n');
     expect(git('rev-parse', 'HEAD')).not.toBe(old);
   });
+  it('reads one exact blob with three Git processes', async () => {
+    const spawn = childProcess.spawn;
+    const calls = vi.spyOn(childProcess, 'spawn').mockImplementation((...args: Parameters<typeof spawn>) => spawn(...args));
+    await readExactBlob(root, 'one.md');
+    expect(calls).toHaveBeenCalledTimes(3);
+  });
+  it('rejects a blob just over the bound that fits the read cap', async () => {
+    writeFileSync(path.join(root, 'one.md'), Buffer.alloc(RECEIPT_MAX_BYTES + 16));
+    git('add', 'one.md'); git('commit', '-m', 'Just over bound');
+    await expect(readExactBlob(root, 'one.md')).rejects.toMatchObject({ code: 'RESPONSE_TOO_LARGE' });
+  });
+  it('accepts a blob exactly at the bound', async () => {
+    writeFileSync(path.join(root, 'one.md'), Buffer.alloc(RECEIPT_MAX_BYTES, 0x61));
+    git('add', 'one.md'); git('commit', '-m', 'At bound');
+    expect((await readExactBlob(root, 'one.md'))?.bytes).toHaveLength(RECEIPT_MAX_BYTES);
+  });
+  it('returns the tree of the pinned commit when the blob ends in newlines', async () => {
+    writeFileSync(path.join(root, 'one.md'), '\n\n');
+    git('add', 'one.md'); git('commit', '-m', 'Newline fixture');
+    const result = await readExactBlob(root, 'one.md');
+    expect(result?.treeOid).toBe(git('rev-parse', 'HEAD^{tree}'));
+    expect(result?.bytes.toString()).toBe('\n\n');
+  });
+  it('reports a repository with no commits as a storage error', async () => {
+    const marker = path.resolve(root, '.git');
+    expect(path.dirname(marker)).toBe(root);
+    rmSync(marker, { recursive: true, force: true });
+    git('init');
+    await expect(readExactBlob(root, 'one.md')).rejects.toMatchObject({ code: 'RECEIPT_STORAGE_ERROR' });
+  });
+  it('rejects a corrupt batch reply without trusting it', async () => {
+    const spawn = childProcess.spawn;
+    vi.spyOn(childProcess, 'spawn').mockImplementation((...args: Parameters<typeof spawn>) => {
+      const argv = args[1] as string[];
+      return argv.includes('--batch') ? spawn('git', ['--version'], args[2] as never) : spawn(...args);
+    });
+    await expect(readExactBlob(root, 'one.md')).rejects.toMatchObject({ code: 'RECEIPT_STORAGE_ERROR' });
+  });
   it('reports only current-tree absence, without searching history', async () => {
     expect(await readExactBlob(root, 'absent.md')).toBeNull();
   });
