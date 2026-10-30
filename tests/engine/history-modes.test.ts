@@ -14,6 +14,9 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { simpleGit, type SimpleGit } from 'simple-git';
 import { MaadEngine } from '../../src/engine.js';
+import { OperationJournal } from '../../src/engine/journal.js';
+import type { CommitOptions, CommitOutcome, GitLayer } from '../../src/git/index.js';
+import { HistoryController } from '../../src/history/controller.js';
 import { resolveHistoryConfig } from '../../src/history/config.js';
 import type { HistoryMode, HistoryOptions, ResolvedHistoryConfig } from '../../src/history/types.js';
 import { validateInstance, type InstanceConfig, type ProjectConfig } from '../../src/instance/config.js';
@@ -99,6 +102,14 @@ async function openEngine(
   return engine;
 }
 
+const batchConfig: ResolvedHistoryConfig = {
+  effectiveMode: 'batch',
+  configuredMode: 'batch',
+  modeSource: 'project',
+  options: {},
+  advisories: [],
+};
+
 async function createNote(engine: MaadEngine, id: string, title = id): Promise<void> {
   const created = await engine.createDocument(
     docType('note'),
@@ -159,10 +170,7 @@ function instance(projectConfig: ProjectConfig): InstanceConfig {
 }
 
 function journalEntries(root: string): unknown[] {
-  const journalPath = path.join(root, '_backend', 'journal.json');
-  return existsSync(journalPath)
-    ? JSON.parse(readFileSync(journalPath, 'utf8')) as unknown[]
-    : [];
+  return new OperationJournal(path.join(root, '_backend')).getPending();
 }
 
 beforeEach(() => {
@@ -478,7 +486,7 @@ describe('batch boundaries and recovery', () => {
     });
   });
 
-  it('recovers indexed pending journal entries on restart', async () => {
+  it.each(['current', 'pre-version-2'])('recovers indexed pending entries from a %s journal on restart', async format => {
     const root = makeRoot();
     scaffoldProject(root);
     const git = await initGit(root);
@@ -496,11 +504,46 @@ describe('batch boundaries and recovery', () => {
     crashed.historyRuntime = null;
     engines.delete(first);
 
+    if (format === 'pre-version-2') {
+      const backend = path.join(root, '_backend');
+      const current = new OperationJournal(backend);
+      writeFileSync(path.join(backend, 'journal.json'), JSON.stringify(current.getPending().map(({ commitId, ...entry }) => ({
+        ...entry,
+        commit: current.getCommit({ ...entry, commitId }),
+      }))));
+      rmSync(path.join(backend, 'journal.log'), { force: true });
+    }
+
     const restarted = await openEngine(root, 'batch');
     expect(restarted.getStartupRecovery()).toContain('history_recovery_completed:batch');
     expect(restarted.health().history.pendingWrites).toBe(0);
     expect(journalEntries(root)).toEqual([]);
     expect(await commitCount(git)).toBe(initial + 1);
+    expect((await git.log({ maxCount: 1 })).latest?.message).toBe('maad:create note-restart [note] — note-restart');
+  });
+
+  it('recovers identical commits bound separately as one commit', async () => {
+    const root = makeRoot();
+    const journal = new OperationJournal(root);
+    const file = path.join(root, 'note-one.md');
+    const options: CommitOptions = {
+      action: 'update',
+      docId: docId('note-one'),
+      docType: docType('note'),
+      detail: 'body:replace',
+      summary: 'Body updated',
+      files: [file],
+    };
+    for (const id of ['first', 'second'].map(() => journal.begin('update', 'note-one', file))) {
+      journal.advance(id, 'indexed');
+      journal.bindCommit([id], options);
+    }
+    const commit = vi.fn(async (_options: CommitOptions): Promise<CommitOutcome> => ({ status: 'noop' }));
+
+    await new HistoryController(batchConfig, { commit } as unknown as GitLayer, journal).recover();
+
+    expect(commit).toHaveBeenCalledTimes(1);
+    expect(commit.mock.calls[0]![0]).toEqual(options);
   });
 
   it('reports an audit-mode commit failure in health', async () => {
