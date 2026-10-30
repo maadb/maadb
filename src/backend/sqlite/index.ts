@@ -273,6 +273,19 @@ export class SqliteBackend implements MaadBackend {
     }
   }
 
+  beginBatch(): void {
+    this.db.exec('BEGIN IMMEDIATE');
+  }
+
+  commitBatch(): void {
+    try {
+      this.db.exec('COMMIT');
+    } catch (error) {
+      if (this.db.inTransaction) this.db.exec('ROLLBACK');
+      throw error;
+    }
+  }
+
   materializeDocument(
     doc: DocumentRecord,
     objects: ExtractedObject[],
