@@ -171,6 +171,9 @@ file in the same directory. Failed replacement preserves the previous journal
 and restores its in-memory state. Windows replacement retries are bounded to
 handle brief file-sharing conflicts.
 
+Commits that name more paths than fit on a command line read them from a
+temporary file in the Git directory, which requires Git 2.25 or later.
+
 Invalid JSON, malformed journal entries, or an unreadable journal stop engine
 initialization with `BACKEND_ERROR`; they are never treated as an empty journal.
 Preserve the original file and reconcile it with the project files and Git

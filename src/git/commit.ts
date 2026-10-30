@@ -161,9 +161,11 @@ function pathspecChunks(files: string[]): string[][] {
   return chunks;
 }
 
-function capSummary(summary: string): string {
-  if (summary.length <= MAX_SUMMARY_CHARS) return summary;
-  return `${Array.from(summary).slice(0, MAX_SUMMARY_CHARS).join('')}…`;
+// One line, so a field value cannot add body lines beside the identity trailer.
+function subjectSummary(summary: string): string {
+  const line = summary.slice(0, MAX_SUMMARY_CHARS * 8).replace(/\s+/g, ' ').trim();
+  if (summary.length <= MAX_SUMMARY_CHARS && line.length <= MAX_SUMMARY_CHARS) return line;
+  return `${Array.from(line).slice(0, MAX_SUMMARY_CHARS).join('')}…`;
 }
 
 // Format: maad:<action> <doc_id> [<doc_type>] <detail> — <summary>
@@ -172,7 +174,7 @@ function capSummary(summary: string): string {
 // identity stay simple without polluting the summary line.
 export function formatCommitMessage(opts: CommitOptions): string {
   const detail = opts.detail ? `${opts.detail} ` : '';
-  const title = `maad:${opts.action} ${opts.docId as string} [${opts.docType as string}] ${detail}— ${capSummary(opts.summary)}`;
+  const title = `maad:${opts.action} ${opts.docId as string} [${opts.docType as string}] ${detail}— ${subjectSummary(opts.summary)}`;
   if (!opts.identity) return title;
   const lines = [`role: ${opts.identity.role}`];
   if (opts.identity.tokenId !== undefined) lines.push(`token: ${opts.identity.tokenId}`);

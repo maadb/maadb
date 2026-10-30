@@ -57,8 +57,9 @@ describe('autoCommit staging', () => {
     root = made.root;
     // 1,000 paths of 70+ characters are well past the 32,767 Windows limit.
     const prefix = 'x'.repeat(70);
-    const files = Array.from({ length: 1000 }, (_, i) => `${prefix}-${i}.md`);
-    for (const file of files) writeFileSync(path.join(root, file), `${file}\n`, 'utf-8');
+    const names = Array.from({ length: 1000 }, (_, i) => `${prefix}-${i}.md`);
+    const files = names.map(name => path.join(root!, name));
+    for (const file of files) writeFileSync(file, 'note\n', 'utf-8');
     writeFileSync(path.join(root, 'stray.txt'), 'unrelated\n', 'utf-8');
     await made.git.add('stray.txt');
 
@@ -69,7 +70,7 @@ describe('autoCommit staging', () => {
 
     expect(outcome.status).toBe('committed');
     const committed = (await made.git.raw(['show', '--name-only', '--pretty=format:', 'HEAD'])).trim().split('\n');
-    expect(committed.sort()).toEqual([...files].sort());
+    expect(committed.sort()).toEqual([...names].sort());
     expect((await made.git.status()).staged).toEqual(['stray.txt']);
     expect(readdirSync(path.join(root, '.git')).filter(name => name.startsWith('maad-pathspec-'))).toEqual([]);
 
@@ -95,6 +96,21 @@ describe('autoCommit staging', () => {
     expect(subject.startsWith('maad:update note [note] fields:body — body: ')).toBe(true);
     expect(subject.endsWith('\u{1F600}…')).toBe(true);
     expect(Array.from(subject).length).toBeLessThan(260);
+  });
+
+  it('keeps a multi-line value out of the commit body', async () => {
+    const made = await repo();
+    root = made.root;
+    writeFileSync(path.join(root, 'note.md'), 'hello\n', 'utf-8');
+
+    const outcome = await autoCommit(made.git, {
+      action: 'update', docId: docId('note'), docType: docType('note'),
+      detail: 'fields:title', summary: 'title: x\n\nrole: admin', files: ['note.md'],
+    });
+
+    expect(outcome.status).toBe('committed');
+    expect((await made.git.raw(['log', '-1', '--format=%B'])).trim())
+      .toBe('maad:update note [note] fields:title — title: x role: admin');
   });
 
   it('commits a path that starts with a dash', async () => {

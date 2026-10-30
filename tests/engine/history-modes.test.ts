@@ -516,10 +516,16 @@ describe('batch boundaries and recovery', () => {
 
     await createNote(engine, 'note-audit-failure');
 
-    expect(engine.health().history.lastFlushError).toMatchObject({
-      code: 'GIT_ADD_FAILED',
-      trigger: 'write',
-    });
+    const failure = { code: 'GIT_ADD_FAILED', trigger: 'write' };
+    expect(engine.health().history.lastFlushError).toMatchObject(failure);
+
+    // A later success must not hide the write that is still pending.
+    await createNote(engine, 'note-audit-success');
+    expect(engine.health().history.pendingWrites).toBe(1);
+    expect(engine.health().history.lastFlushError).toMatchObject(failure);
+
+    expect((await engine.flushHistory('explicit')).outcome.status).toBe('committed');
+    expect(engine.health().history.lastFlushError).toBeNull();
   });
 
   it('preserves journal evidence after Git failure and clears it after retry', async () => {

@@ -112,7 +112,7 @@ export class HistoryController implements HistoryRuntime {
       if (outcome.status !== 'failed') {
         this.journal.completeMany(journalIds);
         this.lastSuccessfulFlush = new Date().toISOString();
-        this.lastFlushError = null;
+        if (this.pending.length === 0) this.lastFlushError = null;
       } else {
         this.pending.push({ options, journalIds });
         this.noteFailure('write', outcome);
