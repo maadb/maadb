@@ -166,21 +166,25 @@ succeeds. Batch thresholds, timers, explicit flushes, shutdown, and recovery
 are serialized per engine, so two triggers cannot commit the same pending group
 concurrently.
 
-Journal updates replace `_backend/journal.json` atomically using a temporary
-file in the same directory. Failed replacement preserves the previous journal
-and restores its in-memory state. Windows replacement retries are bounded to
-handle brief file-sharing conflicts. A commit shared by many entries, such as a
-bulk write, is stored once and referenced by ID. Journals written by earlier
+The journal is a snapshot in `_backend/journal.json` plus one appended line per
+change in `_backend/journal.log`. MAADB folds the log into the snapshot when it
+grows and when nothing is pending, replacing the snapshot atomically through a
+temporary file in the same directory. A failed append or replacement leaves the
+previous journal and its in-memory state unchanged. Windows retries are bounded
+to handle brief file-sharing conflicts. A commit shared by many entries, such as
+a bulk write, is stored once and referenced by ID. Journals written by earlier
 versions still load and are converted on the next update; earlier engines reject
 the new format, so finish or recover pending writes before downgrading.
 
-Invalid JSON, malformed journal entries, or an unreadable journal stop engine
-initialization with `BACKEND_ERROR`; they are never treated as an empty journal.
-Preserve the original file and reconcile it with the project files and Git
-history before repairing it and restarting. Do not replace it with an empty
-array simply to bypass the error. Atomic replacement alone does not guarantee
-survival of power loss; filesystem synchronization and recovery at every write
-stage remain separate concerns.
+A line cut short at the end of the log is an append that never finished, so
+startup ignores it. Invalid JSON, malformed journal entries, a corrupt line
+anywhere else in the log, or an unreadable journal stop engine initialization
+with `BACKEND_ERROR`; they are never treated as an empty journal. Preserve both
+files and reconcile them with the project files and Git history before repairing
+them and restarting. Do not replace them with an empty journal simply to bypass
+the error. Neither appends nor atomic replacement guarantee survival of power
+loss; filesystem synchronization and recovery at every write stage remain
+separate concerns.
 
 On a clean shutdown, MAADB clears the history timer and attempts a bounded
 flush. The shutdown attempt waits for up to five seconds. If it fails or times
