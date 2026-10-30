@@ -1095,8 +1095,14 @@ export async function verifyIntegrity(
     if (!expanded.ok) return expanded;
     const findQuery: DocumentQuery = { filters: expanded.value as NonNullable<DocumentQuery['filters']> };
     if (query.docType) findQuery.docType = query.docType;
-    const found = ctx.backend.findDocuments(findQuery);
-    allowedDocIds = new Set(found.map(r => r.docId as string));
+    // Page through every match: findDocuments defaults to 50 rows.
+    allowedDocIds = new Set();
+    const PAGE = 1000;
+    for (let offset = 0; ; offset += PAGE) {
+      const page = ctx.backend.findDocuments({ ...findQuery, limit: PAGE, offset });
+      for (const match of page) allowedDocIds.add(match.docId as string);
+      if (page.length < PAGE) break;
+    }
   }
 
   const findings: Record<IntegrityCategory, number> = {
