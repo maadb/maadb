@@ -111,8 +111,10 @@ export async function indexAll(ctx: EngineContext, opts?: { force?: boolean }): 
   const batch = new IndexBatch(ctx.backend);
   try {
     return await scanAndIndex(ctx, batch, opts);
-  } finally {
-    batch.close();
+  } catch (error) {
+    // The scan's error is the one to report, even if this commit also fails.
+    try { batch.close(); } catch { /* the group rolled back */ }
+    throw error;
   }
 }
 
