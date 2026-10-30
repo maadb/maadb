@@ -33,6 +33,7 @@ export interface ResolvedHistoryConfig {
 }
 
 export type HistoryFlushTrigger =
+  | 'write'
   | 'threshold'
   | 'timer'
   | 'explicit'
