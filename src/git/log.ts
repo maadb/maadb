@@ -28,25 +28,35 @@ export async function getHistory(
   filePath: string,
   opts?: { limit?: number; since?: string },
 ): Promise<ParsedCommit[]> {
-  const args = ['--follow', '--format=%H|%an|%aI|%s'];
+  // Git's -n counts commits before the MAAD filter below, so widen the window
+  // until the limit is met or the file's history runs out.
+  for (let window = opts?.limit; ; window = (window as number) * 4) {
+    const args = ['--follow', '--format=%H|%an|%aI|%s'];
 
-  if (opts?.limit) args.push(`-n`, String(opts.limit));
-  if (opts?.since) args.push(`--since=${normalizeDateArg(opts.since)}`);
+    if (window) args.push(`-n`, String(window));
+    if (opts?.since) args.push(`--since=${normalizeDateArg(opts.since)}`);
 
-  args.push('--', filePath);
+    args.push('--', filePath);
 
-  let logOutput: string;
-  try {
-    logOutput = await git.raw(['log', ...args]);
-  } catch (e) {
-    logger.bestEffort('git', 'history', `Git log failed for ${filePath}: ${e instanceof Error ? e.message : String(e)}`);
-    return [];
+    let logOutput: string;
+    try {
+      logOutput = await git.raw(['log', ...args]);
+    } catch (e) {
+      logger.bestEffort('git', 'history', `Git log failed for ${filePath}: ${e instanceof Error ? e.message : String(e)}`);
+      return [];
+    }
+
+    const lines = logOutput.trim() ? logOutput.trim().split('\n') : [];
+    const commits = parseHistoryLines(lines);
+    if (!window || lines.length < window || commits.length >= (opts?.limit as number)) {
+      return opts?.limit ? commits.slice(0, opts.limit) : commits;
+    }
   }
+}
 
-  if (!logOutput.trim()) return [];
-
+function parseHistoryLines(lines: string[]): ParsedCommit[] {
   const commits: ParsedCommit[] = [];
-  for (const line of logOutput.trim().split('\n')) {
+  for (const line of lines) {
     const parts = line.split('|');
     if (parts.length < 4) continue;
 
