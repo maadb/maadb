@@ -26,6 +26,7 @@ import {
 import { parseDocument, parseDocumentFromContent, type ParseOptions } from '../parser/index.js';
 import { validateFrontmatter } from '../schema/index.js';
 import { extract } from '../extractor/index.js';
+import type { MaadBackend } from '../backend/adapter.js';
 import type { EngineContext } from './context.js';
 import type { IndexResult } from './types.js';
 import type { BlockTextInput } from './semantic/types.js';
@@ -51,7 +52,71 @@ function computeIndexedFieldFingerprint(schema: SchemaDefinition): string {
 
 const SCHEMA_FP_KEY_PREFIX = 'schema_index_fp:';
 
+// Commits dominate a rebuild, so documents commit in groups. Each document still
+// materializes in its own savepoint, so a failed document costs only itself, and
+// the write lock keeps other writes out while a group is open across awaits.
+const INDEX_BATCH_DOCS = 200;
+
+class IndexBatch {
+  private open = false;
+  private docs = 0;
+  private types = new Set<string>();
+
+  constructor(private readonly backend: MaadBackend) {}
+
+  begin(): void {
+    if (this.open) return;
+    try {
+      this.backend.beginBatch();
+      this.open = true;
+    } catch {
+      // Documents then commit one at a time and report their own failures.
+    }
+  }
+
+  wrote(typeName: string, result: IndexResult, typesWithErrors: Set<string>): void {
+    if (!this.open) return;
+    this.docs++;
+    this.types.add(typeName);
+    if (this.docs >= INDEX_BATCH_DOCS) this.commit(result, typesWithErrors);
+  }
+
+  commit(result: IndexResult, typesWithErrors: Set<string>): void {
+    if (!this.open) return;
+    this.open = false;
+    try {
+      this.backend.commitBatch();
+    } catch (e) {
+      // The group rolled back, so its types stay dirty and retry on the next pass.
+      result.indexed -= this.docs;
+      for (const typeName of this.types) typesWithErrors.add(typeName);
+      result.errors.push({
+        code: 'BACKEND_ERROR',
+        message: `Failed to commit ${this.docs} indexed document(s): ${e instanceof Error ? e.message : String(e)}`,
+      });
+    }
+    this.docs = 0;
+    this.types.clear();
+  }
+
+  /** Keep what finished if the scan itself throws. */
+  close(): void {
+    if (!this.open) return;
+    this.open = false;
+    this.backend.commitBatch();
+  }
+}
+
 export async function indexAll(ctx: EngineContext, opts?: { force?: boolean }): Promise<IndexResult> {
+  const batch = new IndexBatch(ctx.backend);
+  try {
+    return await scanAndIndex(ctx, batch, opts);
+  } finally {
+    batch.close();
+  }
+}
+
+async function scanAndIndex(ctx: EngineContext, batch: IndexBatch, opts?: { force?: boolean }): Promise<IndexResult> {
   const force = opts?.force ?? false;
   const result: IndexResult = { scanned: 0, indexed: 0, skipped: 0, errors: [] };
   const warnings: string[] = [];
@@ -169,18 +234,22 @@ export async function indexAll(ctx: EngineContext, opts?: { force?: boolean }): 
         }
       }
 
+      batch.begin();
       const indexResult = await indexFile(ctx, absPath, raw !== undefined ? { raw } : undefined);
       if (indexResult.ok) {
         result.indexed++;
         if (indexResult.value.annotationsTruncated) {
           result.partial = (result.partial ?? 0) + 1;
         }
+        batch.wrote(typeName as string, result, typesWithErrors);
       } else {
         typesWithErrors.add(typeName as string);
         result.errors.push(...indexResult.errors);
       }
     }
   }
+
+  batch.commit(result, typesWithErrors);
 
   // Remove stale backend records — but never a row whose file still exists on
   // disk. A stale row with a live file means the file sits outside every

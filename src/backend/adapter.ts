@@ -139,6 +139,11 @@ export interface MaadBackend {
   initSemantic(cfg: { dim?: number | undefined; model?: string | undefined }): void;
   semantic(): SemanticIndex | null;
 
+  // Group many materializeDocument calls into one commit, across awaits. The
+  // caller must hold the engine write lock. commitBatch rolls back if it fails.
+  beginBatch(): void;
+  commitBatch(): void;
+
   // Batch write (wraps all puts in a transaction for a single document).
   // 0.8.0 — `semanticBlocks` (when provided) populates the per-block semantic
   // index (FTS + embed queue) inside the same transaction. Omitted/undefined
