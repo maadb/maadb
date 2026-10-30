@@ -161,7 +161,7 @@ function instance(projectConfig: ProjectConfig): InstanceConfig {
 function journalEntries(root: string): unknown[] {
   const journalPath = path.join(root, '_backend', 'journal.json');
   return existsSync(journalPath)
-    ? JSON.parse(readFileSync(journalPath, 'utf8')) as unknown[]
+    ? (JSON.parse(readFileSync(journalPath, 'utf8')) as { entries: unknown[] }).entries
     : [];
 }
 

@@ -305,14 +305,14 @@ export class HistoryController implements HistoryRuntime {
 
     const groups = new Map<string, JournalEntry[]>();
     for (const entry of missing) {
-      const key = entry.commit ? JSON.stringify(entry.commit) : '__recovery__';
+      const key = entry.commitId ?? '__recovery__';
       const group = groups.get(key) ?? [];
       group.push(entry);
       groups.set(key, group);
     }
     for (const group of groups.values()) {
       this.pending.push({
-        options: group[0]?.commit ?? recoveredCommit(group),
+        options: this.journal.getCommit(group[0]!) ?? recoveredCommit(group),
         journalIds: group.map(entry => entry.id),
       });
     }

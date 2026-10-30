@@ -15,20 +15,27 @@ export interface JournalEntry {
   filePath: string;
   tempPath?: string | undefined;
   files?: string[] | undefined;
-  commit?: CommitOptions | undefined;
+  commitId?: string | undefined;
   gitBoundarySha?: string | undefined;
   snapshotTag?: string | undefined;
   timestamp: string;
   status: 'pending' | 'file_written' | 'indexed' | 'committed';
 }
 
-function isJournalEntry(value: unknown): value is JournalEntry {
+// Bulk writes bind one commit to every entry, so the commit (and its file list)
+// is stored once and entries reference it. Before version 2 the file was a bare
+// entry array with the commit inlined on each entry; that form still loads.
+const JOURNAL_VERSION = 2;
+
+type StoredEntry = JournalEntry & { commit?: CommitOptions | undefined };
+
+function isJournalEntry(value: unknown): value is StoredEntry {
   if (!value || typeof value !== 'object') return false;
   const entry = value as Record<string, unknown>;
   return ['id', 'docId', 'filePath', 'timestamp'].every(key => typeof entry[key] === 'string')
     && typeof entry.op === 'string' && ['create', 'update', 'delete'].includes(entry.op)
     && typeof entry.status === 'string' && ['pending', 'file_written', 'indexed', 'committed'].includes(entry.status)
-    && ['tempPath', 'gitBoundarySha', 'snapshotTag'].every(key => entry[key] === undefined || typeof entry[key] === 'string')
+    && ['tempPath', 'commitId', 'gitBoundarySha', 'snapshotTag'].every(key => entry[key] === undefined || typeof entry[key] === 'string')
     && (entry.files === undefined || (Array.isArray(entry.files) && entry.files.every(file => typeof file === 'string')))
     && (entry.commit === undefined || isCommitOptions(entry.commit));
 }
@@ -44,6 +51,7 @@ function isCommitOptions(value: unknown): value is CommitOptions {
 export class OperationJournal {
   private journalPath: string;
   private entries: JournalEntry[] = [];
+  private commits = new Map<string, CommitOptions>();
   private persisted = '[]';
 
   constructor(backendDir: string) {
@@ -63,22 +71,64 @@ export class OperationJournal {
     try { parsed = JSON.parse(raw); } catch {
       throw new Error('Invalid operation journal JSON; preserve journal.json and repair it before restarting');
     }
-    if (!Array.isArray(parsed) || !parsed.every(isJournalEntry)) {
-      throw new Error('Invalid operation journal entries; preserve journal.json and repair it before restarting');
+    this.restore(parsed);
+    this.persisted = raw;
+  }
+
+  private restore(parsed: unknown): void {
+    const invalid = new Error('Invalid operation journal entries; preserve journal.json and repair it before restarting');
+    let stored: unknown;
+    const commits = new Map<string, CommitOptions>();
+    if (Array.isArray(parsed)) {
+      stored = parsed;
+    } else {
+      const file = parsed as { version?: unknown; commits?: unknown; entries?: unknown } | null;
+      if (file?.version !== JOURNAL_VERSION || !file.commits || typeof file.commits !== 'object') throw invalid;
+      for (const [id, commit] of Object.entries(file.commits)) {
+        if (!isCommitOptions(commit)) throw invalid;
+        commits.set(id, commit);
+      }
+      stored = file.entries;
     }
-    this.entries = parsed;
-    this.persisted = JSON.stringify(parsed);
+    if (!Array.isArray(stored) || !stored.every(isJournalEntry)) throw invalid;
+
+    const interned = new Map<string, string>();
+    const entries = stored.map(({ commit, ...entry }) => {
+      if (commit) {
+        const key = JSON.stringify(commit);
+        let commitId = interned.get(key);
+        if (commitId === undefined) {
+          commitId = randomUUID();
+          interned.set(key, commitId);
+          commits.set(commitId, commit);
+        }
+        return { ...entry, commitId };
+      }
+      if (entry.commitId !== undefined && !commits.has(entry.commitId)) throw invalid;
+      return entry;
+    });
+    this.entries = entries;
+    this.commits = commits;
+  }
+
+  private serialize(): string {
+    const live = new Map<string, CommitOptions>();
+    for (const { commitId } of this.entries) {
+      if (commitId !== undefined) live.set(commitId, this.commits.get(commitId)!);
+    }
+    this.commits = live;
+    return JSON.stringify({ version: JOURNAL_VERSION, commits: Object.fromEntries(live), entries: this.entries }, null, 2);
   }
 
   private save(): void {
-    const next = JSON.stringify(this.entries, null, 2);
+    const next = this.serialize();
     try {
       atomicWriteSync(this.journalPath, next, process.platform === 'win32' ? 5 : 0);
       this.persisted = next;
     } catch (error) {
       // A failed publication must not leave unpersisted recovery state queued
       // in memory for a later operation or shutdown flush.
-      this.entries = JSON.parse(this.persisted) as JournalEntry[];
+      this.restore(JSON.parse(this.persisted));
       throw error;
     }
   }
@@ -116,13 +166,20 @@ export class OperationJournal {
   bindCommit(ids: string[], commit: CommitOptions): void {
     if (ids.length === 0) return;
     const wanted = new Set(ids);
+    const commitId = randomUUID();
     let changed = false;
     for (const entry of this.entries) {
       if (!wanted.has(entry.id)) continue;
-      entry.commit = { ...commit, files: [...commit.files] };
+      entry.commitId = commitId;
       changed = true;
     }
-    if (changed) this.save();
+    if (!changed) return;
+    this.commits.set(commitId, { ...commit, files: [...commit.files] });
+    this.save();
+  }
+
+  getCommit(entry: JournalEntry): CommitOptions | undefined {
+    return entry.commitId === undefined ? undefined : this.commits.get(entry.commitId);
   }
 
   recordSnapshotBoundary(ids: string[], sha: string, tag: string): void {
