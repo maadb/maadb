@@ -169,7 +169,10 @@ concurrently.
 Journal updates replace `_backend/journal.json` atomically using a temporary
 file in the same directory. Failed replacement preserves the previous journal
 and restores its in-memory state. Windows replacement retries are bounded to
-handle brief file-sharing conflicts.
+handle brief file-sharing conflicts. A commit shared by many entries, such as a
+bulk write, is stored once and referenced by ID. Journals written by earlier
+versions still load and are converted on the next update; earlier engines reject
+the new format, so finish or recover pending writes before downgrading.
 
 Invalid JSON, malformed journal entries, or an unreadable journal stop engine
 initialization with `BACKEND_ERROR`; they are never treated as an empty journal.
