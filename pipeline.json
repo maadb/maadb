@@ -3,7 +3,8 @@
   "main": [],
   "leaks": {
     "allow": [
-      "^[\\w.-]+@maadb\\.(?:local|ai)$",
+      "^(?:engine|durability-test)@maadb\\.local$",
+      "^brain@maadb\\.ai$",
       "^[\\w.-]+@example\\.invalid$",
       "^(?:test|bob)@test\\.com$",
       "^[Jj]ane@(?:acme\\.com|Acme\\.COM)$",

@@ -3,14 +3,14 @@
 // .github/quality.mjs.
 // Shared copy kept by the maintainers. Refresh the whole file, keeping this header.
 //
-//   node scripts/quality.mjs                    pre-push gate (stage "gate")
-//   node scripts/quality.mjs --stage main       the gate plus the "main" steps (CI on main)
-//   node scripts/quality.mjs --only qx,leaks    run some steps only
-//   node scripts/quality.mjs --range A..B       commit range for the message and leak checks
-//   node scripts/quality.mjs --list             print the resolved steps and exit
-//   node scripts/quality.mjs --config <file>    read the steps from <file>, not pipeline.json
-//   node scripts/quality.mjs --install-hook     install the git pre-push hook [--force]
-//   node scripts/quality.mjs --uninstall-hook
+//   node .github/quality.mjs                    pre-push gate (stage "gate")
+//   node .github/quality.mjs --stage main       the gate plus the "main" steps (CI on main)
+//   node .github/quality.mjs --only qx,leaks    run some steps only
+//   node .github/quality.mjs --range A..B       commit range for the message and leak checks
+//   node .github/quality.mjs --list             print the resolved steps and exit
+//   node .github/quality.mjs --config <file>    read the steps from <file>, not pipeline.json
+//   node .github/quality.mjs --install-hook     install the git pre-push hook [--force]
+//   node .github/quality.mjs --uninstall-hook
 //
 // Steps come from pipeline.json at the repo root. A step is a built-in check,
 // a named command from "commands", or an npm script. A configured step that
@@ -234,13 +234,12 @@ export function scanText(text, cfg, where) {
   const problems = [];
   const allow = cfg.leaks.allow.map((a) => new RegExp(a));
   const deny = cfg.localDeny || [];
+  const patterns = SECRET_PATTERNS.map(([label, re]) => [label, new RegExp(re, "g")]);
+  const allowed = (label, value) => (label === "email" && EMAIL_ALLOW.some((a) => a.test(value))) || allow.some((a) => a.test(value));
   text.split(/\r?\n/).forEach((line, i) => {
-    for (const [label, re] of SECRET_PATTERNS) {
-      const m = line.match(re);
-      if (!m) continue;
-      if (label === "email" && EMAIL_ALLOW.some((a) => a.test(m[0]))) continue;
-      if (allow.some((a) => a.test(m[0]))) continue;
-      problems.push(`${where}:${i + 1}: ${label}`);
+    for (const [label, re] of patterns) {
+      // Every match counts: an allowed value must not hide a real one beside it.
+      if ([...line.matchAll(re)].some(([value]) => !allowed(label, value))) problems.push(`${where}:${i + 1}: ${label}`);
     }
     for (const value of deny) {
       if (value && line.toLowerCase().includes(String(value).toLowerCase())) {
