@@ -19,7 +19,7 @@
 // for adopting the gate while a repo cleans up existing problems.
 
 import { spawnSync } from "node:child_process";
-import { readFileSync, writeFileSync, existsSync, statSync, unlinkSync, mkdirSync, chmodSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, unlinkSync, mkdirSync, chmodSync } from "node:fs";
 import { join, dirname, extname, basename, resolve, relative } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -78,9 +78,8 @@ export function matchesAny(path, globs = []) {
 function readText(root, rel) {
   const abs = join(root, rel);
   try {
-    if (statSync(abs).size > 2 * 1024 * 1024) return null;
     const buf = readFileSync(abs);
-    if (buf.includes(0)) return null; // binary
+    if (buf.length > 2 * 1024 * 1024 || buf.includes(0)) return null; // too large, or binary
     return buf.toString("utf8");
   } catch {
     return null; // deleted in the working tree, or a submodule
@@ -496,9 +495,18 @@ export function hookPath(root) {
   return resolve(root, git(["rev-parse", "--git-common-dir"], { cwd: root }).trim(), "hooks", "pre-push");
 }
 
+function readHook(abs) {
+  try {
+    return readFileSync(abs, "utf8");
+  } catch {
+    return null; // no hook yet
+  }
+}
+
 export function installHook(root, { force = false, script = "scripts/quality.mjs" } = {}) {
   const abs = hookPath(root);
-  if (existsSync(abs) && !readFileSync(abs, "utf8").includes(HOOK_MARKER) && !force) {
+  const current = readHook(abs);
+  if (current !== null && !current.includes(HOOK_MARKER) && !force) {
     throw new Error(`${abs} exists and is not ours; pass --force to replace it`);
   }
   mkdirSync(dirname(abs), { recursive: true });
@@ -517,7 +525,7 @@ exec node "$(git rev-parse --show-toplevel)/${script}" --hook "$@"
 
 function uninstallHook(root) {
   const abs = hookPath(root);
-  if (existsSync(abs) && readFileSync(abs, "utf8").includes(HOOK_MARKER)) unlinkSync(abs);
+  if (readHook(abs)?.includes(HOOK_MARKER)) unlinkSync(abs);
   return abs;
 }
 
