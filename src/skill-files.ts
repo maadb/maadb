@@ -339,7 +339,7 @@ maad_create({
     status: "active",
     industry: "Manufacturing",
     primary_contact: "con-ron-stafford",
-    email: "r.stafford@apexind.com"
+    email: "r.stafford@example.com"
   }
 })
 \`\`\`

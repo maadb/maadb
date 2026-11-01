@@ -1,0 +1,15 @@
+{
+  "gate": ["leaks", "agent-files"],
+  "main": [],
+  "leaks": {
+    "allow": [
+      "^[\\w.-]+@maadb\\.(?:local|ai)$",
+      "^[\\w.-]+@example\\.invalid$",
+      "^(?:test|bob)@test\\.com$",
+      "^[Jj]ane@(?:acme\\.com|Acme\\.COM)$",
+      "^https://user:pw@example(?:\\.com)?$"
+    ],
+    "allowPaths": []
+  },
+  "public": true
+}

@@ -59,6 +59,30 @@ jobs:
             echo "code=false" >> "$GITHUB_OUTPUT"
           fi
 
+  # Scans tracked files and the shipped commit messages for secrets, internal
+  # IDs, private IPs and emails, and refuses tracked agent files. It runs on
+  # docs-only changes too, because that is where a leak is most likely to land.
+  quality:
+    name: quality
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24.22.1'
+
+      - name: Check public repo rules
+        env:
+          PIPELINE_COMMIT_RANGE: ${{ github.event_name == 'pull_request' && format('{0}..{1}', github.event.pull_request.base.sha, github.event.pull_request.head.sha) || format('{0}..{1}', github.event.before, github.sha) }}
+          # Lets the check confirm a Dependabot commit through the GitHub API.
+          PIPELINE_GITHUB_TOKEN: ${{ github.token }}
+        run: node .github/quality.mjs
+
   # The test jobs always run so the required checks always report; their steps
   # skip on docs-only changes. A skipped matrix job would report under an
   # unexpanded name and leave the required checks pending, so the jobs also run
