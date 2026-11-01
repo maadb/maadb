@@ -49,3 +49,6 @@ docs/benchmarks.md
 # Version.md history and brain decision records carry the durable rationale.
 docs/specs/
 docs/archive/
+
+# Local deny list for the quality gate (internal values)
+pipeline.local.json
