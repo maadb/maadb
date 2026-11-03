@@ -164,6 +164,8 @@ describe('operation journal persistence', () => {
       ['an unknown kind', { seq: 9, kind: 'mystery' }],
       ['a missing seq', { kind: 'drop', ids: [] }],
       ['a bad status', { seq: 9, kind: 'patch', ids: ['ID'], patch: { status: 'nope' } }],
+      ['non-list files', { seq: 9, kind: 'patch', ids: ['ID'], patch: { files: 5 } }],
+      ['an unknown patch field', { seq: 9, kind: 'patch', ids: ['ID'], patch: { commitId: 'x' } }],
     ])('rejects %s', (_name, record) => {
       const id = begin(new OperationJournal(root), 'note-one');
       fs.appendFileSync(logPath, `${JSON.stringify(record).replace('ID', id)}\n`);

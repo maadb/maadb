@@ -225,6 +225,8 @@ export class HistoryController implements HistoryRuntime {
       }
       this.journal.completeMany(boundaryIds);
       this.setPending(this.pending.flatMap(item => {
+        // A write with no journal entry was not part of the boundary commit.
+        if (item.journalIds.length === 0) return [item];
         const remaining = item.journalIds.filter(id => !boundaryIdSet.has(id));
         return remaining.length === 0 ? [] : [{ ...item, journalIds: remaining }];
       }));

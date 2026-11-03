@@ -63,12 +63,23 @@ function isCommitOptions(value: unknown): value is CommitOptions {
     && Array.isArray(commit.files) && commit.files.every(file => typeof file === 'string');
 }
 
+// Checked before it is applied, so a corrupt line reports a repair error
+// instead of breaking the file index.
+function isJournalPatch(value: unknown): value is JournalPatch {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const patch = value as Record<string, unknown>;
+  return Object.keys(patch).every(key => ['status', 'files', 'gitBoundarySha', 'snapshotTag'].includes(key))
+    && (patch.status === undefined || ['pending', 'file_written', 'indexed', 'committed'].includes(patch.status as string))
+    && (patch.files === undefined || (Array.isArray(patch.files) && patch.files.every(file => typeof file === 'string')))
+    && ['gitBoundarySha', 'snapshotTag'].every(key => patch[key] === undefined || typeof patch[key] === 'string');
+}
+
 function isJournalChange(value: unknown): value is JournalChange {
   if (!value || typeof value !== 'object') return false;
   const change = value as Record<string, unknown>;
   if (change.kind === 'begin') return isJournalEntry(change.entry);
   if (!Array.isArray(change.ids) || !change.ids.every(id => typeof id === 'string')) return false;
-  if (change.kind === 'patch') return !!change.patch && typeof change.patch === 'object';
+  if (change.kind === 'patch') return isJournalPatch(change.patch);
   if (change.kind === 'bind') return typeof change.commitId === 'string' && isCommitOptions(change.commit);
   return change.kind === 'drop';
 }
