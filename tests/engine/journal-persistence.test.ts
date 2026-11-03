@@ -164,6 +164,8 @@ describe('operation journal persistence', () => {
       ['an unknown kind', { seq: 9, kind: 'mystery' }],
       ['a missing seq', { kind: 'drop', ids: [] }],
       ['a bad status', { seq: 9, kind: 'patch', ids: ['ID'], patch: { status: 'nope' } }],
+      ['non-list files', { seq: 9, kind: 'patch', ids: ['ID'], patch: { files: 5 } }],
+      ['an unknown patch field', { seq: 9, kind: 'patch', ids: ['ID'], patch: { commitId: 'x' } }],
     ])('rejects %s', (_name, record) => {
       const id = begin(new OperationJournal(root), 'note-one');
       fs.appendFileSync(logPath, `${JSON.stringify(record).replace('ID', id)}\n`);
@@ -281,6 +283,38 @@ describe('operation journal persistence', () => {
       expect(storedCommits()).toBe(1);
       journal.complete(entries[1]!.id);
       expect(storedCommits()).toBe(0);
+    });
+
+    it('drops the previous commit when its only entry is bound again', () => {
+      const journal = new OperationJournal(root);
+      const [entry] = indexedEntries(journal, 1);
+      journal.bindCommit([entry!.id], commitFor([entry!.file]));
+      journal.bindCommit([entry!.id], { ...commitFor([entry!.file]), summary: 'again' });
+
+      const commits = (journal as unknown as { commits: Map<string, unknown> }).commits;
+      expect([...commits.values()]).toEqual([{ ...commitFor([entry!.file]), summary: 'again' }]);
+      const reopened = new OperationJournal(root);
+      expect(reopened.getIndexedPending().map(e => reopened.getCommit(e)?.summary)).toEqual(['again']);
+    });
+
+    it('finds indexed entries by their current files in journal order', () => {
+      const journal = new OperationJournal(root);
+      const [first, second, third] = indexedEntries(journal, 3);
+      const moved = path.join(root, 'moved.md');
+      journal.setFiles(third!.id, [third!.file, moved]);
+      journal.setFiles(first!.id, [moved]);
+      journal.advance(second!.id, 'file_written');
+
+      const ids = (j: OperationJournal, files: string[]) => j.findIndexedByFiles(files).map(entry => entry.id);
+      for (const j of [journal, new OperationJournal(root)]) {
+        expect(ids(j, [moved, third!.file])).toEqual([first!.id, third!.id]);
+        expect(ids(j, [first!.file, second!.file])).toEqual([]);
+        expect(j.countIndexedPending()).toBe(2);
+      }
+
+      journal.completeMany([first!.id]);
+      expect(ids(journal, [moved])).toEqual([third!.id]);
+      expect(journal.countIndexedPending()).toBe(1);
     });
 
     it('keeps the bound commit when a later append fails', () => {

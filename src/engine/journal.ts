@@ -63,12 +63,23 @@ function isCommitOptions(value: unknown): value is CommitOptions {
     && Array.isArray(commit.files) && commit.files.every(file => typeof file === 'string');
 }
 
+// Checked before it is applied, so a corrupt line reports a repair error
+// instead of breaking the file index.
+function isJournalPatch(value: unknown): value is JournalPatch {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const patch = value as Record<string, unknown>;
+  return Object.keys(patch).every(key => ['status', 'files', 'gitBoundarySha', 'snapshotTag'].includes(key))
+    && (patch.status === undefined || ['pending', 'file_written', 'indexed', 'committed'].includes(patch.status as string))
+    && (patch.files === undefined || (Array.isArray(patch.files) && patch.files.every(file => typeof file === 'string')))
+    && ['gitBoundarySha', 'snapshotTag'].every(key => patch[key] === undefined || typeof patch[key] === 'string');
+}
+
 function isJournalChange(value: unknown): value is JournalChange {
   if (!value || typeof value !== 'object') return false;
   const change = value as Record<string, unknown>;
   if (change.kind === 'begin') return isJournalEntry(change.entry);
   if (!Array.isArray(change.ids) || !change.ids.every(id => typeof id === 'string')) return false;
-  if (change.kind === 'patch') return !!change.patch && typeof change.patch === 'object';
+  if (change.kind === 'patch') return isJournalPatch(change.patch);
   if (change.kind === 'bind') return typeof change.commitId === 'string' && isCommitOptions(change.commit);
   return change.kind === 'drop';
 }
@@ -87,6 +98,13 @@ export class OperationJournal {
   private logPath: string;
   private entries = new Map<string, JournalEntry>();
   private commits = new Map<string, CommitOptions>();
+  // Derived from entries so a write held for a later flush costs the same with
+  // one pending entry as with thousands.
+  private order = new Map<string, number>();
+  private nextOrder = 0;
+  private byFile = new Map<string, Set<string>>();
+  private commitRefs = new Map<string, number>();
+  private indexed = 0;
   private seq = 0;
   private logBytes = 0;
   private compactAt = COMPACT_MIN_BYTES;
@@ -152,6 +170,10 @@ export class OperationJournal {
       this.entries.set(entry.id, entry);
     }
     this.commits = commits;
+    for (const entry of this.entries.values()) this.track(entry, 1);
+    for (const id of [...this.commits.keys()]) {
+      if (!this.commitRefs.has(id)) this.commits.delete(id);
+    }
   }
 
   private replay(): void {
@@ -181,35 +203,70 @@ export class OperationJournal {
 
   private apply(change: JournalChange): void {
     switch (change.kind) {
-      case 'begin':
+      case 'begin': {
+        const previous = this.entries.get(change.entry.id);
+        if (previous) this.track(previous, -1);
         this.entries.set(change.entry.id, change.entry);
+        this.track(change.entry, 1);
         break;
+      }
       case 'patch':
         for (const id of change.ids) {
           const entry = this.entries.get(id);
-          if (entry) Object.assign(entry, change.patch);
+          if (!entry) continue;
+          this.track(entry, -1);
+          Object.assign(entry, change.patch);
+          this.track(entry, 1);
         }
         break;
       case 'bind':
+        this.commits.set(change.commitId, change.commit);
+        this.commitRefs.set(change.commitId, this.commitRefs.get(change.commitId) ?? 0);
         for (const id of change.ids) {
           const entry = this.entries.get(id);
-          if (entry) entry.commitId = change.commitId;
+          if (!entry) continue;
+          this.track(entry, -1);
+          entry.commitId = change.commitId;
+          this.track(entry, 1);
         }
-        this.commits.set(change.commitId, change.commit);
-        this.pruneCommits();
+        if (this.commitRefs.get(change.commitId) === 0) this.release(change.commitId);
         break;
       case 'drop':
-        for (const id of change.ids) this.entries.delete(id);
-        this.pruneCommits();
+        for (const id of change.ids) {
+          const entry = this.entries.get(id);
+          if (!entry) continue;
+          this.track(entry, -1);
+          this.entries.delete(id);
+          this.order.delete(id);
+        }
         break;
     }
   }
 
-  private pruneCommits(): void {
-    const live = new Set([...this.entries.values()].map(entry => entry.commitId));
-    for (const id of this.commits.keys()) {
-      if (!live.has(id)) this.commits.delete(id);
+  // Adds (+1) or removes (-1) an entry's contribution to the derived state.
+  private track(entry: JournalEntry, sign: 1 | -1): void {
+    if (sign === 1 && !this.order.has(entry.id)) this.order.set(entry.id, this.nextOrder++);
+    if (entry.status === 'indexed') this.indexed += sign;
+    for (const file of entry.files ?? [entry.filePath]) {
+      const key = path.resolve(file);
+      const ids = this.byFile.get(key) ?? new Set<string>();
+      if (sign === 1) {
+        ids.add(entry.id);
+        this.byFile.set(key, ids);
+      } else {
+        ids.delete(entry.id);
+        if (ids.size === 0) this.byFile.delete(key);
+      }
     }
+    if (entry.commitId === undefined) return;
+    const refs = (this.commitRefs.get(entry.commitId) ?? 0) + sign;
+    this.commitRefs.set(entry.commitId, refs);
+    if (refs === 0) this.release(entry.commitId);
+  }
+
+  private release(commitId: string): void {
+    this.commitRefs.delete(commitId);
+    this.commits.delete(commitId);
   }
 
   // Memory changes only after the change is on disk, so a failed write leaves
@@ -314,12 +371,19 @@ export class OperationJournal {
     return [...this.entries.values()].filter(e => e.status === 'indexed');
   }
 
+  countIndexedPending(): number {
+    return this.indexed;
+  }
+
   findIndexedByFiles(files: string[]): JournalEntry[] {
-    const wanted = new Set(files.map(file => path.resolve(file)));
-    return this.getIndexedPending().filter(entry => {
-      const evidence = entry.files ?? [entry.filePath];
-      return evidence.some(file => wanted.has(path.resolve(file)));
-    });
+    const found = new Map<string, JournalEntry>();
+    for (const file of files) {
+      for (const id of this.byFile.get(path.resolve(file)) ?? []) {
+        const entry = this.entries.get(id);
+        if (entry?.status === 'indexed') found.set(id, entry);
+      }
+    }
+    return [...found.values()].sort((a, b) => this.order.get(a.id)! - this.order.get(b.id)!);
   }
 
   /**

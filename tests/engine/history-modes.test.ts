@@ -26,7 +26,7 @@ import type { InstanceCtx } from '../../src/mcp/ctx.js';
 import { getKindForTool } from '../../src/mcp/kinds.js';
 import * as historyModeTools from '../../src/mcp/tools/history-mode.js';
 import { cmdFlush } from '../../src/cli/commands/history-mode.js';
-import { docId, docType } from '../../src/types.js';
+import { commitSha, docId, docType } from '../../src/types.js';
 
 const roots: string[] = [];
 const engines = new Set<MaadEngine>();
@@ -675,6 +675,29 @@ describe('snapshot mode', () => {
     expect(await commitCount(git)).toBe(commitsAfterFailure);
     expect(engine.health().history.pendingWrites).toBe(0);
     expect(journalEntries(root)).toEqual([]);
+  });
+
+  it('keeps a write with no journal entry when finishing an earlier boundary', async () => {
+    const root = makeRoot();
+    const journal = new OperationJournal(root);
+    const tagged = journal.begin('create', 'note-tagged', path.join(root, 'note-tagged.md'));
+    journal.advance(tagged, 'indexed');
+    journal.recordSnapshotBoundary([tagged], 'a'.repeat(40), 'maad-snapshot-earlier');
+    const commit = vi.fn(async (_options: CommitOptions): Promise<CommitOutcome> => ({ status: 'committed', sha: commitSha('b'.repeat(40)) }));
+    const layer = { commit, listTagsByPrefix: vi.fn(async () => []), addAnnotatedTag: vi.fn(async () => undefined) };
+    const controller = new HistoryController({ ...batchConfig, effectiveMode: 'snapshot', configuredMode: 'snapshot' }, layer as unknown as GitLayer, journal);
+    const untracked: CommitOptions = {
+      action: 'update', docId: docId('note-other'), docType: docType('note'), detail: 'd', summary: 's', files: [path.join(root, 'other.md')],
+    };
+
+    await controller.commit(untracked);
+    expect(controller.health().pendingWrites).toBe(2);
+    await controller.flush('explicit');
+
+    expect(commit).toHaveBeenCalledTimes(1);
+    expect(commit.mock.calls[0]![0].files).toEqual(untracked.files);
+    expect(controller.health().pendingWrites).toBe(0);
+    expect(journal.getPending()).toEqual([]);
   });
 });
 
