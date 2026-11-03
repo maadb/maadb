@@ -53,6 +53,7 @@ export class HistoryController implements HistoryRuntime {
   private readonly gitLayer: GitLayer | null;
   private readonly journal: OperationJournal;
   private pending: PendingCommit[] = [];
+  private unjournaled = 0;
   private timer: NodeJS.Timeout | null = null;
   private flushTail: Promise<void> = Promise.resolve();
   private lastSuccessfulFlush: string | null = null;
@@ -114,13 +115,13 @@ export class HistoryController implements HistoryRuntime {
         this.lastSuccessfulFlush = new Date().toISOString();
         if (this.pending.length === 0) this.lastFlushError = null;
       } else {
-        this.pending.push({ options, journalIds });
+        this.enqueue({ options, journalIds });
         this.noteFailure('write', outcome);
       }
       return outcome;
     }
 
-    this.pending.push({ options, journalIds });
+    this.enqueue({ options, journalIds });
     this.armTimer();
     const threshold = this.config.options.max_writes;
     if (threshold !== undefined && this.pendingWriteCount() >= threshold) {
@@ -223,10 +224,10 @@ export class HistoryController implements HistoryRuntime {
         return { trigger, pendingWrites: this.pendingWriteCount(), outcome: failed };
       }
       this.journal.completeMany(boundaryIds);
-      this.pending = this.pending.flatMap(item => {
+      this.setPending(this.pending.flatMap(item => {
         const remaining = item.journalIds.filter(id => !boundaryIdSet.has(id));
         return remaining.length === 0 ? [] : [{ ...item, journalIds: remaining }];
-      });
+      }));
       this.lastSuccessfulFlush = new Date().toISOString();
       this.lastFlushError = null;
       if (this.pending.length > 0) return this.flushNow(trigger);
@@ -234,14 +235,14 @@ export class HistoryController implements HistoryRuntime {
     }
 
     const flushing = this.pending;
-    this.pending = [];
+    this.setPending([]);
     const journalIds = unique(flushing.flatMap(item => item.journalIds));
     let outcome: CommitOutcome;
 
     outcome = await this.commitGit(combinePending(flushing));
 
     if (outcome.status === 'failed') {
-      this.pending.unshift(...flushing);
+      this.setPending([...flushing, ...this.pending]);
       this.noteFailure(trigger, outcome);
       this.armTimer();
       return { trigger, pendingWrites: this.pendingWriteCount(), outcome };
@@ -258,7 +259,7 @@ export class HistoryController implements HistoryRuntime {
           code: 'GIT_TAG_FAILED',
           message: `snapshot tag failed: ${error instanceof Error ? error.message : String(error)}`,
         };
-        this.pending.unshift(...flushing);
+        this.setPending([...flushing, ...this.pending]);
         this.noteFailure(trigger, failed);
         this.armTimer();
         return { trigger, pendingWrites: this.pendingWriteCount(), outcome: failed };
@@ -320,17 +321,27 @@ export class HistoryController implements HistoryRuntime {
       groups.set(key, group);
     }
     for (const group of groups.values()) {
-      this.pending.push({
+      this.enqueue({
         options: this.journal.getCommit(group[0]!) ?? recoveredCommit(group),
         journalIds: group.map(entry => entry.id),
       });
     }
   }
 
+  // Counted once per write, not rescanned, so a long batch stays linear.
   private pendingWriteCount(): number {
-    const journalCount = this.journal.getIndexedPending().length;
-    const unjournaled = this.pending.filter(item => item.journalIds.length === 0).length;
-    return journalCount + unjournaled;
+    return this.journal.countIndexedPending() + this.unjournaled;
+  }
+
+  private enqueue(item: PendingCommit): void {
+    this.pending.push(item);
+    if (item.journalIds.length === 0) this.unjournaled++;
+  }
+
+  // Flushes replace or reorder the whole queue; count it again once.
+  private setPending(items: PendingCommit[]): void {
+    this.pending = items;
+    this.unjournaled = items.filter(item => item.journalIds.length === 0).length;
   }
 
   private noteFailure(trigger: HistoryFlushTrigger, outcome: Extract<CommitOutcome, { status: 'failed' }>): void {
@@ -343,9 +354,8 @@ export class HistoryController implements HistoryRuntime {
   }
 
   private armTimer(): void {
-    if (this.closed || this.timer || this.pendingWriteCount() === 0) return;
     const delay = this.config.options.max_delay_ms;
-    if (delay === undefined) return;
+    if (delay === undefined || this.closed || this.timer || this.pendingWriteCount() === 0) return;
     this.timer = setTimeout(() => {
       this.timer = null;
       void this.serialize('history:timer', () => this.flush('timer'));
