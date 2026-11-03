@@ -450,9 +450,10 @@ The vector store is `sqlite-vec` (in the same SQLite file); the lexical leg is F
 
 ## Current state
 
-**Current:** v0.19.1 — historical snapshots and diffs follow committed document moves and verify document identity. Requires Node.js 24.22.1 or later.
+**Current:** v0.20.0 — the write journal grows linearly with pending writes, large path lists commit on Windows, and finds, blob reads and reindexes do less work. Requires Node.js 24.22.1 or later and Git 2.25 or later.
 
 Recent shipped scope:
+- **0.20.0** — Linear write journal, large commits on Windows, faster finds, blob reads and reindexes
 - **0.19.1** — Historical snapshots and diffs across committed file moves
 - **0.19.0** — `on_finer` precision handling for date fields
 - **0.18.7** — Faster audited writes; `--` pathspecs for `git add` and `git commit`
@@ -485,7 +486,7 @@ MIT — see [LICENSE](LICENSE).
 ## Dependency audit
 
 <!-- dependency-audit:start -->
-Last audit: 2026-10-28, release 0.19.1 (`npm audit` on the release lockfile).
+Last audit: 2026-11-02, release 0.20.0 (`npm audit` on the release lockfile).
 
 | Package | Version | Purpose | Result |
 |---|---|---|---|
@@ -499,5 +500,5 @@ Last audit: 2026-10-28, release 0.19.1 (`npm audit` on the release lockfile).
 
 Full tree: 262 packages (161 production, including optional; 101 development). `npm audit`: 0 vulnerabilities in production dependencies, 0 in the full tree.
 
-gray-matter's own js-yaml 3 dependency is replaced with the js-yaml 4 version above through an npm `overrides` entry. zod 4.6.7 arrives through `@modelcontextprotocol/sdk`; 0.18.6 updated it, with body-parser 2.4.0, fast-uri 3.1.9 and ip-address 10.7.4, to clear advisories published after 0.18.5.
+gray-matter's own js-yaml 3 dependency is replaced with the js-yaml 4 version above through an npm `overrides` entry. zod 4.6.7 arrives through `@modelcontextprotocol/sdk`; 0.18.6 updated it, with body-parser 2.4.0, fast-uri 3.1.9 and ip-address 10.7.4, to clear advisories published after 0.18.5. 0.20.0 moves the transitive `@hono/node-server` to 2.1.5 for GHSA-rmxm-3fg6-px4f.
 <!-- dependency-audit:end -->

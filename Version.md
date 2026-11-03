@@ -1,10 +1,18 @@
 ---
 enabled: true
-current: 0.19.1
+current: 0.20.0
 dev_flow: formal
 ---
 
 # Version History
+
+## 0.20.0 - 2026-11-02
+
+Write paths no longer slow down as the number of pending writes grows. The operation journal stores each commit once, appends each change to `_backend/journal.log` and folds it into `journal.json` when the log grows or nothing is pending, so a bulk write of 1000 records writes under 1 MiB of journal instead of hundreds. Writes held for a later flush in `batch` and `snapshot` modes no longer rescan the pending journal, and finishing an earlier snapshot boundary no longer drops queued writes that have no journal entry. Engines before 0.20.0 reject the new journal format, so let pending writes finish or recover before downgrading.
+
+Bulk writes and large field updates no longer overflow the Windows command line: `git add` and `git status` run in chunks and the commit reads long path lists from a file, which needs Git 2.25 or later. Commit summaries are one line of at most 200 characters, and failed `audit` mode commits now appear in `lastFlushError` with the `write` trigger until they are committed.
+
+Filtered integrity sweeps check every matching record instead of the first 50. `getHistory` applies its limit after filtering for MAAD commits, so a newer manual commit no longer hides older history. Default find order and the changes feed use two new indexes, created on next start; exact blob reads spawn three Git processes instead of seven; and full reindexes commit in groups of 200 documents. `@hono/node-server` moves to 2.1.5 for GHSA-rmxm-3fg6-px4f. No database schema changes beyond the two indexes.
 
 ## 0.19.1 - 2026-10-28
 
