@@ -83,6 +83,7 @@ export type ErrorCode =
   | 'FILTER_BETWEEN_INVALID'
   | 'FILTER_EMPTY_ARRAY'
   | 'FILTER_OP_INVALID'
+  | 'METRIC_OP_INVALID'
   // 0.7.3 — engine-side flood-control safety floor
   | 'BULK_LIMIT_EXCEEDED'
   // 0.7.10 — confirm contract for destructive tools

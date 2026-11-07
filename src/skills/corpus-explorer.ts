@@ -119,9 +119,10 @@ Now compare the intended graph (Stage 2) with reality.
 
 1. **Measure edge usage with aggregates, not iteration.** For each edge in
    the Stage 2 table: \`maad_aggregate docType=<source> groupBy=<ref-field>\`.
-   Group count ≈ how many distinct targets are actually referenced; a
-   near-empty result means a declared-but-unused edge. This also hands you
-   the **hubs** — target IDs with the largest groups.
+   \`groupsTotal\` ≈ how many distinct targets are actually referenced (\`groups\`
+   stops at \`limit\`), and \`missing.count\` is how many records don't use the
+   edge; a near-empty result means a declared-but-unused edge. This also hands
+   you the **hubs** — target IDs with the largest groups.
 2. **Walk the hubs.** For the top 2–3 hubs: \`maad_related direction=both\`,
    then
 

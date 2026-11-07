@@ -291,14 +291,17 @@ export interface AggregateResult {
   }>;
   /** Distinct documents in scope, including `missing`. Does not change with `limit`. */
   total: number;
-  /** The metric over the whole scope, each document counted once. Does not change with `limit`. */
+  /**
+   * The metric over the whole scope, each document counted once. Does not change
+   * with `limit`. Null when the metric field has values but none are numeric.
+   */
   totalMetric?: number | null;
   groupsReturned: number;
   /** Groups in scope before `limit`. A lower bound when a ref chain hits the first-hop cap. */
   groupsTotal: number;
   /** True when `groups` does not hold every group, so group values will not add up to the totals. */
   truncated: boolean;
-  /** Documents in scope with no indexed value for the group field. They appear in no group. */
+  /** Documents in scope with no indexed value, or an empty one, for the group field. They appear in no group. */
   missing: { count: number; metric?: number | null };
   /**
    * Fields this query reads that are undeclared or not indexed in scope. Their

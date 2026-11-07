@@ -694,7 +694,13 @@ export function schemaInfo(ctx: EngineContext, dt: DocType): Result<SchemaInfoRe
 // rather than silently vanishing.
 export const UNRESOLVED_GROUP_KEY = '__unresolved__';
 
+const METRIC_OPS: readonly string[] = ['count', 'sum', 'avg', 'min', 'max'];
+
 export function aggregate(ctx: EngineContext, query: AggregateQuery): Result<AggregateResult> {
+  if (query.metric && !METRIC_OPS.includes(query.metric.op)) {
+    return singleErr('METRIC_OP_INVALID', `Invalid metric op '${query.metric.op}'. Valid ops: ${METRIC_OPS.join(', ')}.`);
+  }
+
   // 0.7.1 R2 — validate + expand filters into atomic per-field arrays.
   const expanded = expandFilters(query.filters as Record<string, unknown> | undefined);
   if (!expanded.ok) return expanded;
@@ -729,15 +735,35 @@ function typesIndexingField(ctx: EngineContext, field: string): string[] {
 }
 
 // Fields the query reads from the index that are undeclared in scope, or that a
-// type in scope declares without `index: true`. The count op reads no field.
+// type in scope declares without `index: true`. The count op reads no field. An
+// unscoped metric is read only from the types that index the group field.
 function unindexedAggregateFields(ctx: EngineContext, query: AggregateQuery, groupField: string): string[] {
-  const types = query.docType ? [query.docType] : [...ctx.registry.types.keys()];
-  const fields = [groupField];
-  if (query.metric && query.metric.op !== 'count' && query.metric.field !== groupField) fields.push(query.metric.field);
-  return fields.filter(field => {
+  const isUnindexed = (field: string, types: DocType[]): boolean => {
     const defs = types.flatMap(type => ctx.schemaStore.getSchemaForType(type)?.fields.get(field) ?? []);
     return defs.length === 0 || defs.some(def => !def.index);
-  });
+  };
+  const unindexed: string[] = [];
+  const groupTypes = query.docType ? [query.docType] : [...ctx.registry.types.keys()];
+  if (isUnindexed(groupField, groupTypes)) unindexed.push(groupField);
+  if (query.metric && query.metric.op !== 'count' && query.metric.field !== groupField) {
+    const metricTypes = query.docType ? [query.docType] : typesIndexingField(ctx, groupField).map(toDocType);
+    if (isUnindexed(query.metric.field, metricTypes)) unindexed.push(query.metric.field);
+  }
+  return unindexed;
+}
+
+// Hops of a validated chain whose field is not indexed. resolveRefChain reads the
+// index, so these resolve to nothing and their records bin as unresolved.
+function unindexedChainHops(ctx: EngineContext, docTypeArg: DocType, hops: string[]): string[] {
+  const unindexed: string[] = [];
+  let currentType = docTypeArg;
+  for (const hop of hops) {
+    const field = ctx.schemaStore.getSchemaForType(currentType)?.fields.get(hop);
+    if (!field) break;
+    if (!field.index) unindexed.push(hop);
+    if (field.target) currentType = field.target;
+  }
+  return unindexed;
 }
 
 // ---------------------------------------------------------------------------
@@ -939,8 +965,8 @@ function aggregateWithRefChain(
   };
   if (firstHopResult.totalMetric !== undefined) result.totalMetric = firstHopResult.totalMetric;
 
-  const unindexed = unindexedAggregateFields(ctx, query, firstHop);
-  if (unindexed.length > 0) result.unindexedFields = unindexed;
+  const unindexed = new Set([...unindexedChainHops(ctx, query.docType!, hops), ...unindexedAggregateFields(ctx, query, firstHop)]);
+  if (unindexed.size > 0) result.unindexedFields = [...unindexed];
   if (limitClamped) result.limitClamped = limitClamped;
   return ok(result);
 }
