@@ -450,9 +450,10 @@ The vector store is `sqlite-vec` (in the same SQLite file); the lexical leg is F
 
 ## Current state
 
-**Current:** v0.21.0 — `maad_aggregate` totals cover the whole scope and report truncated groups, missing values and unindexed fields. Requires Node.js 24.22.1 or later and Git 2.25 or later.
+**Current:** v0.22.0 — filters compare by the field's schema type, date-only bounds cover the whole period, and filters that cannot match are reported. Requires Node.js 24.22.1 or later and Git 2.25 or later.
 
 Recent shipped scope:
+- **0.22.0** — Filters compare by schema type, whole-period date bounds, `filterWarnings`
 - **0.21.0** — `maad_aggregate` totals before the limit, truncation and missing-value reporting
 - **0.20.0** — Linear write journal, large commits on Windows, faster finds, blob reads and reindexes
 - **0.19.1** — Historical snapshots and diffs across committed file moves
@@ -487,7 +488,7 @@ MIT — see [LICENSE](LICENSE).
 ## Dependency audit
 
 <!-- dependency-audit:start -->
-Last audit: 2026-11-06, release 0.21.0 (`npm audit` on the release lockfile).
+Last audit: 2026-11-07, release 0.22.0 (`npm audit` on the release lockfile).
 
 | Package | Version | Purpose | Result |
 |---|---|---|---|
