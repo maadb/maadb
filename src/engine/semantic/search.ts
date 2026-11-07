@@ -12,7 +12,7 @@ import { ok, singleErr, type Result } from '../../errors.js';
 import { docId as toDocId, docType as toDocType, type DocumentQuery } from '../../types.js';
 import type { EngineContext } from '../context.js';
 import { logger } from '../logger.js';
-import { expandFilters, MAX_QUERY_LIMIT } from '../reads.js';
+import { resolveFilters, MAX_QUERY_LIMIT } from '../reads.js';
 import { rrfFuse, DEFAULT_RRF_K } from './rrf.js';
 import type {
   SemanticSearchQuery,
@@ -63,9 +63,9 @@ export async function semanticSearch(
   const withSnippet = query.snippet ?? true;
   if (text.length === 0) return ok({ mode: query.mode, total: 0, results: [] });
 
-  const expanded = expandFilters(query.filters as Record<string, unknown> | undefined);
-  if (!expanded.ok) return expanded;
-  const scope: DocumentQuery = { filters: expanded.value };
+  const resolved = resolveFilters(ctx, query.docType !== undefined ? toDocType(query.docType) : undefined, query.filters as Record<string, unknown> | undefined);
+  if (!resolved.ok) return resolved;
+  const scope: DocumentQuery = { filters: resolved.value.filters };
   if (query.docType !== undefined) scope.docType = toDocType(query.docType);
   const scoped = query.docType !== undefined || query.filters !== undefined;
   // Scoped FTS is also needed for vector-error lexical fallback. Exact mode
@@ -217,6 +217,7 @@ export async function semanticSearch(
     total: top.length,
     results: top,
     ...(limitations.length > 0 ? { limitations } : {}),
+    ...(resolved.value.warnings.length > 0 ? { filterWarnings: resolved.value.warnings } : {}),
     ...(degraded !== undefined ? { degraded } : {}),
   });
 }

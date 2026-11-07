@@ -51,6 +51,7 @@ import { readFrontmatter } from './helpers.js';
 import { generateDocument, extractBody } from '../writer/index.js';
 import { atomicWrite } from './journal.js';
 import { indexFile } from './indexing.js';
+import { resolveFilters } from './reads.js';
 import { readFile } from 'node:fs/promises';
 import { isWritePathContainedIn } from './pathguard.js';
 import { validateStoredIdentity } from './write-boundary.js';
@@ -290,9 +291,12 @@ export async function repairWhere(
     });
   }
 
+  // Same filter contract as the maad_query probe that previews this repair.
+  const resolved = resolveFilters(ctx, docType, filter);
+  if (!resolved.ok) return resolved;
   const matches = ctx.backend.findDocuments({
     docType,
-    ...(filter !== undefined ? { filters: filter } : {}),
+    filters: resolved.value.filters,
     limit: maxRecords,
   });
 

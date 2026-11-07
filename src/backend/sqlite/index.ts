@@ -3,7 +3,7 @@
 // Implements MaadBackend using better-sqlite3 with WAL mode.
 // ============================================================================
 
-import { applyFieldFilters, buildFilterSQL, buildDocumentScope } from './query-scope.js';
+import { applyFieldFilters, fieldFilterClauses, buildDocumentScope } from './query-scope.js';
 import Database from 'better-sqlite3';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import type { Database as DatabaseType } from 'better-sqlite3';
@@ -442,7 +442,7 @@ export class SqliteBackend implements MaadBackend {
     const docTypeClause = query.docType ? ' AND d.doc_type = ?' : '';
     const docTypeParam: unknown[] = query.docType ? [query.docType as string] : [];
 
-    // Correlated EXISTS probes for filters (present-value arm). buildFilterSQL
+    // Correlated EXISTS probes for filters (present-value arm). fieldFilterClauses
     // emits unqualified field_name/field_value/numeric_value, which bind to the
     // inner field_index alias; the correlation is the alias.doc_id = sfi.doc_id.
     const existsConds: string[] = [];
@@ -450,12 +450,13 @@ export class SqliteBackend implements MaadBackend {
     let exIdx = 0;
     if (query.filters) {
       for (const [field, condition] of Object.entries(query.filters)) {
-        const atomics: unknown[] = Array.isArray(condition) ? condition : [condition];
-        for (const c of atomics) {
-          const { sql, values } = buildFilterSQL(field, c);
-          const alias = `fex${exIdx++}`;
-          existsConds.push(`EXISTS (SELECT 1 FROM field_index ${alias} WHERE ${alias}.doc_id = sfi.doc_id AND ${sql})`);
-          existsParams.push(...values);
+        const { required, excluded } = fieldFilterClauses(field, condition);
+        for (const [probe, clauses] of [['EXISTS', required], ['NOT EXISTS', excluded]] as const) {
+          for (const { sql, values } of clauses) {
+            const alias = `fex${exIdx++}`;
+            existsConds.push(`${probe} (SELECT 1 FROM field_index ${alias} WHERE ${alias}.doc_id = sfi.doc_id AND ${sql})`);
+            existsParams.push(...values);
+          }
         }
       }
     }

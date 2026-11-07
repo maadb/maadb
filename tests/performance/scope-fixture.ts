@@ -25,7 +25,7 @@ export function scopeFixture(size: number, options: { inMemory?: boolean } = {})
   }
   add('old', 'uniqueneedle foundational decision', 'note', 'public', '2000-01-01');
   for (let i = 1; i < size; i++) add(`new-${i.toString().padStart(6, '0')}`, 'routine unrelated update');
-  const ctx = { backend, embeddingProvider: {
+  const ctx = { backend, registry: { types: new Map() }, schemaStore: { getSchemaForType: () => undefined }, embeddingProvider: {
     id: 'fixture', model: 'scope-fixture', dim: 2,
     embed: async () => [new Float32Array([1, 0])],
   } } as unknown as EngineContext;

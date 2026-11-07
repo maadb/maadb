@@ -30,10 +30,10 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
   }));
 
   server.registerTool('maad_query', {
-    description: 'Finds documents by type with optional field filters and projection. Filters support shorthand eq, single-op, between shortcut, and array-of-ops (AND semantics). Use fields to return frontmatter values inline instead of chasing IDs. Set depth=cold to return record bodies inline (kills query-then-N-gets pattern), depth=full to return full composite (refs+objects+related) per row.',
+    description: 'Finds documents by type with optional field filters and projection. Filters support shorthand eq, single-op, between shortcut, and array-of-ops (AND semantics). Use fields to return frontmatter values inline instead of chasing IDs. Set depth=cold to return record bodies inline (kills query-then-N-gets pattern), depth=full to return full composite (refs+objects+related) per row. filterWarnings names any filter that cannot match as written (reason undeclared, unindexed or not_numeric), so a low or zero total there does not mean the records are absent.',
     inputSchema: z.object({
       docType: z.string().describe('Document type to query'),
-      filters: z.any().optional().describe('Field filters. Shorthand: { status: "active" }. Single op: { opened_at: { op: "gte", value: "2026-01-01" } }. Range shortcut: { opened_at: { op: "between", value: ["2026-03-01", "2026-03-31"] } }. Array-of-ops (AND): { opened_at: [{op: "gte", value: "2026-03-01"}, {op: "lte", value: "2026-03-31"}] }. Ops: eq, neq, gt, gte, lt, lte, in, contains, between.'),
+      filters: z.any().optional().describe('Field filters. Shorthand: { status: "active" }. Single op: { opened_at: { op: "gte", value: "2026-01-01" } }. Range shortcut: { opened_at: { op: "between", value: ["2026-03-01", "2026-03-31"] } }. Array-of-ops (AND): { opened_at: [{op: "gte", value: "2026-03-01"}, {op: "lte", value: "2026-03-31"}] }. Ops: eq, neq, gt, gte, lt, lte, in, contains, between. Comparison follows the field type in the schema: a number or amount field compares as numbers even when the value is a string, and a date-only, month or year bound on a date field covers that whole period, with dates compared as written and no time zone conversion.'),
       fields: z.array(z.string()).optional().describe('Field names to return inline (e.g. ["name", "status"]). Indexed fields only.'),
       sortBy: z.string().optional().describe('System sort key (updated_at, indexed_at, doc_id, doc_type, created_at — camelCase aliases also accepted) OR an indexed schema field for the requested docType. Unknown / unindexed keys reject with UNSUPPORTED_SORT_FIELD instead of silently returning all-NULL ordering. Always emits a deterministic doc_id tie-breaker.'),
       sortOrder: z.enum(['asc', 'desc']).optional().describe('Sort direction (default desc)'),
@@ -64,10 +64,9 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
         return rest;
       });
       const newValue: import('../../engine/types.js').FindResult = {
-        total: result.value.total,
+        ...result.value,
         results: stripped as typeof result.value.results,
       };
-      if (result.value.limitClamped) newValue.limitClamped = result.value.limitClamped;
       effective = { ok: true, value: newValue } as typeof result;
     }
 
@@ -79,10 +78,9 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
       if (args.depthMaxResults !== undefined) hydrateOpts.depthMaxResults = args.depthMaxResults;
       const outcome = await hydrateQueryRows(engine, effective.value.results, hydrateOpts);
       const newValue: import('../../engine/types.js').FindResult = {
-        total: effective.value.total,
+        ...effective.value,
         results: outcome.rows as typeof effective.value.results,
       };
-      if (effective.value.limitClamped) newValue.limitClamped = effective.value.limitClamped;
       effective = { ok: true, value: newValue } as typeof effective;
       depthMeta = outcome.meta;
     }
@@ -193,7 +191,7 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
   }));
 
   server.registerTool('maad_aggregate', {
-    description: 'Groups documents by a field and optionally computes a metric (count/sum/avg/min/max) on another field. Supports multi-hop ref chains in groupBy (e.g. "client->industry") for cross-doctype aggregates — resolves refs at query time, merges groups that collapse to the same leaf value. Use instead of iterating records for totals. total and totalMetric cover every record in scope and do not change with limit; a record in two groups of a list field counts once. Records with no indexed value for groupBy, or an empty one, appear in no group and are reported in missing { count, metric }. unindexedFields names any field that is undeclared or not indexed, including ref-chain hops: its values cannot be read, so missing does not mean those records have no value. totalMetric is null when the metric field has values but none are numeric. When truncated is true, groups holds groupsReturned of groupsTotal groups, so group values will not add up to the totals.',
+    description: 'Groups documents by a field and optionally computes a metric (count/sum/avg/min/max) on another field. Supports multi-hop ref chains in groupBy (e.g. "client->industry") for cross-doctype aggregates — resolves refs at query time, merges groups that collapse to the same leaf value. Use instead of iterating records for totals. total and totalMetric cover every record in scope and do not change with limit; a record in two groups of a list field counts once. Records with no indexed value for groupBy, or an empty one, appear in no group and are reported in missing { count, metric }. unindexedFields names any field that is undeclared or not indexed, including ref-chain hops: its values cannot be read, so missing does not mean those records have no value. totalMetric is null when the metric field has values but none are numeric. When truncated is true, groups holds groupsReturned of groupsTotal groups, so group values will not add up to the totals. filterWarnings names any filter that cannot match as written (reason undeclared, unindexed or not_numeric), so a low or zero total there does not mean the records are absent.',
     inputSchema: z.object({
       docType: z.string().optional().describe('Document type to scope (optional; required for ref-chain groupBy)'),
       groupBy: z.string().describe('Field name or ref chain to group by. Single field: "status". Multi-hop chain: "client_id->industry" or "case_id->account_id->name". Each non-leaf segment must be a ref field on its parent type.'),
@@ -223,7 +221,7 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
   }));
 
   server.registerTool('maad_verify', {
-    description: 'Fact-check or audit. Three modes: (1) field — verify a specific field value on a document, (2) count — verify a document count for a type with optional filters, (3) integrity — sweep markdown on disk, compare to the SQLite index, and report five drift categories (missing_in_index, missing_on_disk, hash_drift, schema_drift, broken_refs). Field/count: use BEFORE stating any number, date, amount, or count as fact. Integrity: use after external git pulls, manual edits, or schema-pack version bumps to confirm the project is consistent.',
+    description: 'Fact-check or audit. Three modes: (1) field — verify a specific field value on a document, (2) count — verify a document count for a type with optional filters, (3) integrity — sweep markdown on disk, compare to the SQLite index, and report five drift categories (missing_in_index, missing_on_disk, hash_drift, schema_drift, broken_refs). Field/count: use BEFORE stating any number, date, amount, or count as fact. Integrity: use after external git pulls, manual edits, or schema-pack version bumps to confirm the project is consistent. Count and integrity results carry filterWarnings when a filter cannot match as written, so a grounded zero there proves nothing.',
     inputSchema: z.object({
       mode: z.enum(['field', 'count', 'integrity']).describe('Verification mode'),
       docId: z.string().optional().describe('Document ID (required for field mode, optional scope filter for integrity mode)'),
@@ -288,7 +286,7 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
   }));
 
   server.registerTool('maad_join', {
-    description: 'Queries documents and follows ref fields to return projected fields from both source and target records in one call. Eliminates N+1 round-trips. Example: all cases with their client name and attorney name.',
+    description: 'Queries documents and follows ref fields to return projected fields from both source and target records in one call. Eliminates N+1 round-trips. Example: all cases with their client name and attorney name. filterWarnings names any filter that cannot match as written (reason undeclared, unindexed or not_numeric).',
     inputSchema: z.object({
       docType: z.string().describe('Source document type to query'),
       refs: z.array(z.string()).describe('Ref field names to follow (e.g. ["client", "assigned_attorney"])'),
