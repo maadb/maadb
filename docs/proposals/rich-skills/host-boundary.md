@@ -162,7 +162,8 @@ records someone needed to see.
 ### 3.4 `maad_aggregate` — the chart contract
 
 ```
-{ groups: [ { value, count, metric? } ], total, totalMetric?, limitClamped? }
+{ groups: [ { value, count, metric?, metricCount? } ], total, totalMetric?,
+  groupsReturned, groupsTotal, truncated, missing: { count, metric? }, unindexedFields?, limitClamped? }
 ```
 
 Directly chartable: `value` is the category axis, `count` or `metric` the
