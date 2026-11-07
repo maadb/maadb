@@ -714,9 +714,30 @@ export function aggregate(ctx: EngineContext, query: AggregateQuery): Result<Agg
     return aggregateWithRefChain(ctx, effectiveQuery, limitClamped);
   }
 
-  const result = ctx.backend.aggregate(effectiveQuery);
+  const opts = effectiveQuery.docType ? undefined : { totalsDocTypes: typesIndexingField(ctx, effectiveQuery.groupBy) };
+  const result = ctx.backend.aggregate(effectiveQuery, opts);
+  const unindexed = unindexedAggregateFields(ctx, effectiveQuery, effectiveQuery.groupBy);
+  if (unindexed.length > 0) result.unindexedFields = unindexed;
   if (limitClamped) result.limitClamped = limitClamped;
   return ok(result);
+}
+
+function typesIndexingField(ctx: EngineContext, field: string): string[] {
+  return [...ctx.registry.types.keys()]
+    .filter(type => ctx.schemaStore.getSchemaForType(type)?.fields.get(field)?.index)
+    .map(type => type as string);
+}
+
+// Fields the query reads from the index that are undeclared in scope, or that a
+// type in scope declares without `index: true`. The count op reads no field.
+function unindexedAggregateFields(ctx: EngineContext, query: AggregateQuery, groupField: string): string[] {
+  const types = query.docType ? [query.docType] : [...ctx.registry.types.keys()];
+  const fields = [groupField];
+  if (query.metric && query.metric.op !== 'count' && query.metric.field !== groupField) fields.push(query.metric.field);
+  return fields.filter(field => {
+    const defs = types.flatMap(type => ctx.schemaStore.getSchemaForType(type)?.fields.get(field) ?? []);
+    return defs.length === 0 || defs.some(def => !def.index);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -794,6 +815,7 @@ function resolveRefChain(
 
 interface ChainGroupAccum {
   count: number;
+  metricCount: number; // metric values seen; records with no value stay in count only
   sum: number;     // used for sum + avg
   min: number;     // used for min
   max: number;     // used for max
@@ -802,7 +824,7 @@ interface ChainGroupAccum {
 }
 
 function freshAccum(): ChainGroupAccum {
-  return { count: 0, sum: 0, min: 0, max: 0, minSet: false, maxSet: false };
+  return { count: 0, metricCount: 0, sum: 0, min: 0, max: 0, minSet: false, maxSet: false };
 }
 
 function aggregateWithRefChain(
@@ -846,13 +868,15 @@ function aggregateWithRefChain(
     const acc = merged.get(key) ?? freshAccum();
     acc.count += group.count;
 
-    if (query.metric) {
-      const m = group.metric ?? 0;
+    if (query.metric && group.metric !== null && group.metric !== undefined) {
+      const m = group.metric;
+      const metricCount = group.metricCount ?? group.count;
+      acc.metricCount += metricCount;
       if (query.metric.op === 'sum') {
         acc.sum += m;
       } else if (query.metric.op === 'avg') {
-        // Reconstruct per-group sum = avg * count, then re-divide at finalize.
-        acc.sum += m * group.count;
+        // Reconstruct per-group sum = avg * values, then re-divide at finalize.
+        acc.sum += m * metricCount;
       } else if (query.metric.op === 'min') {
         acc.min = acc.minSet ? Math.min(acc.min, m) : m;
         acc.minSet = true;
@@ -873,43 +897,50 @@ function aggregateWithRefChain(
   }
 
   // Finalize: compute metric values per merged group.
-  const finalGroups: Array<{ value: string; count: number; metric?: number | null }> = [];
+  const finalGroups: AggregateResult['groups'] = [];
   for (const [key, acc] of merged.entries()) {
     let metric: number | null | undefined;
     if (query.metric) {
       switch (query.metric.op) {
         case 'count': metric = acc.count; break;
-        case 'sum':   metric = acc.sum; break;
-        case 'avg':   metric = acc.count > 0 ? acc.sum / acc.count : null; break;
+        case 'sum':   metric = acc.metricCount > 0 ? acc.sum : null; break;
+        case 'avg':   metric = acc.metricCount > 0 ? acc.sum / acc.metricCount : null; break;
         case 'min':   metric = acc.minSet ? acc.min : null; break;
         case 'max':   metric = acc.maxSet ? acc.max : null; break;
       }
     }
-    const g: { value: string; count: number; metric?: number | null } = { value: key, count: acc.count };
+    const g: AggregateResult['groups'][number] = { value: key, count: acc.count };
     if (metric !== undefined) g.metric = metric;
+    if (query.metric && query.metric.op !== 'count') g.metricCount = acc.metricCount;
     finalGroups.push(g);
   }
 
-  // Sort to match backend behavior: metric desc when a metric is set, count desc otherwise.
+  // Sort to match backend behavior: metric desc when a metric is set (no value
+  // last), count desc otherwise.
   finalGroups.sort((a, b) => {
-    const aVal = query.metric ? (a.metric ?? 0) : a.count;
-    const bVal = query.metric ? (b.metric ?? 0) : b.count;
-    return (bVal as number) - (aVal as number);
+    const aVal = query.metric ? (a.metric ?? -Infinity) : a.count;
+    const bVal = query.metric ? (b.metric ?? -Infinity) : b.count;
+    return aVal === bVal ? 0 : (bVal as number) - (aVal as number);
   });
 
   // Apply user's requested limit at the final (merged) stage.
   const limited = finalGroups.slice(0, requestedFinalLimit);
 
-  const total = limited.reduce((s, g) => s + g.count, 0);
+  // Totals come from the first-hop scope, so they do not depend on the merge or
+  // the limit. Past the first-hop cap some groups were never seen, which
+  // `truncated` reports.
+  const result: AggregateResult = {
+    groups: limited,
+    total: firstHopResult.total,
+    groupsReturned: limited.length,
+    groupsTotal: finalGroups.length,
+    truncated: firstHopResult.truncated || finalGroups.length > limited.length,
+    missing: firstHopResult.missing,
+  };
+  if (firstHopResult.totalMetric !== undefined) result.totalMetric = firstHopResult.totalMetric;
 
-  const result: AggregateResult = { groups: limited, total };
-
-  // totalMetric: only semantically meaningful for sum / count. For avg/min/max,
-  // a post-merge "total" is not defined — omit rather than emit a misleading number.
-  if (query.metric && (query.metric.op === 'sum' || query.metric.op === 'count')) {
-    result.totalMetric = limited.reduce((s, g) => s + ((g.metric as number) ?? 0), 0);
-  }
-
+  const unindexed = unindexedAggregateFields(ctx, query, firstHop);
+  if (unindexed.length > 0) result.unindexedFields = unindexed;
   if (limitClamped) result.limitClamped = limitClamped;
   return ok(result);
 }

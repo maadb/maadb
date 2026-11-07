@@ -286,9 +286,26 @@ export interface AggregateResult {
     value: string;
     count: number;
     metric?: number | null;
+    /** Metric values behind `metric`; below `count` when records have no value. Omitted for the count op. */
+    metricCount?: number;
   }>;
+  /** Distinct documents in scope, including `missing`. Does not change with `limit`. */
   total: number;
+  /** The metric over the whole scope, each document counted once. Does not change with `limit`. */
   totalMetric?: number | null;
+  groupsReturned: number;
+  /** Groups in scope before `limit`. A lower bound when a ref chain hits the first-hop cap. */
+  groupsTotal: number;
+  /** True when `groups` does not hold every group, so group values will not add up to the totals. */
+  truncated: boolean;
+  /** Documents in scope with no indexed value for the group field. They appear in no group. */
+  missing: { count: number; metric?: number | null };
+  /**
+   * Fields this query reads that are undeclared or not indexed in scope. Their
+   * values cannot be read, so `missing` and null metrics do not mean the records
+   * have no value. Omitted when every field is indexed.
+   */
+  unindexedFields?: string[];
   /**
    * 0.7.1 — set when the engine capped the caller's requested `limit` to the
    * configured maximum. Consumers surface this on MCP responses as

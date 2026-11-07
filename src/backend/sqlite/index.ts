@@ -751,7 +751,7 @@ export class SqliteBackend implements MaadBackend {
     }));
   }
 
-  aggregate(query: AggregateQuery): AggregateResult {
+  aggregate(query: AggregateQuery, opts?: { totalsDocTypes?: string[] }): AggregateResult {
     // Build a set of doc_ids scoped by docType + filters
     const scopeConditions: string[] = ['d.deleted = 0'];
     const scopeParams: unknown[] = [];
@@ -770,6 +770,34 @@ export class SqliteBackend implements MaadBackend {
     const scopeWhere = scopeConditions.join(' AND ');
     const limit = query.limit ?? 50;
 
+    // Totals cover the whole scope, before LIMIT. Without a docType the scope
+    // spans every type, so keep only types the schema says carry the group field
+    // (a client with no `account` field is not missing an account), plus any type
+    // with indexed values, so a group's records are always inside the totals.
+    const totalsConditions = [...scopeConditions];
+    const totalsParams = [...scopeParams];
+    if (!query.docType) {
+      const declared = opts?.totalsDocTypes ?? [];
+      totalsConditions.push(`(d.doc_type IN (${declared.map(() => '?').join(', ')}) OR d.doc_type IN (
+        SELECT td.doc_type FROM field_index tfi
+        JOIN documents td ON td.doc_id = tfi.doc_id
+        WHERE tfi.field_name = ? AND td.deleted = 0))`);
+      totalsParams.push(...declared, query.groupBy);
+    }
+    const totalsWhere = totalsConditions.join(' AND ');
+    const noGroupValue = 'NOT EXISTS (SELECT 1 FROM field_index nfi WHERE nfi.doc_id = d.doc_id AND nfi.field_name = ?)';
+
+    const counts = this.db.prepare(`
+      SELECT COUNT(*) as total, COALESCE(SUM(${noGroupValue}), 0) as missing
+      FROM documents d
+      WHERE ${totalsWhere}`).get(query.groupBy, ...totalsParams) as { total: number; missing: number };
+
+    const groupsTotal = (this.db.prepare(`
+      SELECT COUNT(DISTINCT fi.field_value) as groups_total
+      FROM field_index fi
+      JOIN documents d ON d.doc_id = fi.doc_id
+      WHERE fi.field_name = ? AND ${scopeWhere}`).get(query.groupBy, ...scopeParams) as { groups_total: number }).groups_total;
+
     if (!query.metric) {
       // Count documents per group value
       const sql = `
@@ -785,41 +813,75 @@ export class SqliteBackend implements MaadBackend {
 
       return {
         groups: rows.map(r => ({ value: r.grp ?? '(null)', count: r.cnt })),
-        total: rows.reduce((sum, r) => sum + r.cnt, 0),
+        total: counts.total,
+        groupsReturned: rows.length,
+        groupsTotal,
+        truncated: groupsTotal > rows.length,
+        missing: { count: counts.missing },
       };
     }
 
     // Metric aggregation: group by one field, aggregate another
     const metricOp = query.metric.op;
-    const metricCol = metricOp === 'count' ? '1' : 'mfi.numeric_value';
-    const aggFn = metricOp === 'count' ? 'COUNT(*)' :
-      metricOp === 'sum' ? `SUM(${metricCol})` :
-      metricOp === 'avg' ? `AVG(${metricCol})` :
-      metricOp === 'min' ? `MIN(${metricCol})` :
-      `MAX(${metricCol})`;
 
+    if (metricOp === 'count') {
+      const sql = `
+        SELECT gfi.field_value as grp, COUNT(DISTINCT gfi.doc_id) as cnt
+        FROM field_index gfi
+        JOIN documents d ON d.doc_id = gfi.doc_id
+        WHERE gfi.field_name = ? AND ${scopeWhere}
+        GROUP BY gfi.field_value
+        ORDER BY cnt DESC
+        LIMIT ?`;
+
+      const rows = this.db.prepare(sql).all(query.groupBy, ...scopeParams, limit) as Array<{ grp: string; cnt: number }>;
+
+      return {
+        groups: rows.map(r => ({ value: r.grp ?? '(null)', count: r.cnt, metric: r.cnt })),
+        total: counts.total,
+        totalMetric: counts.total,
+        groupsReturned: rows.length,
+        groupsTotal,
+        truncated: groupsTotal > rows.length,
+        missing: { count: counts.missing, metric: counts.missing },
+      };
+    }
+
+    const aggFn = metricOp === 'sum' ? 'SUM(mfi.numeric_value)' :
+      metricOp === 'avg' ? 'AVG(mfi.numeric_value)' :
+      metricOp === 'min' ? 'MIN(mfi.numeric_value)' :
+      'MAX(mfi.numeric_value)';
+
+    // LEFT JOIN: a record with no metric value still counts toward its group.
     const sql = `
-      SELECT gfi.field_value as grp, COUNT(DISTINCT gfi.doc_id) as cnt, ${aggFn} as metric
+      SELECT gfi.field_value as grp, COUNT(DISTINCT gfi.doc_id) as cnt, ${aggFn} as metric,
+        COUNT(mfi.numeric_value) as metric_count
       FROM field_index gfi
       JOIN documents d ON d.doc_id = gfi.doc_id
-      ${metricOp !== 'count' ? 'JOIN field_index mfi ON mfi.doc_id = gfi.doc_id AND mfi.field_name = ?' : ''}
+      LEFT JOIN field_index mfi ON mfi.doc_id = gfi.doc_id AND mfi.field_name = ?
       WHERE gfi.field_name = ? AND ${scopeWhere}
       GROUP BY gfi.field_value
       ORDER BY metric DESC
       LIMIT ?`;
 
-    const params = metricOp !== 'count'
-      ? [query.metric.field, query.groupBy, ...scopeParams, limit]
-      : [query.groupBy, ...scopeParams, limit];
+    const rows = this.db.prepare(sql).all(query.metric.field, query.groupBy, ...scopeParams, limit) as Array<{ grp: string; cnt: number; metric: number | null; metric_count: number }>;
 
-    const rows = this.db.prepare(sql).all(...params) as Array<{ grp: string; cnt: number; metric: number | null }>;
-
-    const totalMetric = rows.reduce((sum, r) => sum + (r.metric ?? 0), 0);
+    // Read from the documents, not the groups, so a record in two groups of a
+    // list field is counted once.
+    const metrics = this.db.prepare(`
+      SELECT ${aggFn} as total_metric, ${aggFn} FILTER (WHERE ${noGroupValue}) as missing_metric
+      FROM documents d
+      JOIN field_index mfi ON mfi.doc_id = d.doc_id AND mfi.field_name = ?
+      WHERE ${totalsWhere}`).get(query.groupBy, query.metric.field, ...totalsParams) as { total_metric: number | null; missing_metric: number | null };
 
     return {
-      groups: rows.map(r => ({ value: r.grp ?? '(null)', count: r.cnt, metric: r.metric })),
-      total: rows.reduce((sum, r) => sum + r.cnt, 0),
-      totalMetric,
+      groups: rows.map(r => ({ value: r.grp ?? '(null)', count: r.cnt, metric: r.metric, metricCount: r.metric_count })),
+      total: counts.total,
+      totalMetric: metricOp === 'sum' ? (metrics.total_metric ?? 0) : metrics.total_metric,
+      groupsReturned: rows.length,
+      groupsTotal,
+      truncated: groupsTotal > rows.length,
+      missing: { count: counts.missing, metric: metrics.missing_metric },
     };
   }
 

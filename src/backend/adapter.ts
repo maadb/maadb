@@ -56,7 +56,8 @@ export interface MaadBackend {
   getFieldValues(docIds: DocId[], fieldNames: string[]): Map<string, Record<string, string>>;
 
   // Aggregation queries
-  aggregate(query: import('../engine/types.js').AggregateQuery): import('../engine/types.js').AggregateResult;
+  // totalsDocTypes: for a query with no docType, the types that count toward totals.
+  aggregate(query: import('../engine/types.js').AggregateQuery, opts?: { totalsDocTypes?: string[] }): import('../engine/types.js').AggregateResult;
 
   // Changes-since polling delta (0.5.0 R5). Strict deterministic order:
   // (updated_at ASC, doc_id ASC). `cursor` is the exclusive lower bound —
