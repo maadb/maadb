@@ -450,9 +450,10 @@ The vector store is `sqlite-vec` (in the same SQLite file); the lexical leg is F
 
 ## Current state
 
-**Current:** v0.20.0 — the write journal grows linearly with pending writes, large path lists commit on Windows, and finds, blob reads and reindexes do less work. Requires Node.js 24.22.1 or later and Git 2.25 or later.
+**Current:** v0.21.0 — `maad_aggregate` totals cover the whole scope and report truncated groups, missing values and unindexed fields. Requires Node.js 24.22.1 or later and Git 2.25 or later.
 
 Recent shipped scope:
+- **0.21.0** — `maad_aggregate` totals before the limit, truncation and missing-value reporting
 - **0.20.0** — Linear write journal, large commits on Windows, faster finds, blob reads and reindexes
 - **0.19.1** — Historical snapshots and diffs across committed file moves
 - **0.19.0** — `on_finer` precision handling for date fields
@@ -486,11 +487,11 @@ MIT — see [LICENSE](LICENSE).
 ## Dependency audit
 
 <!-- dependency-audit:start -->
-Last audit: 2026-11-02, release 0.20.0 (`npm audit` on the release lockfile).
+Last audit: 2026-11-06, release 0.21.0 (`npm audit` on the release lockfile).
 
 | Package | Version | Purpose | Result |
 |---|---|---|---|
-| `@modelcontextprotocol/sdk` | 1.32.1 | MCP server and transports | no known advisories |
+| `@modelcontextprotocol/sdk` | 1.32.2 | MCP server and transports | no known advisories |
 | `better-sqlite3` | 12.11.1 | SQLite index | no known advisories |
 | `gray-matter` | 4.0.3 | Frontmatter splitting (YAML engine only) | no known advisories |
 | `js-yaml` | 4.3.2 | YAML parsing (core schema) | no known advisories |
