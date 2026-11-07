@@ -38,7 +38,26 @@ export function applyFieldFilters(
   conditions: string[],
   params: unknown[],
 ): void {
+  const { required, excluded } = fieldFilterClauses(field, raw);
+  for (const { sql, values } of required) {
+    conditions.push(`d.doc_id IN (SELECT doc_id FROM field_index WHERE ${sql})`);
+    params.push(...values);
+  }
+  for (const { sql, values } of excluded) {
+    conditions.push(`d.doc_id NOT IN (SELECT doc_id FROM field_index WHERE ${sql})`);
+    params.push(...values);
+  }
+}
+
+// One field's filters as field_index row predicates: a matching document has a
+// row for each `required` predicate and none for any `excluded` one.
+export function fieldFilterClauses(
+  field: string,
+  raw: unknown,
+): { required: Array<{ sql: string; values: unknown[] }>; excluded: Array<{ sql: string; values: unknown[] }> } {
   const atomics: unknown[] = Array.isArray(raw) ? raw : [raw];
+  const required: Array<{ sql: string; values: unknown[] }> = [];
+  const excluded: Array<{ sql: string; values: unknown[] }> = [];
   const positive: Array<{ sql: string; values: unknown[] }> = [];
   for (const c of atomics) {
     const normalized = normalizeFilter(c);
@@ -46,58 +65,66 @@ export function applyFieldFilters(
       // Multi-valued fields use NONE semantics for neq. `EXISTS(value != x)`
       // is wrong for [x, y] because y makes the document match even though x
       // is present. Retain the historical requirement that the field exists.
-      conditions.push('d.doc_id IN (SELECT doc_id FROM field_index WHERE field_name = ?)');
-      params.push(field);
-      conditions.push('d.doc_id NOT IN (SELECT doc_id FROM field_index WHERE field_name = ? AND field_value = ?)');
-      params.push(field, String(normalized.value));
+      required.push({ sql: 'field_name = ?', values: [field] });
+      excluded.push(buildFilterSQL(field, { ...normalized, op: 'eq' }));
       continue;
     }
-    const { sql, values } = buildFilterSQL(field, c);
-    positive.push({ sql, values });
+    positive.push(buildFilterSQL(field, c));
   }
   if (positive.length > 0) {
     // All operators on one field must be satisfied by the same indexed value.
     // This matters for lists: [1, 20] must not satisfy gte 10 AND lte 5 by
     // distributing the two predicates across different items.
-    conditions.push(`d.doc_id IN (SELECT doc_id FROM field_index WHERE ${positive.map(p => `(${p.sql})`).join(' AND ')})`);
-    params.push(...positive.flatMap(p => p.values));
+    required.push({ sql: positive.map(p => `(${p.sql})`).join(' AND '), values: positive.flatMap(p => p.values) });
   }
+  return { required, excluded };
 }
 
-export function buildFilterSQL(field: string, rawCondition: FilterCondition | string | unknown): { sql: string; values: unknown[] } {
+const RANGE_OPERATORS = { gt: '>', gte: '>=', lt: '<', lte: '<=' } as const;
+
+function buildFilterSQL(field: string, rawCondition: FilterCondition | string | unknown): { sql: string; values: unknown[] } {
   const condition = normalizeFilter(rawCondition);
-  // For range operators, use numeric_value when the value is numeric (handles number fields correctly)
-  // For dates, field_value as ISO strings already sort correctly
-  const isNumericRange = (condition.op === 'gt' || condition.op === 'gte' || condition.op === 'lt' || condition.op === 'lte')
-    && typeof condition.value === 'number';
 
   switch (condition.op) {
     case 'eq':
+      if (condition.compare === 'row') {
+        return {
+          sql: 'field_name = ? AND (numeric_value = ? OR (numeric_value IS NULL AND field_value = ?))',
+          values: [field, condition.numericValue ?? null, String(condition.value)],
+        };
+      }
       return { sql: 'field_name = ? AND field_value = ?', values: [field, String(condition.value)] };
     case 'neq':
       return { sql: 'field_name = ? AND field_value != ?', values: [field, String(condition.value)] };
     case 'gt':
-      if (isNumericRange) {
-        return { sql: 'field_name = ? AND numeric_value > ?', values: [field, condition.value] };
-      }
-      return { sql: 'field_name = ? AND field_value > ?', values: [field, String(condition.value)] };
     case 'gte':
-      if (isNumericRange) {
-        return { sql: 'field_name = ? AND numeric_value >= ?', values: [field, condition.value] };
-      }
-      return { sql: 'field_name = ? AND field_value >= ?', values: [field, String(condition.value)] };
     case 'lt':
-      if (isNumericRange) {
-        return { sql: 'field_name = ? AND numeric_value < ?', values: [field, condition.value] };
+    case 'lte': {
+      const operator = RANGE_OPERATORS[condition.op];
+      if (condition.compare === 'none') {
+        return { sql: 'field_name = ? AND 0', values: [field] };
       }
-      return { sql: 'field_name = ? AND field_value < ?', values: [field, String(condition.value)] };
-    case 'lte':
-      if (isNumericRange) {
-        return { sql: 'field_name = ? AND numeric_value <= ?', values: [field, condition.value] };
+      if (condition.compare === 'row') {
+        // A null bound makes the numeric arm NULL, so only text rows can match.
+        return {
+          sql: `field_name = ? AND (numeric_value ${operator} ? OR (numeric_value IS NULL AND field_value ${operator} ?))`,
+          values: [field, condition.numericValue ?? null, String(condition.value)],
+        };
       }
-      return { sql: 'field_name = ? AND field_value <= ?', values: [field, String(condition.value)] };
+      if (typeof condition.value === 'number') {
+        return { sql: `field_name = ? AND numeric_value ${operator} ?`, values: [field, condition.value] };
+      }
+      return { sql: `field_name = ? AND field_value ${operator} ?`, values: [field, String(condition.value)] };
+    }
     case 'in': {
       const placeholders = condition.value.map(() => '?').join(', ');
+      if (condition.compare === 'row') {
+        const numbers = Array.isArray(condition.numericValue) ? condition.numericValue : [];
+        return {
+          sql: `field_name = ? AND (numeric_value IN (${numbers.map(() => '?').join(', ')}) OR (numeric_value IS NULL AND field_value IN (${placeholders})))`,
+          values: [field, ...numbers, ...condition.value.map(String)],
+        };
+      }
       return { sql: `field_name = ? AND field_value IN (${placeholders})`, values: [field, ...condition.value.map(String)] };
     }
     case 'contains':

@@ -40,6 +40,26 @@ function makeDoc(id: string, type: string, path: string): DocumentRecord {
   };
 }
 
+describe('numeric equality on rows with no numeric_value', () => {
+  // Rows indexed before list items carried numeric_value stay this way until a
+  // forced reindex. Equality must keep matching them by text.
+  beforeEach(() => {
+    backend.putDocument(makeDoc('old', 'entry', 'entries/old.md'));
+    backend.putFieldIndex(docId('old'), [{ name: 'readings', value: '5', numericValue: null, type: 'list' }]);
+  });
+  const ids = (condition: Record<string, unknown>) =>
+    backend.findDocuments({ filters: { readings: [{ value: '5', compare: 'row', numericValue: 5, ...condition }] } as any }).map(d => d.docId);
+
+  it('eq and in still match', () => {
+    expect(ids({ op: 'eq' })).toEqual(['old']);
+    expect(ids({ op: 'in', value: ['5'], numericValue: [5] })).toEqual(['old']);
+  });
+
+  it('neq still excludes', () => {
+    expect(ids({ op: 'neq' })).toEqual([]);
+  });
+});
+
 function makeObject(id: string, primitive: string, subtype: string, value: string): ExtractedObject {
   return {
     primitive: primitive as ExtractedObject['primitive'],

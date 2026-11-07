@@ -28,6 +28,7 @@ import { extractBody } from '../writer/index.js';
 import type { EngineContext } from './context.js';
 import type {
   GetResult,
+  FilterWarning,
   FindResult,
   SearchResult,
   RelatedResult,
@@ -56,7 +57,7 @@ import type {
   RelationshipExtractionKind,
 } from './types.js';
 import { RELATIONSHIP_PATH_LIMITS } from './types.js';
-import { readFrontmatter, readBlockContent, collectMarkdownFiles, readDocumentContent, DocumentReadPathError } from './helpers.js';
+import { readFrontmatter, readBlockContent, collectMarkdownFiles, readDocumentContent, DocumentReadPathError, computeNumericValue } from './helpers.js';
 
 export async function getDocument(
   ctx: EngineContext,
@@ -129,7 +130,7 @@ const ATOMIC_FILTER_OPS = new Set(['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'in', 
 //   - array of FilterConditions (AND semantics; betweens inside are also desugared)
 // After expansion, the backend sees only atomic ops — never between, never arrays
 // of unvalidated shapes.
-function normalizeFilterField(field: string, raw: unknown): Result<FilterCondition[]> {
+function normalizeFilterField(field: string, raw: unknown, comparison: FieldComparison | null): Result<FilterCondition[]> {
   // Scalar shorthand → eq
   if (typeof raw === 'string' || typeof raw === 'number') {
     return ok([{ op: 'eq', value: raw }]);
@@ -142,7 +143,7 @@ function normalizeFilterField(field: string, raw: unknown): Result<FilterConditi
     }
     const out: FilterCondition[] = [];
     for (const item of raw) {
-      const inner = normalizeFilterField(field, item);
+      const inner = normalizeFilterField(field, item, comparison);
       if (!inner.ok) return inner;
       out.push(...inner.value);
     }
@@ -168,12 +169,21 @@ function normalizeFilterField(field: string, raw: unknown): Result<FilterConditi
     if (lo === undefined || lo === null || hi === undefined || hi === null) {
       return singleErr('FILTER_BETWEEN_INVALID', `between for field "${field}" has null/undefined bound`);
     }
-    // Type-homogeneous lo > hi check (strings sort lexically; mixed types pass through).
-    if (typeof lo === 'number' && typeof hi === 'number' && lo > hi) {
-      return singleErr('FILTER_BETWEEN_INVALID', `between for field "${field}": lo (${lo}) > hi (${hi})`);
-    }
-    if (typeof lo === 'string' && typeof hi === 'string' && lo > hi) {
-      return singleErr('FILTER_BETWEEN_INVALID', `between for field "${field}": lo ("${lo}") > hi ("${hi}")`);
+    if (comparison?.numeric) {
+      // A numeric field orders its bounds as numbers: "9" comes before "10".
+      const numericLo = filterNumber(lo, comparison.amount);
+      const numericHi = filterNumber(hi, comparison.amount);
+      if (numericLo !== null && numericHi !== null && numericLo > numericHi) {
+        return singleErr('FILTER_BETWEEN_INVALID', `between for field "${field}": lo (${String(lo)}) > hi (${String(hi)})`);
+      }
+    } else {
+      // Type-homogeneous lo > hi check (strings sort lexically; mixed types pass through).
+      if (typeof lo === 'number' && typeof hi === 'number' && lo > hi) {
+        return singleErr('FILTER_BETWEEN_INVALID', `between for field "${field}": lo (${lo}) > hi (${hi})`);
+      }
+      if (typeof lo === 'string' && typeof hi === 'string' && lo > hi) {
+        return singleErr('FILTER_BETWEEN_INVALID', `between for field "${field}": lo ("${lo}") > hi ("${hi}")`);
+      }
     }
     return ok([
       { op: 'gte', value: lo as number | string },
@@ -184,20 +194,173 @@ function normalizeFilterField(field: string, raw: unknown): Result<FilterConditi
   if (!ATOMIC_FILTER_OPS.has(obj.op)) {
     return singleErr('FILTER_OP_INVALID', `unknown filter op "${obj.op}" for field "${field}"`);
   }
-  return ok([obj as FilterCondition]);
+  // Only op and value: the comparison keys are the engine's to set.
+  return ok([{ op: obj.op, value: obj.value } as FilterCondition]);
 }
 
 export function expandFilters(
   raw: Record<string, unknown> | undefined,
+  comparisonFor?: (field: string) => FieldComparison | null,
 ): Result<Record<string, FilterCondition[]>> {
   if (!raw || typeof raw !== 'object') return ok({});
   const out: Record<string, FilterCondition[]> = {};
   for (const [field, value] of Object.entries(raw)) {
-    const result = normalizeFilterField(field, value);
+    const result = normalizeFilterField(field, value, comparisonFor?.(field) ?? null);
     if (!result.ok) return result;
     out[field] = result.value;
   }
   return ok(out);
+}
+
+// How a field's indexed values compare across the types a filter can reach. A
+// list compares by its item type. Without a docType a name can be a number on
+// one type and text on another, so numeric and text can both be set.
+interface FieldComparison {
+  numeric: boolean;
+  text: boolean;
+  amount: boolean;
+  date: boolean;
+}
+
+function fieldComparison(defs: Array<{ type: string; itemType: string | null; index: boolean }>): FieldComparison | null {
+  const types = defs.filter(def => def.index).map(def => (def.type === 'list' ? def.itemType ?? 'string' : def.type));
+  if (types.length === 0) return null;
+  const isNumeric = (type: string): boolean => type === 'number' || type === 'amount';
+  return {
+    numeric: types.some(isNumeric),
+    text: types.some(type => !isNumeric(type)),
+    amount: types.includes('amount'),
+    date: types.includes('date'),
+  };
+}
+
+function plainNumber(value: unknown): number | null {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (typeof value !== 'string' || value.trim() === '') return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+// computeNumericValue reads a leading number, which suits stored amounts, but
+// must not turn a date bound into its year. Only a whole amount counts here.
+const WHOLE_AMOUNT = /^(?:[^\d\s]{1,3}\s*)?\d[\d,]*(?:\.\d+)?(?:\s*[A-Za-z]{3})?$/;
+
+function filterNumber(value: unknown, amount: boolean): number | null {
+  const plain = plainNumber(value);
+  if (plain !== null || !amount || typeof value !== 'string' || !WHOLE_AMOUNT.test(value.trim())) return plain;
+  return computeNumericValue(value, 'amount');
+}
+
+// The first text value after every value in a date-only, month or year period,
+// or null when the bound is not one. Dates compare as written, with no zone, so
+// "2026-11-05T23:30:00-05:00" is in the 5th. Null for an impossible date.
+function nextDatePeriod(bound: string): string | null {
+  const match = /^(\d{4})(?:-(\d{2})(?:-(\d{2}))?)?$/.exec(bound);
+  if (!match) return null;
+  const year = Number(match[1]);
+  if (year === 9999) return null;
+  if (match[2] === undefined) return String(year + 1).padStart(4, '0');
+  const month = Number(match[2]);
+  if (month < 1 || month > 12) return null;
+  if (match[3] === undefined) {
+    return month < 12 ? `${match[1]}-${String(month + 1).padStart(2, '0')}` : `${String(year + 1).padStart(4, '0')}-01`;
+  }
+  const day = new Date(Date.UTC(year, month - 1, Number(match[3])));
+  if (day.toISOString().slice(0, 10) !== bound) return null;
+  day.setUTCDate(day.getUTCDate() + 1);
+  return day.toISOString().slice(0, 10);
+}
+
+function typedCondition(condition: FilterCondition, comparison: FieldComparison, onNotNumeric: () => void): FilterCondition {
+  const { numeric, text, amount, date } = comparison;
+  const isRange = condition.op === 'gt' || condition.op === 'gte' || condition.op === 'lt' || condition.op === 'lte';
+
+  if (numeric && text) {
+    if (isRange) return { op: condition.op, value: condition.value, compare: 'row', numericValue: filterNumber(condition.value, amount) };
+    if (condition.op === 'eq' || condition.op === 'neq') {
+      return { op: condition.op, value: condition.value, compare: 'row', numericValue: plainNumber(condition.value) };
+    }
+    if (condition.op === 'in' && Array.isArray(condition.value)) {
+      const numbers = condition.value.map(plainNumber).filter(value => value !== null);
+      return { op: 'in', value: condition.value, compare: 'row', numericValue: numbers };
+    }
+    return condition;
+  }
+
+  if (numeric) {
+    if (isRange) {
+      const bound = filterNumber(condition.value, amount);
+      if (bound !== null) return { op: condition.op, value: bound };
+      onNotNumeric();
+      return { op: condition.op, value: condition.value, compare: 'none' };
+    }
+    // Equality uses 'row' so a row indexed before it had a numeric_value still
+    // matches by text. An amount with a currency stays exact: "9.50 USD" is not
+    // "9.50 EUR".
+    if (condition.op === 'eq' || condition.op === 'neq') {
+      const exact = plainNumber(condition.value);
+      if (exact !== null) return { op: condition.op, value: String(exact), compare: 'row', numericValue: exact };
+      if (filterNumber(condition.value, amount) === null) onNotNumeric();
+      return condition;
+    }
+    if (condition.op === 'in' && Array.isArray(condition.value)) {
+      const values = condition.value.map(plainNumber);
+      if (amount && values.includes(null)) {
+        if (condition.value.some(value => filterNumber(value, amount) === null)) onNotNumeric();
+        return condition;
+      }
+      if (values.includes(null)) onNotNumeric();
+      const numbers = values.filter(value => value !== null);
+      return { op: 'in', value: numbers.map(String), compare: 'row', numericValue: numbers };
+    }
+    return condition;
+  }
+
+  if (!isRange) return condition;
+  const bound = String(condition.value);
+  // Text order puts a time on the 5th after "2026-11-05", so lte and gt would
+  // split that day. Compare against the next period instead.
+  const next = date && (condition.op === 'lte' || condition.op === 'gt') ? nextDatePeriod(bound) : null;
+  if (next !== null) return { op: condition.op === 'lte' ? 'lt' : 'gte', value: next };
+  return { op: condition.op, value: bound };
+}
+
+export interface ResolvedFilters {
+  filters: Record<string, FilterCondition[]>;
+  warnings: FilterWarning[];
+}
+
+// expandFilters plus the schema: every condition compares by the field's type,
+// and a filter that cannot match as written becomes a warning. The zero result
+// stays, since refusing would fail a whole dashboard over one stale binding.
+export function resolveFilters(
+  ctx: EngineContext,
+  docType: DocType | undefined,
+  raw: Record<string, unknown> | undefined,
+): Result<ResolvedFilters> {
+  const types = docType ? [docType] : [...ctx.registry.types.keys()];
+  const defsFor = (field: string) => types.flatMap(type => ctx.schemaStore.getSchemaForType(type)?.fields.get(field) ?? []);
+
+  const expanded = expandFilters(raw, field => fieldComparison(defsFor(field)));
+  if (!expanded.ok) return expanded;
+
+  const filters: Record<string, FilterCondition[]> = {};
+  const warnings: FilterWarning[] = [];
+  for (const [field, conditions] of Object.entries(expanded.value)) {
+    const defs = defsFor(field);
+    if (defs.length === 0) warnings.push({ field, reason: 'undeclared' });
+    else if (defs.some(def => !def.index)) warnings.push({ field, reason: 'unindexed' });
+
+    const comparison = fieldComparison(defs);
+    if (!comparison) {
+      filters[field] = conditions;
+      continue;
+    }
+    let notNumeric = false;
+    filters[field] = conditions.map(condition => typedCondition(condition, comparison, () => { notNumeric = true; }));
+    if (notNumeric) warnings.push({ field, reason: 'not_numeric' });
+  }
+  return ok({ filters, warnings });
 }
 
 // 0.7.12 — sort contract validator. Accepts a system sort key (any alias in
@@ -265,8 +428,8 @@ function validateSortBy(
 
 export function findDocuments(ctx: EngineContext, query: DocumentQuery): Result<FindResult> {
   // 0.7.1 R2 — validate + expand filters into atomic per-field arrays.
-  const expanded = expandFilters(query.filters as Record<string, unknown> | undefined);
-  if (!expanded.ok) return expanded;
+  const resolved = resolveFilters(ctx, query.docType, query.filters as Record<string, unknown> | undefined);
+  if (!resolved.ok) return resolved;
 
   // 0.7.12 — sort contract. sortBy must be a system sort key (updated_at,
   // indexed_at, doc_id, doc_type, created_at + camelCase aliases) or an
@@ -281,7 +444,7 @@ export function findDocuments(ctx: EngineContext, query: DocumentQuery): Result<
     sortListField = sortValidation.value.isList;
   }
 
-  let effectiveQuery: DocumentQuery = { ...query, filters: expanded.value as any, sortNumeric, sortListField };
+  let effectiveQuery: DocumentQuery = { ...query, filters: resolved.value.filters as any, sortNumeric, sortListField };
   let limitClamped: { requested: number; applied: number } | undefined;
   if (query.limit !== undefined && query.limit > MAX_QUERY_LIMIT) {
     limitClamped = { requested: query.limit, applied: MAX_QUERY_LIMIT };
@@ -300,6 +463,7 @@ export function findDocuments(ctx: EngineContext, query: DocumentQuery): Result<
   }
 
   const result: FindResult = { total, results };
+  if (resolved.value.warnings.length > 0) result.filterWarnings = resolved.value.warnings;
   if (limitClamped) result.limitClamped = limitClamped;
   return ok(result);
 }
@@ -702,10 +866,11 @@ export function aggregate(ctx: EngineContext, query: AggregateQuery): Result<Agg
   }
 
   // 0.7.1 R2 — validate + expand filters into atomic per-field arrays.
-  const expanded = expandFilters(query.filters as Record<string, unknown> | undefined);
-  if (!expanded.ok) return expanded;
+  const resolved = resolveFilters(ctx, query.docType, query.filters as Record<string, unknown> | undefined);
+  if (!resolved.ok) return resolved;
+  const { warnings } = resolved.value;
 
-  let effectiveQuery: AggregateQuery = { ...query, filters: expanded.value as any };
+  let effectiveQuery: AggregateQuery = { ...query, filters: resolved.value.filters as any };
   let limitClamped: { requested: number; applied: number } | undefined;
   if (query.limit !== undefined && query.limit > MAX_AGGREGATE_LIMIT) {
     limitClamped = { requested: query.limit, applied: MAX_AGGREGATE_LIMIT };
@@ -717,13 +882,16 @@ export function aggregate(ctx: EngineContext, query: AggregateQuery): Result<Agg
   // path; validate schema chain; aggregate at first hop via backend; resolve remaining
   // hops in the engine; merge groups that collapse to the same resolved key.
   if (effectiveQuery.groupBy.includes('->')) {
-    return aggregateWithRefChain(ctx, effectiveQuery, limitClamped);
+    const chained = aggregateWithRefChain(ctx, effectiveQuery, limitClamped);
+    if (chained.ok && warnings.length > 0) chained.value.filterWarnings = warnings;
+    return chained;
   }
 
   const opts = effectiveQuery.docType ? undefined : { totalsDocTypes: typesIndexingField(ctx, effectiveQuery.groupBy) };
   const result = ctx.backend.aggregate(effectiveQuery, opts);
   const unindexed = unindexedAggregateFields(ctx, effectiveQuery, effectiveQuery.groupBy);
   if (unindexed.length > 0) result.unindexedFields = unindexed;
+  if (warnings.length > 0) result.filterWarnings = warnings;
   if (limitClamped) result.limitClamped = limitClamped;
   return ok(result);
 }
@@ -976,17 +1144,19 @@ export function join(ctx: EngineContext, query: JoinQuery): Result<JoinResult> {
   // (between, in, shorthand), so they must expand to atomic conditions before
   // the backend — which throws on un-expanded shapes — sees them.
   const docQuery: DocumentQuery = { docType: query.docType };
+  let filterWarnings: { filterWarnings?: FilterWarning[] } = {};
   if (query.filters) {
-    const expanded = expandFilters(query.filters as Record<string, unknown>);
-    if (!expanded.ok) return expanded;
-    docQuery.filters = expanded.value as NonNullable<DocumentQuery['filters']>;
+    const resolved = resolveFilters(ctx, query.docType, query.filters as Record<string, unknown>);
+    if (!resolved.ok) return resolved;
+    docQuery.filters = resolved.value.filters as NonNullable<DocumentQuery['filters']>;
+    if (resolved.value.warnings.length > 0) filterWarnings = { filterWarnings: resolved.value.warnings };
   }
   if (query.limit) docQuery.limit = query.limit;
   if (query.offset) docQuery.offset = query.offset;
 
   const docs = ctx.backend.findDocuments(docQuery);
   const total = ctx.backend.countDocuments(docQuery);
-  if (docs.length === 0) return ok({ total, results: [] });
+  if (docs.length === 0) return ok({ total, results: [], ...filterWarnings });
 
   const docIds = docs.map(d => d.docId);
 
@@ -1051,7 +1221,7 @@ export function join(ctx: EngineContext, query: JoinQuery): Result<JoinResult> {
     results.push({ docId: doc.docId as string, fields: displayFields, refs });
   }
 
-  return ok({ total, results });
+  return ok({ total, results, ...filterWarnings });
 }
 
 // ---- Verify — fact-checking primitive --------------------------------------
@@ -1103,11 +1273,13 @@ export function verifyCount(
   filters?: Record<string, import('../types.js').FilterCondition>,
 ): Result<VerifyResult> {
   const query: DocumentQuery = { docType: dt, limit: 0 };
+  let filterWarnings: { filterWarnings?: FilterWarning[] } = {};
   if (filters) {
     // Same contract as maad_query filters — expand before the backend sees them.
-    const expanded = expandFilters(filters as Record<string, unknown>);
-    if (!expanded.ok) return expanded;
-    query.filters = expanded.value as NonNullable<DocumentQuery['filters']>;
+    const resolved = resolveFilters(ctx, dt, filters as Record<string, unknown>);
+    if (!resolved.ok) return resolved;
+    query.filters = resolved.value.filters as NonNullable<DocumentQuery['filters']>;
+    if (resolved.value.warnings.length > 0) filterWarnings = { filterWarnings: resolved.value.warnings };
   }
   const actual = ctx.backend.countDocuments(query);
 
@@ -1117,6 +1289,7 @@ export function verifyCount(
     expected: expectedCount,
     actual,
     source: 'query',
+    ...filterWarnings,
   });
 }
 
@@ -1146,11 +1319,13 @@ export async function verifyIntegrity(
   // (only records already indexed can match — missing_in_index for filtered
   // scopes is undefined and not reported when filter is in play).
   let allowedDocIds: Set<string> | null = null;
+  let filterWarnings: FilterWarning[] = [];
   if (query.filter) {
     // Same contract as maad_query filters — expand before the backend sees them.
-    const expanded = expandFilters(query.filter as Record<string, unknown>);
-    if (!expanded.ok) return expanded;
-    const findQuery: DocumentQuery = { filters: expanded.value as NonNullable<DocumentQuery['filters']> };
+    const resolved = resolveFilters(ctx, query.docType, query.filter as Record<string, unknown>);
+    if (!resolved.ok) return resolved;
+    filterWarnings = resolved.value.warnings;
+    const findQuery: DocumentQuery = { filters: resolved.value.filters as NonNullable<DocumentQuery['filters']> };
     if (query.docType) findQuery.docType = query.docType;
     // Page through every match: findDocuments defaults to 50 rows.
     allowedDocIds = new Set();
@@ -1335,6 +1510,7 @@ export async function verifyIntegrity(
     durationMs: Date.now() - startMs,
   };
   if (verbose) result.details = details;
+  if (filterWarnings.length > 0) result.filterWarnings = filterWarnings;
 
   // 0.7.10 — stamp the result into engine_meta so maad_health.lastIntegrity*
   // can surface the most recent sweep without the operator re-running it.

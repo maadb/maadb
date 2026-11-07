@@ -5,6 +5,7 @@
 // ============================================================================
 
 import type { DocumentQuery } from '../../types.js';
+import type { FilterWarning } from '../types.js';
 
 /** Whether a text is being embedded as a stored passage or a search query.
  *  Drives asymmetric model prefixes (e.g. nomic search_document:/search_query:). */
@@ -106,6 +107,8 @@ export interface SemanticSearchResult {
   degraded?: string;
   /** Independent fallback and candidate-budget limitations; absent when none. */
   limitations?: string[];
+  /** Filters that cannot match as written, so results may not reflect the data. Absent when none. */
+  filterWarnings?: FilterWarning[];
 }
 
 /** Embedding subsystem stats surfaced via maad_health.embeddings. */
