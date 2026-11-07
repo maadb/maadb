@@ -1,10 +1,18 @@
 ---
 enabled: true
-current: 0.20.0
+current: 0.21.0
 dev_flow: formal
 ---
 
 # Version History
+
+## 0.21.0 - 2026-11-06
+
+`maad_aggregate` no longer undercounts silently. `total` and `totalMetric` cover every record in scope and do not change with `limit`, and a record in two groups of a list field counts once. New additive fields report what the groups leave out: `truncated`, `groupsReturned` and `groupsTotal` when groups were cut, `missing` for records with no value for the group field, `unindexedFields` for fields that are undeclared or not indexed, and a per-group `metricCount`.
+
+Some existing results change. `total` rises wherever groups were being cut or dropped. With a metric, a group's `count` includes records with no metric value, and a group with no metric values appears with `metric: null`. `totalMetric` for `avg`, `min` and `max` is the whole-scope value, and a `sum` over values that are not numeric returns `null` instead of `0`. Empty group values count in `missing`. Direct engine callers passing an unknown metric `op` get `METRIC_OP_INVALID` instead of a `MAX` result.
+
+Each aggregate runs one extra totals query. `@modelcontextprotocol/sdk` moves to 1.32.2. No database schema changes.
 
 ## 0.20.0 - 2026-11-02
 
