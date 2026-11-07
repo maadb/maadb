@@ -1,10 +1,18 @@
 ---
 enabled: true
-current: 0.21.0
+current: 0.22.0
 dev_flow: formal
 ---
 
 # Version History
+
+## 0.22.0 - 2026-11-07
+
+Filters compare by the field's schema type instead of the JSON type of the value. This covers `maad_query`, `maad_aggregate`, `maad_join`, `maad_verify`, `maad_semantic_search`, `maad_delete_where` and `maad_repair_where`. `hours gte "10"` now compares as numbers, `between ["9", "10"]` is accepted on a number field, and a number bound on a text or date field compares as text. A date-only, month or year bound covers the whole period, so `lte "2026-11-05"` keeps `2026-11-05T15:00:00Z` and `gt` starts the next day. Dates compare as written, with no time zone conversion.
+
+A new additive `filterWarnings: [{ field, reason }]` reports filters that cannot match, with the reason `undeclared`, `unindexed` or `not_numeric`. It is omitted when there is nothing to report, and it also appears on the delete and repair previews.
+
+Some existing results change. `maad_delete_where` and `maad_repair_where` inherit the new matching, so a date-only `lte` now includes that day's timed records. A range with a non-numeric value on a number field matches nothing instead of comparing as text. A sort on a scalar field no longer applies list filters item by item. `maad_repair_where` accepts `between` and matches the same records as its preview. No database schema changes.
 
 ## 0.21.0 - 2026-11-06
 
