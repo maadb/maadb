@@ -254,9 +254,21 @@ export interface ChangesSinceParsedCursor {
   docId: string;
 }
 
+/**
+ * A filter that cannot match as written. undeclared and unindexed fields have no
+ * indexed values to compare; not_numeric is a value that is not a number on a
+ * number or amount field.
+ */
+export interface FilterWarning {
+  field: string;
+  reason: 'undeclared' | 'unindexed' | 'not_numeric';
+}
+
 export interface FindResult {
   total: number;
   results: DocumentMatch[];
+  /** Filters that cannot match as written, so `total` may not reflect the data. Omitted when there are none. */
+  filterWarnings?: FilterWarning[];
   /**
    * 0.7.1 — set when the engine capped the caller's requested `limit` to the
    * configured maximum. Consumers surface this on MCP responses as
@@ -309,6 +321,8 @@ export interface AggregateResult {
    * have no value. Omitted when every field is indexed.
    */
   unindexedFields?: string[];
+  /** Filters that cannot match as written, so `total` may not reflect the data. Omitted when there are none. */
+  filterWarnings?: FilterWarning[];
   /**
    * 0.7.1 — set when the engine capped the caller's requested `limit` to the
    * configured maximum. Consumers surface this on MCP responses as
@@ -336,6 +350,8 @@ export interface JoinResultRow {
 export interface JoinResult {
   total: number;
   results: JoinResultRow[];
+  /** Filters that cannot match as written, so `total` may not reflect the data. Omitted when there are none. */
+  filterWarnings?: FilterWarning[];
 }
 
 export interface RelatedResult {
@@ -495,6 +511,8 @@ export interface VerifyResult {
   expected: unknown;
   actual: unknown;
   source: { docId: string; filePath: string } | 'query';
+  /** Count mode: filters that cannot match as written, so `actual` may not reflect the data. Omitted when there are none. */
+  filterWarnings?: FilterWarning[];
 }
 
 // ----------------------------------------------------------------------------
@@ -538,6 +556,8 @@ export interface IntegrityResult {
   completedAt: string;
   durationMs: number;
   details?: IntegrityFindingDetail[];
+  /** Filters that cannot match as written, so `scanned` may not cover the intended records. Omitted when there are none. */
+  filterWarnings?: FilterWarning[];
 }
 
 export interface IntegrityQuery {

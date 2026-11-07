@@ -97,6 +97,15 @@ describe('maad_semantic_search — modes & fusion', () => {
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.value.results.some(h => h.docId === ids['health'])).toBe(false); // health is active, filtered out
+    expect(r.value.filterWarnings).toBeUndefined();
+  });
+
+  it('a scope filter that cannot match is reported', async () => {
+    const r = await engine.semanticSearch({ query: 'consultations', mode: 'exact', filters: { nope: 'x' } });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.value.results).toEqual([]);
+    expect(r.value.filterWarnings).toEqual([{ field: 'nope', reason: 'undeclared' }]);
   });
 
   it('soft-deleted docs are excluded from results', async () => {

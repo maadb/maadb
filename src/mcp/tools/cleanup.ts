@@ -190,6 +190,7 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
           mode,
           docType: args.docType,
           maxRecords,
+          ...(queryResult.value.filterWarnings ? { filterWarnings: queryResult.value.filterWarnings } : {}),
         });
       }
 
@@ -326,6 +327,7 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
           docType: args.docType,
           repairTypes,
           maxRecords,
+          ...(probe.value.filterWarnings ? { filterWarnings: probe.value.filterWarnings } : {}),
         });
       }
 

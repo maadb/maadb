@@ -468,7 +468,7 @@ export interface DocumentRecord {
   partial?: boolean;
 }
 
-export type FilterCondition =
+export type FilterCondition = (
   | { op: 'eq'; value: unknown }
   | { op: 'neq'; value: unknown }
   | { op: 'gt' | 'gte' | 'lt' | 'lte'; value: number | string }
@@ -476,8 +476,25 @@ export type FilterCondition =
   | { op: 'contains'; value: string }
   // 0.7.1 R2 — range shortcut. Desugared to [gte, lte] at engine-layer expand time;
   // backend never sees a between-shaped FilterCondition. `value` is inclusive on
-  // both ends, type-agnostic (dates/numbers/strings sort lexically).
-  | { op: 'between'; value: [number | string, number | string] };
+  // both ends and compares by the field's schema type, like gte and lte.
+  | { op: 'between'; value: [number | string, number | string] }
+) & FilterComparison;
+
+/**
+ * Set by the engine from the schema, never by callers: expandFilters drops both
+ * keys from filter input. Without `compare`, the backend compares as text, or on
+ * numeric_value for a range with a number value.
+ */
+export interface FilterComparison {
+  /**
+   * none: the value cannot compare to any stored value, so match nothing.
+   * row: rows with a numeric_value compare to `numericValue`, others to `value`
+   * as text.
+   */
+  compare?: 'none' | 'row';
+  /** For compare 'row': the value for numeric rows (a list for `in`). Null when it is not a number. */
+  numericValue?: number | number[] | null;
+}
 
 /**
  * 0.7.1 R2 — filter input accepts composite forms:
