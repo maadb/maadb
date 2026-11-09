@@ -1,0 +1,21 @@
+{
+  "mcpServers": {
+    "maadb": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "--package=@maadb/core@latest",
+        "maad",
+        "serve",
+        "--project",
+        "${user_config.project_dir}",
+        "--role",
+        "${user_config.role}"
+      ],
+      "env": {
+        "MAAD_BOOT_REINDEX": "1"
+      }
+    }
+  }
+}

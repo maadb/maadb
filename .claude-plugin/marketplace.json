@@ -1,0 +1,25 @@
+{
+  "name": "maadb",
+  "owner": {
+    "name": "MAADB"
+  },
+  "metadata": {
+    "description": "Claude Code plugins for MAADB, the Markdown As A Database engine."
+  },
+  "plugins": [
+    {
+      "name": "maadb",
+      "source": "./plugins/maadb",
+      "description": "Run a MAADB engine locally over stdio against a project folder you choose.",
+      "category": "database",
+      "keywords": ["maadb", "markdown", "database", "mcp"]
+    },
+    {
+      "name": "maadb-remote",
+      "source": "./plugins/maadb-remote",
+      "description": "Connect to a MAADB engine you host, over HTTP with a bearer token.",
+      "category": "database",
+      "keywords": ["maadb", "markdown", "database", "mcp", "remote"]
+    }
+  ]
+}

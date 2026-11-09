@@ -19,7 +19,6 @@ export function registerContract(server: McpServer, ctx: InstanceCtx): number {
   server.registerTool('maad_create_contract', {
     description: 'Read a complete versioned schema contract and effective history mode from an already-bound ready project. Optional compact-json-v1 delivery returns lossless, digest-bound pages; verify all pages before accepting a contract.',
     inputSchema: createContractInput,
-    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
   }, async (args, extra) => withEngine(ctx, extra, 'maad_create_contract', args, async call => {
     const result = await call.engine.createContract({ contract: args.contract, docType: args.docType }, {
       ...(call.signal ? { signal: call.signal } : {}),
@@ -36,7 +35,6 @@ export function registerWrite(server: McpServer, ctx: InstanceCtx): number {
   server.registerTool('maad_create_guarded', {
     description: 'Create exact expected content only if the complete schema, history policy and current write access match. After uncertain outcomes reconcile by document receipt; never automatically replay.',
     inputSchema: guardedCreateInput,
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
   }, async (args, extra) => withEngine(ctx, extra, 'maad_create_guarded', args, async call => {
     const denied = call.validateAccess?.();
     if (denied) return errorResponse([denied]);

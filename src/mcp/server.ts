@@ -46,6 +46,7 @@ import * as historyModeTools from './tools/history-mode.js';
 import * as cleanupTools from './tools/cleanup.js';
 import * as instanceTools from './tools/instance.js';
 import * as authTools from './tools/auth.js';
+import { annotateRegistrations } from './annotations.js';
 
 export type Transport = 'stdio' | 'http' | 'unix';
 
@@ -186,7 +187,7 @@ export async function startServer(opts: ServeOptions): Promise<void> {
   const legacyRole = instance.source === 'synthetic' ? parseRole(opts.role) : 'admin';
 
   const buildMcpServer = (): { server: McpServer; toolCount: number } => {
-    const server = new McpServer({ name: 'maad', version: pkg.version });
+    const server = annotateRegistrations(new McpServer({ name: 'maad', version: pkg.version }));
     let toolCount = 0;
     if (instance.source === 'file') {
       toolCount += instanceTools.register(server, ctx);

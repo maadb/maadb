@@ -1,0 +1,27 @@
+{
+  "name": "maadb",
+  "version": "0.22.0",
+  "description": "Use a MAADB project from Claude Code. Starts a local MAADB engine over stdio against a project folder you choose.",
+  "author": {
+    "name": "MAADB"
+  },
+  "homepage": "https://github.com/maadb/maadb/tree/main/plugins/maadb",
+  "repository": "https://github.com/maadb/maadb",
+  "license": "MIT",
+  "keywords": ["maadb", "markdown", "database", "mcp"],
+  "userConfig": {
+    "project_dir": {
+      "type": "directory",
+      "title": "MAADB project folder",
+      "description": "Absolute path to the MAADB project folder (the folder that holds _registry/ and _schema/). The engine reads and writes only inside it.",
+      "required": true
+    },
+    "role": {
+      "type": "string",
+      "title": "Role",
+      "description": "reader can only read. writer can also create, update and delete records. admin can also reindex, back up and run cleanup tools.",
+      "options": ["reader", "writer", "admin"],
+      "default": "writer"
+    }
+  }
+}

@@ -143,6 +143,17 @@ cd maadb
 npm install && npm run build
 ```
 
+### Claude Code plugin
+
+Claude Code users can install MAADB as a plugin instead of writing MCP config by hand:
+
+```
+/plugin marketplace add maadb/maadb
+/plugin install maadb@maadb
+```
+
+`maadb` runs the engine locally against a project folder you choose; `maadb-remote` connects to an engine you host. See [plugins/README.md](plugins/README.md).
+
 ### Single-project (simplest)
 
 Wire up MCP in your agent (`.mcp.json` in the project directory):

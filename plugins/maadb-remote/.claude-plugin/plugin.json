@@ -1,0 +1,28 @@
+{
+  "name": "maadb-remote",
+  "version": "0.22.0",
+  "description": "Use a MAADB engine you host from Claude Code. Connects over Streamable HTTP with a MAADB bearer token.",
+  "author": {
+    "name": "MAADB"
+  },
+  "homepage": "https://github.com/maadb/maadb/tree/main/plugins/maadb-remote",
+  "repository": "https://github.com/maadb/maadb",
+  "license": "MIT",
+  "privacyPolicyUrl": "https://github.com/maadb/maadb/blob/main/plugins/PRIVACY.md",
+  "keywords": ["maadb", "markdown", "database", "mcp", "remote"],
+  "userConfig": {
+    "url": {
+      "type": "string",
+      "title": "MAADB MCP URL",
+      "description": "Full URL of your engine's MCP endpoint, ending in /mcp. Use https for anything that is not on this machine.",
+      "required": true
+    },
+    "token": {
+      "type": "string",
+      "title": "MAADB token",
+      "description": "A maad_pat_ token from `maad auth issue-token`. Stored in your system keychain.",
+      "required": true,
+      "sensitive": true
+    }
+  }
+}

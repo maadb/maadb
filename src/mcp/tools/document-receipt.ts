@@ -18,7 +18,6 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
   server.registerTool('maad_document_receipt', {
     description: 'Read exact immutable committed document evidence from an already-bound, ready project. Does not prove operation completion or power-loss durability; no result authorizes create replay. Optional compact-json-v1 delivery returns bounded complete-evidence pages.',
     inputSchema: documentReceiptInput,
-    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
   }, async (args, extra) => withEngine(ctx, extra, 'maad_document_receipt', args,
     async call => {
       const { delivery, project: _project, ...request } = args;
