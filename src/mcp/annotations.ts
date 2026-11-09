@@ -82,7 +82,8 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, Hints>> = Object.freeze({
   maad_reload: additive('Reload engine', true),
   maad_flush: additive('Flush history writes', true),
   maad_backup: destructive('Manage backup snapshots'),
-  maad_instructions: additive('Check or refresh instructions', true),
+  // refresh with force=true replaces user-edited instruction files.
+  maad_instructions: destructive('Check or refresh instructions', true),
 
   // Token registry.
   maad_list_tokens: read('List tokens'),

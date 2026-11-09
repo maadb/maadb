@@ -107,7 +107,7 @@ describe('tool annotations', () => {
     for (const name of [
       'maad_update', 'maad_bulk_update', 'maad_delete', 'maad_bulk_delete',
       'maad_delete_where', 'maad_purge_soft_deleted', 'maad_repair_where',
-      'maad_backup', 'maad_revoke_token', 'maad_rotate_token',
+      'maad_backup', 'maad_instructions', 'maad_revoke_token', 'maad_rotate_token',
     ]) {
       expect(TOOL_ANNOTATIONS[name]?.destructiveHint, name).toBe(true);
     }

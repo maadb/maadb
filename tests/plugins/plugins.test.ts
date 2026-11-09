@@ -95,7 +95,8 @@ describe('plugin manifests', () => {
     const server = mcpServer('maadb');
     expect(server.type).toBe('stdio');
     expect(server.command).toBe('npx');
-    expect(server.args).toContain('--package=@maadb/core@latest');
+    // Pinned to the plugin's version: npx reuses its cache and the skill matches the engine.
+    expect(server.args).toContain(`--package=@maadb/core@${readJson<{ version: string }>(path.join(REPO, 'package.json')).version}`);
     const args = server.args!;
     expect(args[args.indexOf('--project') + 1]).toBe('${user_config.project_dir}');
     expect(manifest('maadb').userConfig?.project_dir?.type).toBe('directory');
@@ -190,7 +191,7 @@ describe.skipIf(!haveDist)('maadb plugin (stdio) against the built engine', () =
     await copyFixture(project);
 
     // Launch exactly what the plugin declares, with the npx package swap for
-    // the local build: `npx -y --package=@maadb/core@latest maad <rest>`.
+    // the local build: `npx -y --package=@maadb/core@<version> maad <rest>`.
     const server = mcpServer('maadb');
     const args = server.args!.map(a => fill(a, { project_dir: project, role: 'writer' }));
     const rest = args.slice(args.indexOf('maad') + 1);
@@ -282,7 +283,11 @@ describe.skipIf(!haveDist)('maadb-remote plugin (HTTP) against the built engine'
 
   afterAll(async () => {
     for (const c of clients) await c.close().catch(() => {});
-    child?.kill();
+    if (child && child.exitCode === null) {
+      const exited = new Promise(r => child.once('exit', r));
+      child.kill();
+      await exited;
+    }
     await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }).catch(() => {});
   });
 

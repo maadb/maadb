@@ -43,7 +43,7 @@ Prompts:
 - **MAADB project folder**: absolute path to the project (the folder with `_registry/` and `_schema/`). The engine reads and writes only inside this folder. For a new, empty project, create the folder first; Claude can design the schema with you.
 - **Role**: `reader`, `writer` (default) or `admin`. Admin adds reindex, backup and cleanup tools.
 
-The plugin runs `npx -y --package=@maadb/core@latest maad serve --project <folder> --role <role>`. It sets `MAAD_BOOT_REINDEX=1`, so a folder that has records but no index yet (a fresh clone or restore) is indexed when the engine starts.
+The plugin runs `npx -y --package=@maadb/core@<plugin version> maad serve --project <folder> --role <role>`. It sets `MAAD_BOOT_REINDEX=1`, so a folder that has records but no index yet (a fresh clone or restore) is indexed when the engine starts.
 
 ## `maadb-remote`: engine you host
 
@@ -76,7 +76,7 @@ See [PRIVACY.md](PRIVACY.md). The plugins send nothing to the MAADB maintainers.
 
 ## For maintainers
 
-- The plugin `version` in each `.claude-plugin/plugin.json` matches `package.json`. Bump all three in the release PR; Claude Code only offers an update when the version changes.
+- The plugin `version` in each `.claude-plugin/plugin.json`, and the `@maadb/core@<version>` pin in `plugins/maadb/.mcp.json`, match `package.json`. Bump them in the release PR; Claude Code only offers an update when the version changes.
 - Tool titles and hints live in `src/mcp/annotations.ts`. A new tool fails to register until it has an entry there.
 - `tests/plugins/plugins.test.ts` checks the manifests and drives the built engine through both plugin configs. Run `npm run build` first.
 - `claude plugin validate . --strict` checks the marketplace; run it on each plugin folder too.
