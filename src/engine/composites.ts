@@ -71,28 +71,34 @@ export async function getDocumentFull(ctx: EngineContext, id: DocId): Promise<Re
     }
   }
 
-  // Latest incoming note
+  // Latest incoming note. The index already orders notes by updatedAt, so
+  // read git history newest first and stop once the next note was last
+  // written before the best commit found: it cannot hold a newer one. In the
+  // usual case that is one git call, not one per note. A note whose newest
+  // update has no engine commit yet (edited outside the engine, or waiting
+  // for a batched flush) does not hide a newer commit on an older note.
   let latestNote: GetFullResult['latestNote'] = null;
   if (ctx.gitLayer) {
+    const notes = new Map<string, NonNullable<ReturnType<typeof docsMap.get>>>();
     for (const inc of incoming) {
+      if (!inc.docType.includes('note') || notes.has(inc.docId)) continue;
       const incDoc = docsMap.get(toDocId(inc.docId));
-      if (!incDoc) continue;
-      if (!(inc.docType.includes('note'))) continue;
-
+      if (incDoc) notes.set(inc.docId, incDoc);
+    }
+    const newestFirst = [...notes.entries()].sort(([, a], [, b]) =>
+      a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0);
+    let bestMs = -Infinity;
+    for (const [noteId, noteDoc] of newestFirst) {
+      // Git timestamps have one-second resolution; allow for it.
+      if (Date.parse(noteDoc.updatedAt) < bestMs - 1000) break;
       try {
-        const history = await ctx.gitLayer.history(incDoc.filePath as string, { limit: 1 });
-        if (history.length > 0) {
-          const entry = history[0]!;
-          if (!latestNote || entry.timestamp > latestNote.timestamp) {
-            latestNote = {
-              docId: inc.docId,
-              summary: entry.summary,
-              timestamp: entry.timestamp,
-            };
-          }
+        const [entry] = await ctx.gitLayer.history(noteDoc.filePath as string, { limit: 1 });
+        if (entry && Date.parse(entry.timestamp) > bestMs) {
+          bestMs = Date.parse(entry.timestamp);
+          latestNote = { docId: noteId, summary: entry.summary, timestamp: entry.timestamp };
         }
       } catch (e) {
-        logger.bestEffort('composites', 'getDocumentFull.latestNote', `Git history lookup failed for ${inc.docId}`, { error: e instanceof Error ? e.message : String(e) });
+        logger.bestEffort('composites', 'getDocumentFull.latestNote', `Git history lookup failed for ${noteId}`, { error: e instanceof Error ? e.message : String(e) });
       }
     }
   }
