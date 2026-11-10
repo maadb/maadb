@@ -189,6 +189,7 @@ export async function publishPreparedCreate(ctx: EngineContext, prepared: Prepar
     detail: '',
     summary: String(fields['name'] ?? fields['title'] ?? id),
     files: [fp],
+    changed: true,
   });
 
   const result: CreateResult = {
@@ -363,6 +364,7 @@ export async function updateDocument(
       detail,
       summary: summaryStr,
       files: [absPath],
+      changed: markdown !== raw,
     });
   }
 
@@ -468,6 +470,7 @@ export async function deleteDocument(
         detail: 'hard',
         summary: `Hard deleted ${id as string}`,
         files: [absPath],
+        changed: true,
       });
     } else {
       const deletedPath = path.join(path.dirname(absPath), `_deleted_${path.basename(absPath)}`);
@@ -478,6 +481,7 @@ export async function deleteDocument(
         detail: 'soft',
         summary: `Soft deleted ${id as string}`,
         files: [absPath, deletedPath],
+        changed: true,
       });
     }
   }
@@ -559,6 +563,7 @@ export async function bulkDelete(
       detail: `bulk:${mode}:${succeeded.length}`,
       summary: `Bulk ${mode}-deleted ${succeeded.length} records`,
       files: allFiles,
+      changed: true,
     });
     if (outcome.status === 'failed') {
       writeDurable = false;
@@ -725,6 +730,7 @@ export async function bulkCreate(
       detail: `bulk:${succeeded.length}`,
       summary: `Bulk created ${succeeded.length} records`,
       files: allFiles,
+      changed: true,
     });
     if (outcome.status === 'failed') {
       writeDurable = false;
@@ -1057,6 +1063,7 @@ export async function purgeSoftDeleted(
       detail: `purge:${purged.length}`,
       summary: `Purged ${purged.length} soft-deleted records older than ${olderThanIso}`,
       files: allFiles,
+      changed: true,
     });
     if (outcome.status === 'failed') {
       writeDurable = false;

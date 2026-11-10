@@ -37,13 +37,15 @@ function recoveredCommit(entries: JournalEntry[]): CommitOptions {
 }
 
 function combinePending(pending: PendingCommit[]): CommitOptions {
-  const first = pending[0]!.options;
+  const { changed: _firstChanged, ...first } = pending[0]!.options;
+  const allChanged = pending.every(item => item.options.changed === true);
   const logicalWrites = unique(pending.flatMap(item => item.journalIds)).length || pending.length;
   return {
     ...first,
     detail: pending.length === 1 ? first.detail : `batch:${logicalWrites}`,
     summary: pending.length === 1 ? first.summary : `Flushed ${logicalWrites} pending writes`,
     files: unique(pending.flatMap(item => item.options.files)),
+    ...(allChanged ? { changed: true } : {}),
   };
 }
 

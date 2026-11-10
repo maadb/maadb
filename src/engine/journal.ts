@@ -341,7 +341,10 @@ export class OperationJournal {
   bindCommit(ids: string[], commit: CommitOptions): void {
     const known = ids.filter(id => this.entries.has(id));
     if (known.length === 0) return;
-    this.record({ kind: 'bind', ids: known, commitId: randomUUID(), commit: { ...commit, files: [...commit.files] } });
+    // The changed hint is a per-call speed hint, not part of the commit: keep it
+    // out of the journal so replay groups and subjects are unchanged.
+    const { changed: _changed, ...stored } = commit;
+    this.record({ kind: 'bind', ids: known, commitId: randomUUID(), commit: { ...stored, files: [...commit.files] } });
   }
 
   getCommit(entry: JournalEntry): CommitOptions | undefined {
