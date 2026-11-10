@@ -44,6 +44,7 @@ function combinePending(pending: PendingCommit[]): CommitOptions {
     detail: pending.length === 1 ? first.detail : `batch:${logicalWrites}`,
     summary: pending.length === 1 ? first.summary : `Flushed ${logicalWrites} pending writes`,
     files: unique(pending.flatMap(item => item.options.files)),
+    changed: pending.every(item => item.options.changed === true),
   };
 }
 
