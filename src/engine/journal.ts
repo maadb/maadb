@@ -375,6 +375,11 @@ export class OperationJournal {
     return this.indexed;
   }
 
+  /** Whether any operation on this file is still open (not yet committed). */
+  hasOpenEntry(file: string): boolean {
+    return (this.byFile.get(path.resolve(file))?.size ?? 0) > 0;
+  }
+
   findIndexedByFiles(files: string[]): JournalEntry[] {
     const found = new Map<string, JournalEntry>();
     for (const file of files) {

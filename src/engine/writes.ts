@@ -306,13 +306,29 @@ export async function updateDocument(
     })));
   }
 
+  // No-op update: the new bytes equal the file, the index already holds them,
+  // and no earlier operation on the file is still waiting to commit (a retry
+  // after a failed commit must still commit). Nothing to write, index or commit.
+  if (markdown === raw && preflight.value.fileHash === doc.fileHash && !ctx.journal.hasOpenEntry(absPath)) {
+    return ok({
+      docId: id,
+      docType: doc.docType,
+      version: doc.version,
+      changedFields,
+      validation,
+      writeDurable: true,
+    });
+  }
+
   // Durable write: journal → atomic write → index → git → complete
   const journalId = ctx.journal.begin('update', id as string, absPath);
 
   await atomicWrite(absPath, markdown);
   ctx.journal.advance(journalId, 'file_written');
 
-  const indexResult = await indexFile(ctx, toFilePath(absPath));
+  // The bytes just written are in hand, so the indexer parses them without
+  // reading the file back.
+  const indexResult = await indexFile(ctx, toFilePath(absPath), { raw: markdown });
   if (!indexResult.ok) {
     return err(indexResult.errors.map(e => ({
       ...e,
