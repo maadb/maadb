@@ -320,7 +320,24 @@ export async function withEngine(
         return null;
       };
     }
-    const invokeHandler = (): Promise<McpToolResponse> => Promise.resolve(handler(callCtx));
+    // Set by the request timer below. A write that is still waiting for the
+    // engine write lock when its timer fires must not run later: the client
+    // already got REQUEST_TIMEOUT and may retry it.
+    let timedOut = false;
+    let started = false;
+    const invokeHandler = (): Promise<McpToolResponse> => {
+      if (timedOut) {
+        getOpsLog().warn(
+          { event: 'tool_call_skipped_after_timeout', request_id: requestId, tool: toolName, limit_ms: timeoutMs },
+          'tool_call_skipped_after_timeout',
+        );
+        return Promise.resolve(mcpErrorWithDetails('REQUEST_TIMEOUT',
+          `Tool ${toolName} timed out before it started; it was not run`,
+          { tool: toolName, limitMs: timeoutMs, started: false }));
+      }
+      started = true;
+      return Promise.resolve(handler(callCtx));
+    };
     // 0.7.0 — For writes under an authenticated session with the identity
     // flag on, set the engine's pending commit-identity slot inside the
     // write mutex. This survives the full handler scope; cleared in finally.
@@ -407,15 +424,16 @@ export async function withEngine(
       });
     }
 
-    let timedOut = false;
     let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
     const timeoutPromise = new Promise<McpToolResponse>((resolve) => {
       timeoutHandle = setTimeout(() => {
         timedOut = true;
         receiptAbort?.abort();
+        // started: false means the handler never ran and never will, so a
+        // retry cannot double-apply. true means it may still complete.
         resolve(mcpErrorWithDetails('REQUEST_TIMEOUT',
           `Tool ${toolName} exceeded per-request timeout of ${timeoutMs}ms`,
-          { tool: toolName, limitMs: timeoutMs },
+          { tool: toolName, limitMs: timeoutMs, started },
         ));
       }, timeoutMs);
       // Don't keep the event loop alive for a pending request timer —
@@ -437,6 +455,8 @@ export async function withEngine(
       // Keep the observation unhandled-rejection-safe.
       void handlerPromise.then(
         () => {
+          // A skipped handler already logged tool_call_skipped_after_timeout.
+          if (!started) return;
           getOpsLog().warn(
             { event: 'tool_call_overrun', request_id: requestId, tool: toolName, limit_ms: timeoutMs },
             'tool_call_overrun',
