@@ -42,10 +42,12 @@ async function addNote(id: string, author: string): Promise<void> {
 }
 
 describe('getDocumentFull latestNote', () => {
-  it('reads git history once, for the newest incoming note', async () => {
+  it('reads git history once, for the newest incoming note', { timeout: 20_000 }, async () => {
     await addNote('note-2026-11-01-001', 'ana');
     await addNote('note-2026-11-01-002', 'ben');
     await addNote('note-2026-11-01-003', 'cy');
+    // Older notes must be more than git's one-second resolution older.
+    await new Promise(r => setTimeout(r, 2100));
     const updated = await engine.updateDocument(docId('note-2026-11-01-001'), { author: 'dee' });
     expect(updated.ok).toBe(true);
 
@@ -77,6 +79,22 @@ describe('getDocumentFull latestNote', () => {
     const result = await engine.getDocumentFull(docId('cas-2026-001'));
     expect(result.ok && result.value.latestNote?.docId).toBe('note-2026-11-01-001');
   });
+
+  it('does not let a newer outside edit hide a newer engine commit on another note', async () => {
+    await addNote('note-2026-11-01-001', 'ana');
+    await new Promise(r => setTimeout(r, 1100));
+    await addNote('note-2026-11-01-002', 'ben');
+    await new Promise(r => setTimeout(r, 1100));
+    // Note 001 is now newest in the index, but its only engine commit is older than 002's.
+    const notePath = path.join(root, 'case-notes', 'note-2026-11-01-001.md');
+    const { readFileSync, writeFileSync } = await import('node:fs');
+    writeFileSync(notePath, readFileSync(notePath, 'utf8').replace('author: ana', 'author: outside'));
+    git('add', '.'); git('commit', '-m', 'Outside edit');
+    await engine.indexAll({ force: true });
+
+    const result = await engine.getDocumentFull(docId('cas-2026-001'));
+    expect(result.ok && result.value.latestNote?.docId).toBe('note-2026-11-01-002');
+  }, 20_000);
 
   it('returns null when no incoming note has an engine commit', async () => {
     const result = await engine.getDocumentFull(docId('cas-2026-001'));

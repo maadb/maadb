@@ -71,9 +71,12 @@ export async function getDocumentFull(ctx: EngineContext, id: DocId): Promise<Re
     }
   }
 
-  // Latest incoming note. The index already orders notes by updatedAt, so read
-  // git history for the newest one only, not one git log per note. A note with
-  // no engine commit (edited outside the engine) falls through to the next.
+  // Latest incoming note. The index already orders notes by updatedAt, so
+  // read git history newest first and stop once the next note was last
+  // written before the best commit found: it cannot hold a newer one. In the
+  // usual case that is one git call, not one per note. A note whose newest
+  // update has no engine commit yet (edited outside the engine, or waiting
+  // for a batched flush) does not hide a newer commit on an older note.
   let latestNote: GetFullResult['latestNote'] = null;
   if (ctx.gitLayer) {
     const notes = new Map<string, NonNullable<ReturnType<typeof docsMap.get>>>();
@@ -84,12 +87,15 @@ export async function getDocumentFull(ctx: EngineContext, id: DocId): Promise<Re
     }
     const newestFirst = [...notes.entries()].sort(([, a], [, b]) =>
       a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0);
+    let bestMs = -Infinity;
     for (const [noteId, noteDoc] of newestFirst) {
+      // Git timestamps have one-second resolution; allow for it.
+      if (Date.parse(noteDoc.updatedAt) < bestMs - 1000) break;
       try {
         const [entry] = await ctx.gitLayer.history(noteDoc.filePath as string, { limit: 1 });
-        if (entry) {
+        if (entry && Date.parse(entry.timestamp) > bestMs) {
+          bestMs = Date.parse(entry.timestamp);
           latestNote = { docId: noteId, summary: entry.summary, timestamp: entry.timestamp };
-          break;
         }
       } catch (e) {
         logger.bestEffort('composites', 'getDocumentFull.latestNote', `Git history lookup failed for ${noteId}`, { error: e instanceof Error ? e.message : String(e) });
