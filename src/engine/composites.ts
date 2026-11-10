@@ -71,28 +71,28 @@ export async function getDocumentFull(ctx: EngineContext, id: DocId): Promise<Re
     }
   }
 
-  // Latest incoming note
+  // Latest incoming note. The index already orders notes by updatedAt, so read
+  // git history for the newest one only, not one git log per note. A note with
+  // no engine commit (edited outside the engine) falls through to the next.
   let latestNote: GetFullResult['latestNote'] = null;
   if (ctx.gitLayer) {
+    const notes = new Map<string, NonNullable<ReturnType<typeof docsMap.get>>>();
     for (const inc of incoming) {
+      if (!inc.docType.includes('note') || notes.has(inc.docId)) continue;
       const incDoc = docsMap.get(toDocId(inc.docId));
-      if (!incDoc) continue;
-      if (!(inc.docType.includes('note'))) continue;
-
+      if (incDoc) notes.set(inc.docId, incDoc);
+    }
+    const newestFirst = [...notes.entries()].sort(([, a], [, b]) =>
+      a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0);
+    for (const [noteId, noteDoc] of newestFirst) {
       try {
-        const history = await ctx.gitLayer.history(incDoc.filePath as string, { limit: 1 });
-        if (history.length > 0) {
-          const entry = history[0]!;
-          if (!latestNote || entry.timestamp > latestNote.timestamp) {
-            latestNote = {
-              docId: inc.docId,
-              summary: entry.summary,
-              timestamp: entry.timestamp,
-            };
-          }
+        const [entry] = await ctx.gitLayer.history(noteDoc.filePath as string, { limit: 1 });
+        if (entry) {
+          latestNote = { docId: noteId, summary: entry.summary, timestamp: entry.timestamp };
+          break;
         }
       } catch (e) {
-        logger.bestEffort('composites', 'getDocumentFull.latestNote', `Git history lookup failed for ${inc.docId}`, { error: e instanceof Error ? e.message : String(e) });
+        logger.bestEffort('composites', 'getDocumentFull.latestNote', `Git history lookup failed for ${noteId}`, { error: e instanceof Error ? e.message : String(e) });
       }
     }
   }
