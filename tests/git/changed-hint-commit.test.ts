@@ -115,3 +115,24 @@ describe('real git', () => {
     expect(git('status', '--porcelain', '--', 'clients')).toBe('');
   });
 });
+
+describe('journal', () => {
+  it('does not store the changed hint with a bound commit', async () => {
+    const { OperationJournal } = await import('../../src/engine/journal.js');
+    const dir = mkdtempSync(path.join(tmpdir(), 'changed-hint-journal-'));
+    try {
+      const journal = new OperationJournal(dir);
+      const file = path.join(dir, 'note-one.md');
+      const entry = journal.begin('update', 'note-one', file);
+      journal.advance(entry, 'indexed');
+      journal.bindCommit([entry], { ...opts, files: [file] });
+      const reread = new OperationJournal(dir);
+      const stored = reread.getCommit(reread.getIndexedPending()[0]!);
+      expect(stored).toBeDefined();
+      expect(stored).not.toHaveProperty('changed');
+      expect(stored?.summary).toBe('test');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
