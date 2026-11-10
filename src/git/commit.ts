@@ -122,6 +122,12 @@ export interface CommitOptions {
   summary: string;
   files: string[];
   identity?: CommitIdentity;
+  /**
+   * The caller changed these files' content (a create, a delete, or an update
+   * whose bytes differ). autoCommit then commits without a git status first;
+   * the status check runs only if the commit records nothing.
+   */
+  changed?: boolean;
 }
 
 /**
@@ -231,6 +237,43 @@ async function commitFromPathspecFile(git: SimpleGit, message: string, files: st
   }
 }
 
+// Whether any of the operation's paths has a staged change. Returns a failed
+// outcome when git status itself fails.
+async function hasStagedChange(git: SimpleGit, chunks: string[][]): Promise<boolean | CommitOutcome> {
+  // Check if there's anything to commit. Update paths where the file
+  // actually equals its on-disk form produce an empty staged list — this
+  // is benign (record is durable; git history matches state).
+  // Pathspec-scoped to the operation's files: unrelated staged content
+  // (operator activity, a prior failed commit) must neither trip this
+  // check nor be swept into the commit below under this op's message —
+  // the maad:<action> subject line is the audit trail.
+  let staged = false;
+  // simple-git's StatusSummary.staged misses renames — `R` entries land in
+  // `renamed[]` (with a parallel FileStatusSummary in `files[]` carrying
+  // `index: 'R'`) and never appear in `staged[]`. Pre-0.7.10 this caused
+  // soft-delete autoCommit to silently noop because soft-delete writes a
+  // rename pair (cli-x.md → _deleted_cli-x.md) which git's rename detection
+  // collapses. Fall back to the full files[] index column: anything other
+  // than ' ' (clean) or '?' (untracked) is a real index entry the next
+  // commit will pick up. The staged.length check stays as the fast path
+  // (and to keep stubs that only populate `staged` working).
+  try {
+    for (const chunk of chunks) {
+      const status = await git.status(['--', ...chunk]);
+      staged = status.staged.length > 0
+        || status.files.some(f => f.index !== ' ' && f.index !== '?');
+      if (staged) break;
+    }
+  } catch (e) {
+    return {
+      status: 'failed',
+      code: 'GIT_STATUS_FAILED',
+      message: `git status failed: ${e instanceof Error ? e.message : String(e)}`,
+    };
+  }
+  return staged;
+}
+
 export async function autoCommit(
   git: SimpleGit,
   opts: CommitOptions,
@@ -250,39 +293,11 @@ export async function autoCommit(
       };
     }
 
-    // Check if there's anything to commit. Update paths where the file
-    // actually equals its on-disk form produce an empty staged list — this
-    // is benign (record is durable; git history matches state).
-    // Pathspec-scoped to the operation's files: unrelated staged content
-    // (operator activity, a prior failed commit) must neither trip this
-    // check nor be swept into the commit below under this op's message —
-    // the maad:<action> subject line is the audit trail.
-    let hasStagedChange = false;
-    // simple-git's StatusSummary.staged misses renames — `R` entries land in
-    // `renamed[]` (with a parallel FileStatusSummary in `files[]` carrying
-    // `index: 'R'`) and never appear in `staged[]`. Pre-0.7.10 this caused
-    // soft-delete autoCommit to silently noop because soft-delete writes a
-    // rename pair (cli-x.md → _deleted_cli-x.md) which git's rename detection
-    // collapses. Fall back to the full files[] index column: anything other
-    // than ' ' (clean) or '?' (untracked) is a real index entry the next
-    // commit will pick up. The staged.length check stays as the fast path
-    // (and to keep stubs that only populate `staged` working).
-    try {
-      for (const chunk of chunks) {
-        const status = await git.status(['--', ...chunk]);
-        hasStagedChange = status.staged.length > 0
-          || status.files.some(f => f.index !== ' ' && f.index !== '?');
-        if (hasStagedChange) break;
-      }
-    } catch (e) {
-      return {
-        status: 'failed',
-        code: 'GIT_STATUS_FAILED',
-        message: `git status failed: ${e instanceof Error ? e.message : String(e)}`,
-      };
-    }
-    if (!hasStagedChange) {
-      return { status: 'noop' };
+    // A caller that knows the content changed skips the status probe: the
+    // commit itself proves there was something to commit.
+    if (!opts.changed) {
+      const staged = await hasStagedChange(git, chunks);
+      if (staged !== true) return staged === false ? { status: 'noop' } : staged;
     }
 
     const message = formatCommitMessage(opts);
@@ -295,6 +310,7 @@ export async function autoCommit(
         ? await git.env(buildGitEnv()).commit(message, ['--', ...opts.files])
         : await commitFromPathspecFile(git, message, opts.files);
     } catch (e) {
+      if (opts.changed && await hasStagedChange(git, chunks) === false) return { status: 'noop' };
       // The add succeeded but the commit itself failed — worst case, since
       // the working tree is now dirty with staged but uncommitted changes.
       // Callers use this signal to stamp `write_durable: false` on the MCP
@@ -307,6 +323,9 @@ export async function autoCommit(
     }
 
     if (!result.commit) {
+      // Git records nothing when the paths already match HEAD; simple-git then
+      // resolves with no sha. Same benign noop the status probe reports.
+      if (opts.changed && await hasStagedChange(git, chunks) === false) return { status: 'noop' };
       // simple-git returned an empty commit field — shouldn't happen after a
       // successful commit, but defend against it so durability tracking is
       // truthful rather than optimistic.
