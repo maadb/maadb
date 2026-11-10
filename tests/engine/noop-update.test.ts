@@ -74,6 +74,19 @@ describe('no-op update', () => {
     expect(git('log', '-1', '--format=%s')).toMatch(/^maad:update cli-acme/);
   });
 
+  it('still commits a retry after an interrupted write was reindexed', async () => {
+    // The file holds the update's bytes and the index has them (crash after
+    // the write, then reindex), but git never got the commit.
+    const updated = readFileSync(file(), 'utf8').replace('status: inactive', 'status: active');
+    writeFileSync(file(), updated);
+    await engine.indexAll({ force: true });
+    expect(git('status', '--porcelain', '--', 'clients')).not.toBe('');
+
+    const retry = await engine.updateDocument(id, { status: 'active' });
+    expect(retry.ok && retry.value.writeDurable).toBe(true);
+    expect(git('status', '--porcelain', '--', 'clients')).toBe('');
+  });
+
   it('reindexes when the file was edited outside the engine', async () => {
     const outside = readFileSync(file(), 'utf8').replace('status: inactive', 'status: active');
     writeFileSync(file(), outside);

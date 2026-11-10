@@ -36,6 +36,15 @@ export class GitLayer {
     this.git = simpleGit({ baseDir: projectRoot, allowEnvironment: GIT_IDENTITY_ENV_KEYS });
   }
 
+  /** True when the path has no staged, unstaged or untracked change. Any git error counts as not clean. */
+  async isPathClean(filePath: string): Promise<boolean> {
+    try {
+      return (await this.git.raw(['status', '--porcelain', '--', filePath])).trim() === '';
+    } catch {
+      return false;
+    }
+  }
+
   async isRepo(): Promise<boolean> {
     // Check if .git exists at the project root specifically — not a parent repo
     const gitDir = path.join(this.projectRoot, '.git');
