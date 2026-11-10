@@ -322,11 +322,13 @@ export async function withEngine(
     }
     // Set by the request timer below. A write that is still waiting for the
     // engine write lock when its timer fires must not run later: the client
-    // already got REQUEST_TIMEOUT and may retry it.
+    // already got REQUEST_TIMEOUT and may retry it. Heavy maintenance ops are
+    // left as they were: identical calls share one run (single-flight), so a
+    // caller cannot tell whether the shared run started.
     let timedOut = false;
     let started = false;
     const invokeHandler = (): Promise<McpToolResponse> => {
-      if (timedOut) {
+      if (timedOut && !heavy) {
         getOpsLog().warn(
           { event: 'tool_call_skipped_after_timeout', request_id: requestId, tool: toolName, limit_ms: timeoutMs },
           'tool_call_skipped_after_timeout',
@@ -433,7 +435,7 @@ export async function withEngine(
         // retry cannot double-apply. true means it may still complete.
         resolve(mcpErrorWithDetails('REQUEST_TIMEOUT',
           `Tool ${toolName} exceeded per-request timeout of ${timeoutMs}ms`,
-          { tool: toolName, limitMs: timeoutMs, started },
+          { tool: toolName, limitMs: timeoutMs, ...(heavy ? {} : { started }) },
         ));
       }, timeoutMs);
       // Don't keep the event loop alive for a pending request timer —
@@ -456,7 +458,7 @@ export async function withEngine(
       void handlerPromise.then(
         () => {
           // A skipped handler already logged tool_call_skipped_after_timeout.
-          if (!started) return;
+          if (!started && !heavy) return;
           getOpsLog().warn(
             { event: 'tool_call_overrun', request_id: requestId, tool: toolName, limit_ms: timeoutMs },
             'tool_call_overrun',

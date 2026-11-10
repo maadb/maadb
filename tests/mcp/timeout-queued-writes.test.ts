@@ -58,7 +58,7 @@ describe('queued writes after a request timeout', () => {
       return okResponse();
     });
     // Let the holder take the lock before the second write queues behind it.
-    await sleep(10);
+    while (!ran.includes('holder')) await sleep(1);
     const queued = withEngine(ctx, { sessionId: 'sid-1' }, 'maad_update', {}, async () => {
       ran.push('queued');
       return okResponse();
@@ -84,7 +84,7 @@ describe('queued writes after a request timeout', () => {
       await sleep(50);
       return okResponse();
     });
-    await sleep(10);
+    while (!ran.includes('holder')) await sleep(1);
     const queued = withEngine(ctx, { sessionId: 'sid-1' }, 'maad_update', {}, async () => {
       ran.push('queued');
       return okResponse();
@@ -93,5 +93,24 @@ describe('queued writes after a request timeout', () => {
     expect(body(first).ok).toBe(true);
     expect(body(second).ok).toBe(true);
     expect(ran).toEqual(['holder', 'queued']);
+  }, 10_000);
+
+  it('leaves heavy maintenance ops as before: queued runs still run, no started detail', async () => {
+    const ran: string[] = [];
+    const holder = withEngine(ctx, { sessionId: 'sid-1' }, 'maad_create', {}, async () => {
+      ran.push('holder');
+      await sleep(300);
+      return okResponse();
+    });
+    while (!ran.includes('holder')) await sleep(1);
+    const queued = withEngine(ctx, { sessionId: 'sid-1' }, 'maad_reindex', {}, async () => {
+      ran.push('reindex');
+      return okResponse();
+    });
+    const [, second] = await Promise.all([holder, queued]);
+    expect(body(second).errors[0].code).toBe('REQUEST_TIMEOUT');
+    expect(body(second).errors[0].details).not.toHaveProperty('started');
+    await sleep(400);
+    expect(ran).toEqual(['holder', 'reindex']);
   }, 10_000);
 });
