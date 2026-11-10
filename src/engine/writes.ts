@@ -205,6 +205,15 @@ export async function publishPreparedCreate(ctx: EngineContext, prepared: Prepar
   return ok(result);
 }
 
+// Whether git already holds this file as it is on disk, or writes do not
+// commit to git at all (no repository, feed mode).
+async function gitHasFile(ctx: EngineContext, absPath: string): Promise<boolean> {
+  if (!ctx.gitLayer) return true;
+  const mode = ctx.history?.config.effectiveMode;
+  if (mode === 'feed' || mode === 'read') return true;
+  return ctx.gitLayer.isPathClean(absPath);
+}
+
 export async function updateDocument(
   ctx: EngineContext,
   id: DocId,
@@ -307,13 +316,31 @@ export async function updateDocument(
     })));
   }
 
+  // No-op update: the new bytes equal the file, the index already holds them,
+  // no earlier operation on the file is still waiting to commit, and, where
+  // writes commit to git, the file matches git (a retry after a failed or
+  // interrupted commit must still commit). Nothing to write, index or commit.
+  if (markdown === raw && preflight.value.fileHash === doc.fileHash && !ctx.journal.hasOpenEntry(absPath)
+    && await gitHasFile(ctx, absPath)) {
+    return ok({
+      docId: id,
+      docType: doc.docType,
+      version: doc.version,
+      changedFields,
+      validation,
+      writeDurable: true,
+    });
+  }
+
   // Durable write: journal → atomic write → index → git → complete
   const journalId = ctx.journal.begin('update', id as string, absPath);
 
   await atomicWrite(absPath, markdown);
   ctx.journal.advance(journalId, 'file_written');
 
-  const indexResult = await indexFile(ctx, toFilePath(absPath));
+  // The bytes just written are in hand, so the indexer parses them without
+  // reading the file back.
+  const indexResult = await indexFile(ctx, toFilePath(absPath), { raw: markdown });
   if (!indexResult.ok) {
     return err(indexResult.errors.map(e => ({
       ...e,
