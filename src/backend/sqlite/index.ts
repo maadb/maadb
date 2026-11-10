@@ -136,6 +136,10 @@ export class SqliteBackend implements MaadBackend {
     // page stops at LIMIT instead of sorting every live row.
     this.db.exec('CREATE INDEX IF NOT EXISTS idx_documents_del_updated_id ON documents(deleted, updated_at, doc_id)');
     this.db.exec('CREATE INDEX IF NOT EXISTS idx_documents_del_indexed_id ON documents(deleted, indexed_at, doc_id)');
+    // The same orders within one docType (maad_query always passes one, and the
+    // changes feed can filter by type), so typed pages also stop at LIMIT.
+    this.db.exec('CREATE INDEX IF NOT EXISTS idx_documents_del_type_indexed_id ON documents(deleted, doc_type, indexed_at, doc_id)');
+    this.db.exec('CREATE INDEX IF NOT EXISTS idx_documents_del_type_updated_id ON documents(deleted, doc_type, updated_at, doc_id)');
   }
 
   close(): void {

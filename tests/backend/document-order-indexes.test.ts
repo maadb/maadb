@@ -80,6 +80,45 @@ describe('document order indexes', () => {
     expect(plan).not.toContain('TEMP B-TREE');
   });
 
+  it('walks the typed index for the default find order of one docType', () => {
+    const plan = planOf(() => backend.findDocuments({ docType: docType('note') }));
+    expect(plan).toContain('idx_documents_del_type_indexed_id');
+    expect(plan).not.toContain('TEMP B-TREE');
+  });
+
+  it('walks the typed index for a system-key sort within one docType', () => {
+    const plan = planOf(() => backend.findDocuments({
+      docType: docType('note'),
+      sortBy: 'updated_at',
+      sortOrder: 'asc',
+    }));
+    expect(plan).toContain('idx_documents_del_type_updated_id');
+    expect(plan).not.toContain('TEMP B-TREE');
+  });
+
+  it('walks the typed index for a changes page filtered to one docType', () => {
+    const plan = planOf(() => backend.listChangesSince({
+      cursor: { updatedAt: '2026-10-30T00:00:30.000Z', docId: 'note-030' },
+      limit: 10,
+      docTypes: ['note'],
+    }));
+    expect(plan).toContain('idx_documents_del_type_updated_id');
+    expect(plan).not.toContain('TEMP B-TREE');
+  });
+
+  it('returns typed rows in the same order as a plain sort', () => {
+    const live = Array.from({ length: 120 }, (_, i) => makeDoc(i))
+      .filter(doc => !doc.deleted && doc.docType === 'note');
+    const found = backend.findDocuments({ docType: docType('note'), limit: 200 }).map(m => m.docId as string);
+    expect(found).toEqual([...live]
+      .sort((a, b) => b.indexedAt.localeCompare(a.indexedAt) || (b.docId as string).localeCompare(a.docId as string))
+      .map(doc => doc.docId as string));
+    const changes = backend.listChangesSince({ cursor: null, limit: 200, docTypes: ['note'] }).map(row => row.docId);
+    expect(changes).toEqual([...live]
+      .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt) || (a.docId as string).localeCompare(b.docId as string))
+      .map(doc => doc.docId as string));
+  });
+
   it('pages through every live row in order with no gap or repeat', () => {
     const seen: string[] = [];
     let cursor: { updatedAt: string; docId: string } | null = null;
@@ -101,9 +140,16 @@ describe('document order indexes', () => {
   it('adds the indexes to a database that lacks them', () => {
     db.exec('DROP INDEX idx_documents_del_updated_id');
     db.exec('DROP INDEX idx_documents_del_indexed_id');
+    db.exec('DROP INDEX IF EXISTS idx_documents_del_type_updated_id');
+    db.exec('DROP INDEX IF EXISTS idx_documents_del_type_indexed_id');
     backend.init();
     const names = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'index'").all() as Array<{ name: string }>)
       .map(row => row.name);
-    expect(names).toEqual(expect.arrayContaining(['idx_documents_del_updated_id', 'idx_documents_del_indexed_id']));
+    expect(names).toEqual(expect.arrayContaining([
+      'idx_documents_del_updated_id',
+      'idx_documents_del_indexed_id',
+      'idx_documents_del_type_updated_id',
+      'idx_documents_del_type_indexed_id',
+    ]));
   });
 });
