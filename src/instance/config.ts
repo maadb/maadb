@@ -62,19 +62,22 @@ export async function loadInstance(
     return singleErr('FILE_READ_ERROR', `Failed to read instance config: ${message}`);
   }
 
-  let data: Record<string, unknown>;
+  const parsed = parseInstanceText(raw);
+  if (!parsed.ok) return parsed;
+  return validateInstance(parsed.value, resolved, env);
+}
+
+/** Parse instance.yaml text: plain YAML, or YAML between `---` fences. */
+export function parseInstanceText(raw: string): Result<Record<string, unknown>> {
   try {
-    if (raw.trimStart().startsWith('---')) {
-      data = parseMatter(raw).data as Record<string, unknown>;
-    } else {
-      data = parseMatter(`---\n${raw}\n---`).data as Record<string, unknown>;
-    }
+    const data = raw.trimStart().startsWith('---')
+      ? parseMatter(raw).data
+      : parseMatter(`---\n${raw}\n---`).data;
+    return ok(data as Record<string, unknown>);
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Unknown parse error';
     return singleErr('PARSE_ERROR', `Failed to parse instance YAML: ${message}`);
   }
-
-  return validateInstance(data, resolved, env);
 }
 
 export function validateInstance(

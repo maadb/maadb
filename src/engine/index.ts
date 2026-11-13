@@ -942,7 +942,13 @@ export class MaadEngine {
 
   // --- Reads ---
   async getDocument(id: DocId, depth: 'hot' | 'warm' | 'cold', blockIdOrHeading?: string) { return withDocumentReadBoundary(() => reads.getDocument(this.ctx(), id, depth, blockIdOrHeading)); }
-  findDocuments(query: import('../types.js').DocumentQuery) { return reads.findDocuments(this.ctx(), query); }
+  // The no-options form is last so ReturnType/Parameters keep resolving to FindResult.
+  findDocuments(query: import('../types.js').DocumentQuery, options: import('./types.js').FindOptions & { includeTotal: false }): Result<import('./types.js').FindPage>;
+  findDocuments(query: import('../types.js').DocumentQuery, options: import('./types.js').FindOptions): Result<import('./types.js').FindResult | import('./types.js').FindPage>;
+  findDocuments(query: import('../types.js').DocumentQuery): Result<import('./types.js').FindResult>;
+  findDocuments(query: import('../types.js').DocumentQuery, options?: import('./types.js').FindOptions): Result<import('./types.js').FindResult | import('./types.js').FindPage> {
+    return reads.findDocuments(this.ctx(), query, options);
+  }
   searchObjects(query: import('../types.js').ObjectQuery) { return reads.searchObjects(this.ctx(), query); }
   listRelated(id: DocId, direction: 'outgoing' | 'incoming' | 'both', types?: DocType[]) { return reads.listRelated(this.ctx(), id, direction, types); }
   relationshipPaths(query: import('./types.js').RelationshipPathQuery) { return reads.relationshipPaths(this.ctx(), query); }

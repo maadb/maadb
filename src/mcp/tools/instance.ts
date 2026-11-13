@@ -15,8 +15,19 @@ import { performInstanceReload } from '../instance-reload.js';
 import { roleSatisfies } from '../roles.js';
 import { maadError } from '../../errors.js';
 import { collectSubscriptions } from '../notifications.js';
+import { tokenRoleOn } from '../../auth/scope.js';
+import { registerProject, type RegisterProjectSpec } from '../../instance/register.js';
 
 const ROLE_ENUM = z.enum(['reader', 'writer', 'admin']);
+
+// Registrations on this server run one at a time, reload included, so a
+// second registration never collides with the first one's reload.
+let registerTail: Promise<unknown> = Promise.resolve();
+function serializeRegistration<T>(fn: () => Promise<T>): Promise<T> {
+  const run = registerTail.then(fn, fn);
+  registerTail = run.then(() => undefined, () => undefined);
+  return run;
+}
 
 export function register(server: McpServer, ctx: InstanceCtx): number {
   server.registerTool('maad_projects', {
@@ -209,6 +220,77 @@ export function registerReload(server: McpServer, ctx: InstanceCtx): number {
     }, 'maad_instance_reload');
   });
 
+  server.registerTool('maad_register_project', {
+    description: 'Registers a new project in instance.yaml and loads it, so hosts never write instance.yaml, run git init or commit themselves. Creates the folder inside the instance folder (path defaults to name), scaffolds _schema/ and _registry/, initializes Git when historyMode is audit, batch or snapshot, writes instance.yaml atomically, then reloads the instance. Idempotent: calling again with the same name, role and historyMode (and path, when given) returns registered:false. A different path, role or historyMode for an existing name fails with PROJECT_ALREADY_REGISTERED. Requires admin on every bound project and, with a token, an admin "*" grant.',
+    inputSchema: z.object({
+      name: z.string().describe('Project name, /^[a-z][a-z0-9_-]*$/'),
+      historyMode: z.enum(['audit', 'batch', 'snapshot', 'feed', 'read']).describe('How writes reach Git: audit (commit per write), batch, snapshot, feed (no commits), read (read-only)'),
+      role: ROLE_ENUM.describe('Highest role any session gets on this project'),
+      path: z.string().optional().describe('Folder relative to the instance config folder (default: name)'),
+      description: z.string().max(500).optional().describe('Shown by maad_projects'),
+      historyOptions: z.object({
+        max_writes: z.number().int().positive().optional(),
+        max_delay_ms: z.number().int().positive().optional(),
+      }).strict().optional().describe('Batch tuning: { max_writes, max_delay_ms }'),
+    }),
+  }, async (args, extra) => {
+    const sessionId = resolveSessionId(extra);
+    const state = ctx.sessions.get(sessionId);
+    if (!state || state.mode === null) {
+      return errorResponse([maadError('SESSION_UNBOUND',
+        'Session is not bound to any project. Call maad_use_project(s) before maad_register_project.')]);
+    }
+    for (const [projectName, role] of state.effectiveRoles) {
+      if (!roleSatisfies(role, 'admin')) {
+        return errorResponse([maadError('INSUFFICIENT_ROLE',
+          `maad_register_project requires admin on every project in the session binding; session has "${role}" on "${projectName}".`)]);
+      }
+    }
+    // A new project is outside every named grant, so only a token that
+    // already reaches all projects as admin may create one.
+    if (state.token !== undefined && tokenRoleOn(state.token, '*') !== 'admin') {
+      return errorResponse([maadError('INSUFFICIENT_ROLE',
+        'maad_register_project requires a token with an admin "*" project grant.')]);
+    }
+    if (ctx.instance.source !== 'file' || !ctx.instance.configPath) {
+      return errorResponse([maadError('INSTANCE_RELOAD_SYNTHETIC',
+        'Synthetic (legacy --project) instances have no instance.yaml. Start the server with --instance <path> to register projects.')]);
+    }
+
+    const spec: RegisterProjectSpec = { name: args.name, role: args.role, historyMode: args.historyMode };
+    if (args.path !== undefined) spec.path = args.path;
+    if (args.description !== undefined) spec.description = args.description;
+    if (args.historyOptions !== undefined) {
+      const opts: RegisterProjectSpec['historyOptions'] = {};
+      if (args.historyOptions.max_writes !== undefined) opts.max_writes = args.historyOptions.max_writes;
+      if (args.historyOptions.max_delay_ms !== undefined) opts.max_delay_ms = args.historyOptions.max_delay_ms;
+      spec.historyOptions = opts;
+    }
+
+    const configPath = ctx.instance.configPath;
+    return serializeRegistration(async () => {
+      const registered = await registerProject(configPath, spec);
+      if (!registered.ok) return errorResponse(registered.errors);
+      const outcome = registered.value;
+
+      // Load it unless this server already serves it (an idempotent repeat).
+      let reloaded = false;
+      if (!ctx.instance.projects.some(p => p.name === outcome.name)) {
+        const reload = await performInstanceReload(ctx, 'tool', { excludeSessionId: sessionId });
+        if (!reload.ok) {
+          // instance.yaml already holds the entry; repeating the call only reloads.
+          return errorResponse(reload.errors.map(e => ({
+            ...e,
+            details: { ...(e.details ?? {}), registered: outcome.registered, retrySafe: true },
+          })));
+        }
+        reloaded = true;
+      }
+
+      return successResponse({ ...outcome, reloaded }, 'maad_register_project');
+    });
+  });
+
   server.registerTool('maad_subscriptions', {
     description: 'Admin tool: returns live-subscription inventory across all sessions as { totalSubscriptions, subscriptions[], byProject, byDocType }. Requires admin on every project in the session binding.',
     inputSchema: z.object({}),
@@ -232,5 +314,5 @@ export function registerReload(server: McpServer, ctx: InstanceCtx): number {
     return successResponse(inventory, 'maad_subscriptions');
   });
 
-  return 2;
+  return 3;
 }

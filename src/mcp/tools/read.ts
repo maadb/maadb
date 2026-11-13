@@ -42,6 +42,7 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
       depth: z.enum(['hot', 'cold', 'full']).optional().describe('hot (default) = pointer + projected fields only; cold = adds body to each row; full = adds resolved composite (refs+objects+related). cold/full bound by depth_max_results (default 50, capped at 100) to prevent payload blowups.'),
       depthMaxResults: z.number().int().min(1).optional().describe('When depth=cold|full, hydrate at most N rows (default 50, capped at 100). Beyond cap, remaining rows return at hot depth.'),
       includeFilePath: z.boolean().optional().describe('Include filePath in each result row (default false — omitted to trim response size)'),
+      includeTotal: z.boolean().optional().describe('Default true. Set false to skip counting every match: the response then has no total, only hasMore (true when another page exists). Use it when you page or need only the rows; the count is a large share of query time.'),
       project: z.string().optional().describe('Project name (multi-project mode only)'),
     }),
   }, async (args, extra) => withEngine(ctx, extra, 'maad_query', args, async ({ engine }) => {
@@ -52,7 +53,7 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
     if (args.sortOrder !== undefined) query.sortOrder = args.sortOrder;
     if (args.limit !== undefined) query.limit = args.limit;
     if (args.offset !== undefined) query.offset = args.offset;
-    const result = engine.findDocuments(query);
+    const result = engine.findDocuments(query, { includeTotal: args.includeTotal !== false });
     // 0.7.0 — default-strip filePath to trim response size. Clients that
     // need the on-disk path opt in via includeFilePath:true. Backend still
     // produces the field; we drop it at the MCP boundary.
@@ -63,7 +64,7 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
         void filePath;
         return rest;
       });
-      const newValue: import('../../engine/types.js').FindResult = {
+      const newValue: typeof result.value = {
         ...result.value,
         results: stripped as typeof result.value.results,
       };
@@ -77,7 +78,7 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
       const hydrateOpts: { depth: 'cold' | 'full'; depthMaxResults?: number } = { depth: args.depth };
       if (args.depthMaxResults !== undefined) hydrateOpts.depthMaxResults = args.depthMaxResults;
       const outcome = await hydrateQueryRows(engine, effective.value.results, hydrateOpts);
-      const newValue: import('../../engine/types.js').FindResult = {
+      const newValue: typeof effective.value = {
         ...effective.value,
         results: outcome.rows as typeof effective.value.results,
       };

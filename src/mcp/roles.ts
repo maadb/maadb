@@ -24,6 +24,7 @@ const ADMIN_TOOLS = [
   ...WRITER_TOOLS,
   'maad_delete', 'maad_reindex', 'maad_reload', 'maad_health',
   'maad_instance_reload',
+  'maad_register_project',
   'maad_subscriptions',
   'maad_issue_token', 'maad_revoke_token', 'maad_rotate_token',
   'maad_list_tokens', 'maad_show_token',

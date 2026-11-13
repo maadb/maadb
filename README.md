@@ -226,7 +226,9 @@ node dist/cli.js --instance /path/to/instance.yaml serve
 
 `--project` and `--instance` are mutually exclusive. `serve` with neither flag errors.
 
-**Declaring new projects:** add another entry to `projects[]` and reload the server (`SIGHUP` / `systemctl reload maad` / `docker compose kill -s SIGHUP maad`). Projects not declared in `instance.yaml` are unreachable through MCP — there is no runtime add-project path.
+**Declaring new projects:** add another entry to `projects[]` and reload the server (`SIGHUP` / `systemctl reload maad` / `docker compose kill -s SIGHUP maad`). Projects not declared in `instance.yaml` are unreachable through MCP.
+
+**Registering projects at runtime:** a host that creates projects calls `maad_register_project { name, role, historyMode, path?, description?, historyOptions? }` instead of editing `instance.yaml`. The engine creates the folder inside the `instance.yaml` folder (`path` defaults to `name`; absolute paths, `..`, symlink escapes and overlaps with another project or the engine install folder are refused), creates `_schema/` and `_registry/`, runs `git init` with one `.gitignore` commit when `historyMode` is `audit`, `batch` or `snapshot`, appends the entry with an explicit `history_mode` (comments and layout are kept), writes the file atomically and reloads. A repeat call with the same `role` and `historyMode` (and `path`, when passed) returns `registered: false`; a different value for an existing name fails with `PROJECT_ALREADY_REGISTERED`, since changing a project still needs an edit and a restart. Registrations in one server run one at a time. Requires admin on every bound project and, over HTTP, a token with an admin `*` grant.
 
 **Recovering a false-empty index:** in multi-project instance mode, `maad_reindex` is the only MCP tool allowed to initialize a project whose registered paths contain Markdown while its index is empty. Every other tool continues to fail with `INDEX_EMPTY` until recovery succeeds. Single-project servers still recover with `MAAD_BOOT_REINDEX=1` or the CLI. For instance fleets, run `maad reindex --project <absolute-path-exactly-as-declared-in-instance.yaml>` in the same filesystem namespace as the server. Do not rely on a relative path (it resolves from the CLI working directory), an inherited `MAAD_PROJECT`, or a host path that differs from the container mount view.
 
@@ -262,7 +264,7 @@ Roles are **server-assigned ceilings**. An agent never sets its own role — it 
 
 ### Isolation & escalation
 
-- `instance.yaml` and `_auth/tokens.yaml` are filesystem-only artifacts. No MCP tool can read or modify them.
+- `_auth/tokens.yaml` is a filesystem-only artifact. No MCP tool can read or modify it. `instance.yaml` is changed by MCP only through `maad_register_project`, which can add a project but never change or remove one, and requires a token with an admin `*` grant.
 - Admin-tier MCP tools (`maad_issue_token`, `maad_revoke_token`, `maad_rotate_token`) require admin on **every** bound project. Reader/writer sessions cannot reach them.
 - An admin session cannot issue a token that exceeds the instance project ceiling.
 - Token records are append-only with revocation — never upgraded in place.
@@ -413,7 +415,7 @@ All tools return `{ ok: true, data: {...} }` or `{ ok: false, errors: [...] }`. 
 **Backup:** `maad_backup` — annotated git tags as snapshot points.
 **Cleanup (admin, confirm-contract governed):** `maad_bulk_delete`, `maad_delete_where`, `maad_repair_where`, `maad_purge_soft_deleted` — destructive ops are dry-run by default; pass `confirm: true` to mutate. `maxRecords` cap default 100 / ceiling 1000.
 **Live updates:** `maad_subscribe`, `maad_unsubscribe` — push notifications on durable writes.
-**Instance admin:** `maad_instance_reload`, `maad_subscriptions`.
+**Instance admin:** `maad_instance_reload`, `maad_register_project`, `maad_subscriptions`.
 **Auth admin:** `maad_issue_token`, `maad_revoke_token`, `maad_rotate_token`, `maad_list_tokens`, `maad_show_token`.
 
 ### Relationship retrieval

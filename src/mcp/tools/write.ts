@@ -320,13 +320,14 @@ export function register(server: McpServer, ctx: InstanceCtx): number {
   ));
 
   server.registerTool('maad_bulk_update', {
-    description: 'Updates multiple records in one call. Returns per-record success/failure. Hard cap of 50 items per call (configurable via MAAD_BULK_MAX_ITEMS); oversize requests return BULK_LIMIT_EXCEEDED.',
+    description: 'Updates multiple records in one call, with one git commit. Returns per-record success/failure; each failed item has error, code and details. Pass expectedVersion per item to detect concurrent changes. Hard cap of 50 items per call (configurable via MAAD_BULK_MAX_ITEMS); oversize requests return BULK_LIMIT_EXCEEDED.',
     inputSchema: z.object({
       updates: z.array(z.object({
         docId: z.string().describe('Document ID to update'),
         fields: z.any().optional().describe('Frontmatter fields to update'),
         body: z.string().optional().describe('Replace entire body'),
         appendBody: z.string().optional().describe('Append to body'),
+        expectedVersion: z.number().int().optional().describe('Version from a prior get. If the record has changed, this item fails with code VERSION_CONFLICT and the other items still apply.'),
       })).describe('Array of updates'),
       project: z.string().optional().describe('Project name (multi-project mode only)'),
       idempotencyKey: z.string().max(128).optional().describe('Opaque client-supplied key; scopes (project, tool, key) and dedupes retries within TTL'),

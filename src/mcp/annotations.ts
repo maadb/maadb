@@ -41,6 +41,7 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, Hints>> = Object.freeze({
   maad_unsubscribe: read('Unsubscribe from record changes'),
   maad_subscriptions: read('List subscriptions'),
   maad_instance_reload: destructive('Reload instance config', true),
+  maad_register_project: additive('Register a project', true),
 
   // Discovery and reads.
   maad_summary: read('Summarize project'),

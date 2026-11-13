@@ -41,9 +41,9 @@ describe('MCP roles', () => {
     expect(tools.has('maad_reindex')).toBe(false);
   });
 
-  it('admin gets 45 tools (all)', () => {
+  it('admin gets 46 tools (all)', () => {
     const tools = getToolsForRole('admin');
-    expect(tools.size).toBe(45);
+    expect(tools.size).toBe(46);
     expect(tools.has('maad_document_receipt')).toBe(true);
     expect(tools.has('maad_delete')).toBe(true);
     expect(tools.has('maad_reindex')).toBe(true);

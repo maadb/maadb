@@ -73,6 +73,7 @@ export const ENGINE_LESS_TOOLS: ReadonlySet<string> = new Set([
   'maad_use_projects',
   'maad_current_session',
   'maad_instance_reload',
+  'maad_register_project',
   'maad_subscribe',
   'maad_unsubscribe',
   'maad_subscriptions',
