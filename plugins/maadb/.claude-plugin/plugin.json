@@ -1,6 +1,6 @@
 {
   "name": "maadb",
-  "version": "0.22.0",
+  "version": "0.23.0",
   "description": "Use a MAADB project from Claude Code. Starts a local MAADB engine over stdio against a project folder you choose.",
   "author": {
     "name": "MAADB"

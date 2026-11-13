@@ -1,10 +1,22 @@
 ---
 enabled: true
-current: 0.22.0
+current: 0.23.0
 dev_flow: formal
 ---
 
 # Version History
+
+## 0.23.0 - 2026-11-13
+
+`maad_query` takes `includeTotal: false` to skip counting every match. The response then has no `total` and reports `hasMore` instead, which the engine works out by fetching one extra row. Without the flag the response keeps `total` and also gains `hasMore`. The engine API returns a new `FindPage` type for `findDocuments(query, { includeTotal: false })`; `findDocuments(query)` still returns `FindResult`.
+
+Each item in `maad_bulk_update` takes an optional `expectedVersion`. An item whose record has moved on fails with `VERSION_CONFLICT` and `details: { expected, actual }`, and the other items still apply in one commit. Every failed bulk update item now also carries `code` and `details`.
+
+New admin tool `maad_register_project` adds a project at runtime. It creates the folder inside the `instance.yaml` folder, creates `_schema/` and `_registry/`, runs `git init` with a single `.gitignore` commit for `audit`, `batch` and `snapshot`, appends the entry with an explicit `history_mode`, writes `instance.yaml` atomically and reloads. Repeating the same call is safe; a different role, mode or path for an existing name fails with `PROJECT_ALREADY_REGISTERED`. It refuses paths outside the instance folder or overlapping another project, and over HTTP it needs a token with an admin `*` grant. It can add a project but never change or remove one.
+
+Faster reads and writes. Typed finds and typed change pages use two new indexes, created on next start. `maad_get` at `full` depth reads note history with one git call. Audited writes that changed content skip a git status check, and an update that changes nothing returns without writing or committing. A write that times out while waiting for the write lock no longer runs later, and `REQUEST_TIMEOUT` details gain a `started` field.
+
+Adds the `maadb` and `maadb-remote` Claude Code plugins and a title plus read-only and destructive hints on every MCP tool. Moves the transitive `hono` to 4.13.16 and `@hono/node-server` to 2.1.6 for current advisories. No database schema changes beyond the two indexes.
 
 ## 0.22.0 - 2026-11-07
 

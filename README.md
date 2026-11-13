@@ -463,9 +463,10 @@ The vector store is `sqlite-vec` (in the same SQLite file); the lexical leg is F
 
 ## Current state
 
-**Current:** v0.22.0 — filters compare by the field's schema type, date-only bounds cover the whole period, and filters that cannot match are reported. Requires Node.js 24.22.1 or later and Git 2.25 or later.
+**Current:** v0.23.0 — queries can skip the total count, bulk updates take a per-record expected version, and hosts can register projects at runtime. Requires Node.js 24.22.1 or later and Git 2.25 or later.
 
 Recent shipped scope:
+- **0.23.0** — `includeTotal: false` on `maad_query`, per-record `expectedVersion` in bulk updates, `maad_register_project`, faster finds and writes, Claude Code plugins
 - **0.22.0** — Filters compare by schema type, whole-period date bounds, `filterWarnings`
 - **0.21.0** — `maad_aggregate` totals before the limit, truncation and missing-value reporting
 - **0.20.0** — Linear write journal, large commits on Windows, faster finds, blob reads and reindexes
@@ -501,7 +502,7 @@ MIT — see [LICENSE](LICENSE).
 ## Dependency audit
 
 <!-- dependency-audit:start -->
-Last audit: 2026-11-07, release 0.22.0 (`npm audit` on the release lockfile).
+Last audit: 2026-11-13, release 0.23.0 (`npm audit` on the release lockfile).
 
 | Package | Version | Purpose | Result |
 |---|---|---|---|
@@ -515,5 +516,5 @@ Last audit: 2026-11-07, release 0.22.0 (`npm audit` on the release lockfile).
 
 Full tree: 262 packages (161 production, including optional; 101 development). `npm audit`: 0 vulnerabilities in production dependencies, 0 in the full tree.
 
-gray-matter's own js-yaml 3 dependency is replaced with the js-yaml 4 version above through an npm `overrides` entry. zod 4.6.7 arrives through `@modelcontextprotocol/sdk`; 0.18.6 updated it, with body-parser 2.4.0, fast-uri 3.1.9 and ip-address 10.7.4, to clear advisories published after 0.18.5. 0.20.0 moves the transitive `@hono/node-server` to 2.1.5 for GHSA-rmxm-3fg6-px4f.
+gray-matter's own js-yaml 3 dependency is replaced with the js-yaml 4 version above through an npm `overrides` entry. zod 4.6.7 arrives through `@modelcontextprotocol/sdk`; 0.18.6 updated it, with body-parser 2.4.0, fast-uri 3.1.9 and ip-address 10.7.4, to clear advisories published after 0.18.5. 0.20.0 moves the transitive `@hono/node-server` to 2.1.5 for GHSA-rmxm-3fg6-px4f. 0.23.0 moves the transitive `hono` to 4.13.16 and `@hono/node-server` to 2.1.6 for advisories published after 0.22.0 (GHSA-4m76-xfj5-7975, GHSA-h7mg-cq63-vhpq, GHSA-3gg2-335m-rxc6, GHSA-46wx-v44x-9hh2, GHSA-4h7h-rv7c-7m2v, GHSA-qv5m-9pm6-hqp3, GHSA-jpvv-r467-5p4w).
 <!-- dependency-audit:end -->
