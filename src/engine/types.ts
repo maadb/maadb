@@ -100,6 +100,12 @@ export interface BulkUpdateInput {
   fields?: Record<string, unknown>;
   body?: string;
   appendBody?: string;
+  /**
+   * 0.23.0 — version from a prior read. When set and the document has moved
+   * on, this item fails with code VERSION_CONFLICT and the rest of the batch
+   * still applies.
+   */
+  expectedVersion?: number;
 }
 
 export interface BulkVerification {
@@ -118,7 +124,11 @@ export interface BulkResult {
     version: number;
     warnings?: ValidationWarning[];
   }>;
-  failed: Array<{ index: number; docId: string | null; error: string }>;
+  /**
+   * `code` and `details` (0.23.0, bulk update only) carry the first engine
+   * error for the item, e.g. VERSION_CONFLICT with { expected, actual }.
+   */
+  failed: Array<{ index: number; docId: string | null; error: string; code?: string; details?: Record<string, unknown> }>;
   totalRequested: number;
   verification: BulkVerification;
   /**
@@ -274,6 +284,26 @@ export interface FindResult {
    * configured maximum. Consumers surface this on MCP responses as
    * `_meta.limit_clamped`. Omitted when no clamping occurred.
    */
+  limitClamped?: { requested: number; applied: number };
+  /** 0.23.0 — true when rows exist past this page (offset + results < total). */
+  hasMore?: boolean;
+}
+
+/** 0.23.0 — options for findDocuments. */
+export interface FindOptions {
+  /**
+   * Default true. False skips the COUNT(*) scan behind `total`; the result
+   * then carries `hasMore` (from one extra row fetched) and no `total`.
+   */
+  includeTotal?: boolean;
+}
+
+/** 0.23.0 — findDocuments result when called with `includeTotal: false`. */
+export interface FindPage {
+  results: DocumentMatch[];
+  /** True when at least one more row exists after this page. */
+  hasMore: boolean;
+  filterWarnings?: FilterWarning[];
   limitClamped?: { requested: number; applied: number };
 }
 

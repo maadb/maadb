@@ -763,7 +763,7 @@ export async function bulkUpdate(
       upd.fields,
       upd.body,
       upd.appendBody,
-      undefined, // no expectedVersion in bulk
+      upd.expectedVersion,
       true,      // skipGit — single commit at the end
     );
 
@@ -783,11 +783,17 @@ export async function bulkUpdate(
       }
       succeeded.push(entry);
     } else {
-      failed.push({
+      const entry: BulkResult['failed'][number] = {
         index: j,
         docId: upd.docId,
         error: result.errors.map(e => e.message).join('; '),
-      });
+      };
+      const firstError = result.errors[0];
+      if (firstError) {
+        entry.code = firstError.code;
+        if (firstError.details) entry.details = firstError.details as Record<string, unknown>;
+      }
+      failed.push(entry);
     }
   }
 

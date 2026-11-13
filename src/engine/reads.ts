@@ -20,6 +20,7 @@ import {
   type DocType,
   type SchemaDefinition,
   type DocumentQuery,
+  type DocumentMatch,
   type ObjectQuery,
   type FilterCondition,
   type Relationship,
@@ -30,6 +31,8 @@ import type {
   GetResult,
   FilterWarning,
   FindResult,
+  FindPage,
+  FindOptions,
   SearchResult,
   RelatedResult,
   DescribeResult,
@@ -426,7 +429,11 @@ function validateSortBy(
   });
 }
 
-export function findDocuments(ctx: EngineContext, query: DocumentQuery): Result<FindResult> {
+export function findDocuments(ctx: EngineContext, query: DocumentQuery): Result<FindResult>;
+export function findDocuments(ctx: EngineContext, query: DocumentQuery, options: FindOptions & { includeTotal: false }): Result<FindPage>;
+export function findDocuments(ctx: EngineContext, query: DocumentQuery, options?: FindOptions): Result<FindResult | FindPage>;
+export function findDocuments(ctx: EngineContext, query: DocumentQuery, options?: FindOptions): Result<FindResult | FindPage> {
+  const includeTotal = options?.includeTotal !== false;
   // 0.7.1 R2 — validate + expand filters into atomic per-field arrays.
   const resolved = resolveFilters(ctx, query.docType, query.filters as Record<string, unknown> | undefined);
   if (!resolved.ok) return resolved;
@@ -451,8 +458,26 @@ export function findDocuments(ctx: EngineContext, query: DocumentQuery): Result<
     effectiveQuery = { ...effectiveQuery, limit: MAX_QUERY_LIMIT };
   }
 
-  const results = ctx.backend.findDocuments(effectiveQuery);
-  const total = ctx.backend.countDocuments(effectiveQuery);
+  // Page size as the backend applies it (default 50, negatives floor to 0).
+  const rawLimit = effectiveQuery.limit;
+  const pageLimit = rawLimit === undefined || !Number.isFinite(rawLimit) ? 50 : Math.max(0, Math.trunc(rawLimit));
+  const offset = effectiveQuery.offset === undefined || !Number.isFinite(effectiveQuery.offset)
+    ? 0 : Math.max(0, Math.trunc(effectiveQuery.offset));
+
+  let results: DocumentMatch[];
+  let total: number | undefined;
+  let hasMore: boolean;
+  if (includeTotal) {
+    results = ctx.backend.findDocuments(effectiveQuery);
+    total = ctx.backend.countDocuments(effectiveQuery);
+    hasMore = offset + results.length < total;
+  } else {
+    // 0.23.0 — skip the COUNT(*) scan. One extra row tells the caller
+    // whether another page exists.
+    results = ctx.backend.findDocuments({ ...effectiveQuery, limit: pageLimit + 1 });
+    hasMore = results.length > pageLimit;
+    if (hasMore) results = results.slice(0, pageLimit);
+  }
 
   if (effectiveQuery.fields && effectiveQuery.fields.length > 0 && results.length > 0) {
     const docIds = results.map(r => r.docId);
@@ -462,7 +487,9 @@ export function findDocuments(ctx: EngineContext, query: DocumentQuery): Result<
     }
   }
 
-  const result: FindResult = { total, results };
+  const result: FindResult | FindPage = total !== undefined
+    ? { total, results, hasMore }
+    : { results, hasMore };
   if (resolved.value.warnings.length > 0) result.filterWarnings = resolved.value.warnings;
   if (limitClamped) result.limitClamped = limitClamped;
   return ok(result);
