@@ -127,19 +127,46 @@ export function computeNumericValue(value: unknown, fieldType: string): number |
     return isFinite(num) ? num : null;
   }
 
-  if (fieldType === 'amount') {
-    // 0.8.1 — tolerate a leading currency marker ("$100", "€ 1,500", "USD 25").
-    // Amounts written with a symbol previously extracted null and silently
-    // dropped out of numeric filters/sorts.
-    const match = /^\s*(?:[^\d\s]{1,3}|[A-Za-z]{3})?\s*([\d,.]+)/.exec(String(value));
-    if (match) {
-      const num = parseFloat(match[1]!.replace(/,/g, ''));
-      return isFinite(num) ? num : null;
-    }
-    return null;
-  }
+  if (fieldType === 'amount') return parseAmountNumber(String(value));
 
   return null;
+}
+
+/**
+ * The number in a written amount, or null when there is none.
+ *
+ * 0.8.1 — tolerates a leading currency marker ("$100", "€ 1,500", "USD 25").
+ * 0.24.0 — keeps the sign: "-100.00 USD", "-$1,000", "$-5" and "($1,000.00)"
+ * are negative (earlier releases read them as positive). A comma after the
+ * last dot is a decimal comma ("1.000,50 EUR" is 1000.5), and repeated dots
+ * with no comma are thousands separators ("1.000.000"). Text after the number
+ * is ignored, as before.
+ */
+export function parseAmountNumber(raw: string): number | null {
+  let text = raw.trim();
+  let negative = false;
+  const parens = /^\((.*)\)\s*([A-Za-z]{3})?$/.exec(text);
+  if (parens) {
+    negative = true;
+    text = `${parens[1]!.trim()}${parens[2] ? ` ${parens[2]}` : ''}`;
+  }
+  const match = /^([-−])?\s*(?:[^\d\s\-−(),.]{1,3}|[A-Za-z]{3})?\s*([-−])?\s*(\d[\d,.]*)/.exec(text);
+  if (!match) return null;
+  if (match[1] || match[2]) negative = !negative;
+  const digits = match[3]!.replace(/[.,]+$/, '');
+  const lastComma = digits.lastIndexOf(',');
+  const lastDot = digits.lastIndexOf('.');
+  let normalized: string;
+  if (lastComma > lastDot && lastDot !== -1) {
+    normalized = digits.replace(/\./g, '').replace(',', '.');
+  } else if (lastComma === -1 && digits.indexOf('.') !== lastDot) {
+    normalized = digits.replace(/\./g, '');
+  } else {
+    normalized = digits.replace(/,/g, '');
+  }
+  const num = parseFloat(normalized);
+  if (!isFinite(num)) return null;
+  return negative ? -num : num;
 }
 
 export interface CollectedMarkdownFiles {

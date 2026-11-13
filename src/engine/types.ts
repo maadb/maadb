@@ -287,6 +287,19 @@ export interface FindResult {
   limitClamped?: { requested: number; applied: number };
   /** 0.23.0 — true when rows exist past this page (offset + results < total). */
   hasMore?: boolean;
+  /** 0.24.0 — see UnparsedValues. Omitted when there are none. */
+  unparsedValues?: UnparsedValues[];
+}
+
+/**
+ * 0.24.0 — a number or amount field used in a filter, and how many records of
+ * the queried type hold a value there that does not read as a number (such as
+ * "about a thousand"). A numeric filter cannot match those records, so they
+ * are left out of results and totals; read them without that filter.
+ */
+export interface UnparsedValues {
+  field: string;
+  count: number;
 }
 
 /** 0.23.0 — options for findDocuments. */
@@ -305,6 +318,7 @@ export interface FindPage {
   hasMore: boolean;
   filterWarnings?: FilterWarning[];
   limitClamped?: { requested: number; applied: number };
+  unparsedValues?: UnparsedValues[];
 }
 
 export interface SearchResult {

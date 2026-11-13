@@ -43,6 +43,8 @@ export interface MaadBackend {
   getDocumentByPath(path: FilePath): DocumentRecord | null;
   findDocuments(query: DocumentQuery): DocumentMatch[];
   countDocuments(query: DocumentQuery): number;
+  /** 0.24.0 — live documents of `docType` whose indexed `field` has a value that is not a number. */
+  countUnparsedNumeric(docType: DocType, field: string): number;
   findObjects(query: ObjectQuery): ObjectMatch[];
   countObjects(query: ObjectQuery): number;
   getRelationships(
