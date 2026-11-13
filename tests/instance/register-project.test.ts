@@ -135,6 +135,35 @@ describe('registerProject', () => {
     expect(existsSync(path.join(tmpRoot, 'engine'))).toBe(false);
   });
 
+  it('confirms an operator entry outside the instance folder when no path is passed', async () => {
+    const outside = await mkdtemp(path.join(tmpdir(), 'maad-register-outside-'));
+    try {
+      const entry = ['  - name: legacy', `    path: ${outside.replace(/\\/g, '/')}`, '    role: admin', '    history_mode: feed', ''].join('\n');
+      await writeFile(configPath, BASE_YAML + entry, 'utf8');
+      const r = await registerProject(configPath, { name: 'legacy', role: 'admin', historyMode: 'feed' });
+      expect(r.ok).toBe(true);
+      if (r.ok) expect(r.value.registered).toBe(false);
+    } finally {
+      await rm(outside, { recursive: true, force: true }).catch(() => {});
+    }
+  });
+
+  it('refuses an existing folder whose _registry links outside', async () => {
+    const outside = await mkdtemp(path.join(tmpdir(), 'maad-register-link-'));
+    try {
+      await mkdir(path.join(tmpRoot, 'linked'));
+      const { symlink } = await import('node:fs/promises');
+      await symlink(outside, path.join(tmpRoot, 'linked', '_registry'), process.platform === 'win32' ? 'junction' : 'dir');
+      const r = await registerProject(configPath, { name: 'linked', role: 'admin', historyMode: 'feed' });
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.errors[0]?.code).toBe('PROJECT_PATH_INVALID');
+      expect(existsSync(path.join(outside, 'object_types.yaml'))).toBe(false);
+      expect(await readFile(configPath, 'utf8')).toBe(BASE_YAML);
+    } finally {
+      await rm(outside, { recursive: true, force: true }).catch(() => {});
+    }
+  });
+
   it('refuses a bad name', async () => {
     const r = await registerProject(configPath, { name: 'Bad Name', role: 'admin', historyMode: 'feed' });
     expect(r.ok).toBe(false);
@@ -217,6 +246,14 @@ describe('maad_register_project tool', () => {
     const again = await call('s-root', { name: 'beta', role: 'admin', historyMode: 'audit' });
     expect(again.ok).toBe(true);
     expect(again.data).toMatchObject({ registered: false, reloaded: false });
+  });
+
+  it('concurrent tool calls all register and reload without a spurious error', async () => {
+    bind('s-root', 'admin', fx.record);
+    const names = ['c1', 'c2', 'c3'];
+    const results = await Promise.all(names.map(name => call('s-root', { name, role: 'admin', historyMode: 'feed' })));
+    expect(results.map(r => r.ok)).toEqual([true, true, true]);
+    for (const name of names) expect(ctx.instance.projects.map(p => p.name)).toContain(name);
   });
 
   it('refuses a token without an admin wildcard grant', async () => {

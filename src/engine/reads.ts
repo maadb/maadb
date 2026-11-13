@@ -429,9 +429,9 @@ function validateSortBy(
   });
 }
 
-export function findDocuments(ctx: EngineContext, query: DocumentQuery): Result<FindResult>;
 export function findDocuments(ctx: EngineContext, query: DocumentQuery, options: FindOptions & { includeTotal: false }): Result<FindPage>;
-export function findDocuments(ctx: EngineContext, query: DocumentQuery, options?: FindOptions): Result<FindResult | FindPage>;
+export function findDocuments(ctx: EngineContext, query: DocumentQuery, options: FindOptions | undefined): Result<FindResult | FindPage>;
+export function findDocuments(ctx: EngineContext, query: DocumentQuery): Result<FindResult>;
 export function findDocuments(ctx: EngineContext, query: DocumentQuery, options?: FindOptions): Result<FindResult | FindPage> {
   const includeTotal = options?.includeTotal !== false;
   // 0.7.1 R2 — validate + expand filters into atomic per-field arrays.

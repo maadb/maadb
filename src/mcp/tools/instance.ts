@@ -20,6 +20,15 @@ import { registerProject, type RegisterProjectSpec } from '../../instance/regist
 
 const ROLE_ENUM = z.enum(['reader', 'writer', 'admin']);
 
+// Registrations on this server run one at a time, reload included, so a
+// second registration never collides with the first one's reload.
+let registerTail: Promise<unknown> = Promise.resolve();
+function serializeRegistration<T>(fn: () => Promise<T>): Promise<T> {
+  const run = registerTail.then(fn, fn);
+  registerTail = run.then(() => undefined, () => undefined);
+  return run;
+}
+
 export function register(server: McpServer, ctx: InstanceCtx): number {
   server.registerTool('maad_projects', {
     description: 'Lists projects declared in this MCP instance. Returns name, description, configured role, and whether the current session has access. Call this before maad_use_project.',
@@ -212,7 +221,7 @@ export function registerReload(server: McpServer, ctx: InstanceCtx): number {
   });
 
   server.registerTool('maad_register_project', {
-    description: 'Registers a new project in instance.yaml and loads it, so hosts never write instance.yaml, run git init or commit themselves. Creates the folder inside the instance folder (path defaults to name), scaffolds _schema/ and _registry/, initializes Git when historyMode is audit, batch or snapshot, writes instance.yaml atomically, then reloads the instance. Idempotent: calling again with the same name, path, role and historyMode returns registered:false. A different path, role or historyMode for an existing name fails with PROJECT_ALREADY_REGISTERED. Requires admin on every bound project and, with a token, an admin "*" grant.',
+    description: 'Registers a new project in instance.yaml and loads it, so hosts never write instance.yaml, run git init or commit themselves. Creates the folder inside the instance folder (path defaults to name), scaffolds _schema/ and _registry/, initializes Git when historyMode is audit, batch or snapshot, writes instance.yaml atomically, then reloads the instance. Idempotent: calling again with the same name, role and historyMode (and path, when given) returns registered:false. A different path, role or historyMode for an existing name fails with PROJECT_ALREADY_REGISTERED. Requires admin on every bound project and, with a token, an admin "*" grant.',
     inputSchema: z.object({
       name: z.string().describe('Project name, /^[a-z][a-z0-9_-]*$/'),
       historyMode: z.enum(['audit', 'batch', 'snapshot', 'feed', 'read']).describe('How writes reach Git: audit (commit per write), batch, snapshot, feed (no commits), read (read-only)'),
@@ -258,25 +267,28 @@ export function registerReload(server: McpServer, ctx: InstanceCtx): number {
       spec.historyOptions = opts;
     }
 
-    const registered = await registerProject(ctx.instance.configPath, spec);
-    if (!registered.ok) return errorResponse(registered.errors);
-    const outcome = registered.value;
+    const configPath = ctx.instance.configPath;
+    return serializeRegistration(async () => {
+      const registered = await registerProject(configPath, spec);
+      if (!registered.ok) return errorResponse(registered.errors);
+      const outcome = registered.value;
 
-    // Load it unless this server already serves it (an idempotent repeat).
-    let reloaded = false;
-    if (!ctx.instance.projects.some(p => p.name === outcome.name)) {
-      const reload = await performInstanceReload(ctx, 'tool', { excludeSessionId: sessionId });
-      if (!reload.ok) {
-        // instance.yaml already holds the entry; repeating the call only reloads.
-        return errorResponse(reload.errors.map(e => ({
-          ...e,
-          details: { ...(e.details ?? {}), registered: outcome.registered, retrySafe: true },
-        })));
+      // Load it unless this server already serves it (an idempotent repeat).
+      let reloaded = false;
+      if (!ctx.instance.projects.some(p => p.name === outcome.name)) {
+        const reload = await performInstanceReload(ctx, 'tool', { excludeSessionId: sessionId });
+        if (!reload.ok) {
+          // instance.yaml already holds the entry; repeating the call only reloads.
+          return errorResponse(reload.errors.map(e => ({
+            ...e,
+            details: { ...(e.details ?? {}), registered: outcome.registered, retrySafe: true },
+          })));
+        }
+        reloaded = true;
       }
-      reloaded = true;
-    }
 
-    return successResponse({ ...outcome, reloaded }, 'maad_register_project');
+      return successResponse({ ...outcome, reloaded }, 'maad_register_project');
+    });
   });
 
   server.registerTool('maad_subscriptions', {

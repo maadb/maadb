@@ -152,18 +152,14 @@ async function registerLocked(
     return invalidPath('path must be relative to the instance config folder', { path: requested });
   }
   const absPath = path.resolve(configDir, requested);
-  if (samePath(absPath, configDir) || !isWithin(configDir, absPath)) {
-    return invalidPath('path must name a folder inside the instance config folder', { path: requested });
-  }
-  if (isWithin(engineRoot, absPath) || isWithin(absPath, engineRoot)) {
-    return invalidPath('path must not overlap the MAADB engine install folder', { path: requested });
-  }
 
   // --- Already declared? -------------------------------------------------------
+  // Checked before the containment rules so an operator-written entry that
+  // lives elsewhere can still be confirmed (pass no path to accept it).
   const existing = current.value.projects.find(p => p.name === spec.name);
   if (existing) {
     const conflicts: string[] = [];
-    if (!samePath(existing.path, absPath)) conflicts.push('path');
+    if (spec.path !== undefined && !samePath(existing.path, absPath)) conflicts.push('path');
     if (existing.role !== spec.role) conflicts.push('role');
     if (existing.configuredHistoryMode !== spec.historyMode) conflicts.push('historyMode');
     if (conflicts.length > 0) {
@@ -190,6 +186,13 @@ async function registerLocked(
     });
   }
 
+  if (samePath(absPath, configDir) || !isWithin(configDir, absPath)) {
+    return invalidPath('path must name a folder inside the instance config folder', { path: requested });
+  }
+  if (isWithin(engineRoot, absPath) || isWithin(absPath, engineRoot)) {
+    return invalidPath('path must not overlap the MAADB engine install folder', { path: requested });
+  }
+
   for (const other of current.value.projects) {
     if (isWithin(other.path, absPath) || isWithin(absPath, other.path)) {
       return invalidPath(`path overlaps project "${other.name}"`, { path: requested, project: other.name });
@@ -214,6 +217,13 @@ async function registerLocked(
     directoryCreated = !existsSync(absPath);
     mkdirSync(path.join(absPath, '_schema'), { recursive: true });
     mkdirSync(path.join(absPath, '_registry'), { recursive: true });
+    // An existing folder may hold links; every folder written into must
+    // still resolve inside the instance folder.
+    for (const dir of [absPath, path.join(absPath, '_schema'), path.join(absPath, '_registry')]) {
+      if (!isWithin(realConfigDir, realpathSync(dir))) {
+        return invalidPath('a project folder resolves outside the instance config folder', { path: requested, folder: path.relative(configDir, dir) });
+      }
+    }
     writeFileIfAbsent(path.join(absPath, '_registry', 'object_types.yaml'), 'types: {}\n');
     writeFileIfAbsent(path.join(absPath, '.gitignore'), '_backend/\n_import/\n');
     if (GIT_REQUIRED_MODES.has(spec.historyMode) && !existsSync(path.join(absPath, '.git'))) {
