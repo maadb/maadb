@@ -41,10 +41,17 @@ import { collectMarkdownFiles, computeNumericValue, toCanonicalRelPath } from '.
 // Fingerprint covers: indexed field names + their types (so a type-change
 // on an indexed field also triggers rebuild). Sorted+joined+hashed; first
 // 16 hex chars are plenty of collision resistance for this use.
+// 0.24.0 — amount fields carry a parser revision, so a type with an indexed
+// amount rebuilds once after the sign and decimal-comma fix and its stored
+// numeric values match what the parser now reads.
+const AMOUNT_PARSER_REVISION = 2;
+
 function computeIndexedFieldFingerprint(schema: SchemaDefinition): string {
   const parts: string[] = [];
   for (const [name, def] of schema.fields) {
-    if (def.index) parts.push(`${name}:${def.type}`);
+    if (!def.index) continue;
+    const isAmount = def.type === 'amount' || (def.type === 'list' && def.itemType === 'amount');
+    parts.push(isAmount ? `${name}:${def.type}@amount${AMOUNT_PARSER_REVISION}` : `${name}:${def.type}`);
   }
   parts.sort();
   return createHash('sha256').update(parts.join('|')).digest('hex').slice(0, 16);

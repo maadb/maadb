@@ -331,6 +331,8 @@ function typedCondition(condition: FilterCondition, comparison: FieldComparison,
 export interface ResolvedFilters {
   filters: Record<string, FilterCondition[]>;
   warnings: FilterWarning[];
+  /** Filtered fields that compare only as numbers (every indexed definition is number or amount). */
+  numericFields: string[];
 }
 
 // expandFilters plus the schema: every condition compares by the field's type,
@@ -349,6 +351,7 @@ export function resolveFilters(
 
   const filters: Record<string, FilterCondition[]> = {};
   const warnings: FilterWarning[] = [];
+  const numericFields: string[] = [];
   for (const [field, conditions] of Object.entries(expanded.value)) {
     const defs = defsFor(field);
     if (defs.length === 0) warnings.push({ field, reason: 'undeclared' });
@@ -359,11 +362,12 @@ export function resolveFilters(
       filters[field] = conditions;
       continue;
     }
+    if (comparison.numeric && !comparison.text) numericFields.push(field);
     let notNumeric = false;
     filters[field] = conditions.map(condition => typedCondition(condition, comparison, () => { notNumeric = true; }));
     if (notNumeric) warnings.push({ field, reason: 'not_numeric' });
   }
-  return ok({ filters, warnings });
+  return ok({ filters, warnings, numericFields });
 }
 
 // 0.7.12 — sort contract validator. Accepts a system sort key (any alias in
@@ -492,6 +496,13 @@ export function findDocuments(ctx: EngineContext, query: DocumentQuery, options?
     : { results, hasMore };
   if (resolved.value.warnings.length > 0) result.filterWarnings = resolved.value.warnings;
   if (limitClamped) result.limitClamped = limitClamped;
+  // 0.24.0 — say how many records a numeric filter could not compare.
+  if (query.docType !== undefined && resolved.value.numericFields.length > 0) {
+    const unparsed = resolved.value.numericFields
+      .map(field => ({ field, count: ctx.backend.countUnparsedNumeric(query.docType!, field) }))
+      .filter(entry => entry.count > 0);
+    if (unparsed.length > 0) result.unparsedValues = unparsed;
+  }
   return ok(result);
 }
 

@@ -524,6 +524,17 @@ export class SqliteBackend implements MaadBackend {
     return row.cnt;
   }
 
+  countUnparsedNumeric(docType: DocType, field: string): number {
+    const row = this.db.prepare(
+      `SELECT COUNT(DISTINCT fi.doc_id) AS cnt FROM field_index fi
+       JOIN documents d ON d.doc_id = fi.doc_id
+       WHERE fi.field_name = ? AND fi.numeric_value IS NULL
+         AND fi.field_value IS NOT NULL AND TRIM(fi.field_value) != ''
+         AND d.doc_type = ? AND d.deleted = 0`,
+    ).get(field, docType as string) as { cnt: number };
+    return row.cnt;
+  }
+
   getFieldValues(docIds: DocId[], fieldNames: string[]): Map<string, Record<string, string>> {
     if (docIds.length === 0 || fieldNames.length === 0) return new Map();
 
