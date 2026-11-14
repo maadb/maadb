@@ -5,7 +5,7 @@
       "command": "npx",
       "args": [
         "-y",
-        "--package=@maadb/core@0.23.0",
+        "--package=@maadb/core@0.24.0",
         "maad",
         "serve",
         "--project",

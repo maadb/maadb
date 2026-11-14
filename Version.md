@@ -1,10 +1,16 @@
 ---
 enabled: true
-current: 0.23.0
+current: 0.24.0
 dev_flow: formal
 ---
 
 # Version History
+
+## 0.24.0 - 2026-11-14
+
+Amount fields keep their sign when filtered, sorted or summed. `-250.00 USD`, `-$1,000`, `$-5` and `($100.00)` were read as positive values, so credits were added to sums instead of subtracted. A decimal comma such as `1.000,50 EUR` now reads as 1000.5 instead of 1. Types with an indexed amount field rebuild their index once on next start so stored values are corrected.
+
+Records with amounts that are not in canonical form were never dropped from unfiltered reads; `maad_query` and `maad_get` return them as written, and `maad_aggregate` counts them. A filter on a number or amount field still cannot compare a value with no number in it, and now says so: the response carries `unparsedValues: [{ field, count }]` with the number of such records of that type. The engine API adds `unparsedValues` to `FindResult` and `FindPage`. No database schema changes.
 
 ## 0.23.0 - 2026-11-13
 
