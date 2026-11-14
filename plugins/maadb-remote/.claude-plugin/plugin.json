@@ -1,6 +1,6 @@
 {
   "name": "maadb-remote",
-  "version": "0.23.0",
+  "version": "0.24.0",
   "description": "Use a MAADB engine you host from Claude Code. Connects over Streamable HTTP with a MAADB bearer token.",
   "author": {
     "name": "MAADB"
