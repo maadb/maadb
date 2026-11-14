@@ -463,9 +463,10 @@ The vector store is `sqlite-vec` (in the same SQLite file); the lexical leg is F
 
 ## Current state
 
-**Current:** v0.23.0 — queries can skip the total count, bulk updates take a per-record expected version, and hosts can register projects at runtime. Requires Node.js 24.22.1 or later and Git 2.25 or later.
+**Current:** v0.24.0 — amounts keep their sign and read decimal commas, and numeric filters report the records they could not compare. Requires Node.js 24.22.1 or later and Git 2.25 or later.
 
 Recent shipped scope:
+- **0.24.0** — Negative and decimal-comma amounts read correctly, `unparsedValues` on numeric filters
 - **0.23.0** — `includeTotal: false` on `maad_query`, per-record `expectedVersion` in bulk updates, `maad_register_project`, faster finds and writes, Claude Code plugins
 - **0.22.0** — Filters compare by schema type, whole-period date bounds, `filterWarnings`
 - **0.21.0** — `maad_aggregate` totals before the limit, truncation and missing-value reporting
@@ -502,7 +503,7 @@ MIT — see [LICENSE](LICENSE).
 ## Dependency audit
 
 <!-- dependency-audit:start -->
-Last audit: 2026-11-13, release 0.23.0 (`npm audit` on the release lockfile).
+Last audit: 2026-11-14, release 0.24.0 (`npm audit` on the release lockfile).
 
 | Package | Version | Purpose | Result |
 |---|---|---|---|
