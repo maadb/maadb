@@ -856,7 +856,7 @@ export function schemaInfo(ctx: EngineContext, dt: DocType): Result<SchemaInfoRe
       if (field.target) typeStr += ` -> ${field.target as string}`;
     }
 
-    const format = field.format ?? (field.type === 'amount' ? '<number> <currency> (e.g. 1250.00 USD)' : undefined);
+    const format = field.format ?? (field.type === 'amount' ? '<number> <currency> (e.g. 1250.00 USD; -1250.00 USD for a credit)' : undefined);
 
     // 0.7.0 — build entry with only the populated fields. Pre-0.7.0 serialized
     // null placeholders for every optional field, bloating the response.

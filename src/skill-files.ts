@@ -119,7 +119,7 @@ fields:
 | \`ref\` | Reference to another record | Exact match. Requires \`target\` type. Creates relationship edges. |
 | \`boolean\` | true/false | Exact match |
 | \`list\` | Array of values | Requires \`item_type\`. Use \`target\` for list-of-ref. |
-| \`amount\` | Currency value (e.g. "1250000 USD") | Numeric range on extracted value |
+| \`amount\` | Currency value (e.g. "1250000 USD"; "-250.00 USD" for a credit) | Numeric range on extracted value |
 
 ## Date precision (0.6.7+)
 

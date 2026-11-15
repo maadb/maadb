@@ -76,6 +76,17 @@ export function validateFrontmatter(
     const value = frontmatter[fieldName];
     if (value === undefined || value === null) continue; // missing handled by required check
 
+    // 0.25.0 — an update re-checks only the amounts it changes. A stored
+    // amount in another form (an import, a hand edit) no longer blocks edits
+    // to the record's other fields; reads already parse it, and audit and
+    // index validation still report it.
+    if (
+      mode === 'write' &&
+      changedFields !== undefined &&
+      !changedFields.has(fieldName) &&
+      isAmountField(fieldDef)
+    ) continue;
+
     const fieldErrors = validateField(fieldName, value, fieldDef, registry);
     errors.push(...fieldErrors);
 
@@ -321,13 +332,20 @@ function validateField(
     case 'amount':
       if (typeof value !== 'string') {
         errors.push({ field: name, message: `Expected amount string (e.g. "100.00 USD"), got ${typeof value}`, location: null });
-      } else if (!/^\d+(\.\d+)?\s+[A-Z]{3}$/.test(value)) {
-        errors.push({ field: name, message: `Amount "${value}" does not match format "<number> <CURRENCY>"`, location: null });
+      } else if (!AMOUNT_FORMAT.test(value)) {
+        errors.push({ field: name, message: `Amount "${value}" does not match format "<number> <CURRENCY>" (e.g. "100.00 USD" or "-100.00 USD")`, location: null });
       }
       break;
   }
 
   return errors;
+}
+
+// "<number> <CURRENCY>", with an optional leading minus for credits and refunds.
+const AMOUNT_FORMAT = /^-?\d+(\.\d+)?\s+[A-Z]{3}$/;
+
+function isAmountField(def: FieldDefinition): boolean {
+  return def.type === 'amount' || (def.type === 'list' && def.itemType === 'amount');
 }
 
 function validateListItem(
