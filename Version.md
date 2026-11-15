@@ -1,10 +1,16 @@
 ---
 enabled: true
-current: 0.24.0
+current: 0.25.0
 dev_flow: formal
 ---
 
 # Version History
+
+## 0.25.0 - 2026-11-15
+
+Amount fields accept a leading minus on write, so credits and refunds can be stored as `-250.00 USD`. Other forms such as `$1,000.00`, `+5.00 USD` and `5 usd` are still refused. The text extractor reads `-250.00 USD` as -250.
+
+An update re-checks only the amount fields it changes. A stored amount in another form, from an import or a hand edit, no longer blocks edits to the record's other fields; an update that changes the amount still checks it. Index and audit validation still report non-standard amounts. Other field types are unchanged. No database schema changes and no rebuild.
 
 ## 0.24.0 - 2026-11-14
 

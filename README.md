@@ -463,9 +463,10 @@ The vector store is `sqlite-vec` (in the same SQLite file); the lexical leg is F
 
 ## Current state
 
-**Current:** v0.24.0 — amounts keep their sign and read decimal commas, and numeric filters report the records they could not compare. Requires Node.js 24.22.1 or later and Git 2.25 or later.
+**Current:** v0.25.0 — amount fields accept negative values on write, and an update no longer fails on an amount it does not change. Requires Node.js 24.22.1 or later and Git 2.25 or later.
 
 Recent shipped scope:
+- **0.25.0** — Negative amounts on write, updates re-check only the amounts they change
 - **0.24.0** — Negative and decimal-comma amounts read correctly, `unparsedValues` on numeric filters
 - **0.23.0** — `includeTotal: false` on `maad_query`, per-record `expectedVersion` in bulk updates, `maad_register_project`, faster finds and writes, Claude Code plugins
 - **0.22.0** — Filters compare by schema type, whole-period date bounds, `filterWarnings`
@@ -503,7 +504,7 @@ MIT — see [LICENSE](LICENSE).
 ## Dependency audit
 
 <!-- dependency-audit:start -->
-Last audit: 2026-11-14, release 0.24.0 (`npm audit` on the release lockfile).
+Last audit: 2026-11-15, release 0.25.0 (`npm audit` on the release lockfile).
 
 | Package | Version | Purpose | Result |
 |---|---|---|---|
