@@ -138,8 +138,8 @@ const CURRENCY_SYMBOLS: Record<string, string> = {
 export function normalizeAmount(value: string): { amount: number; currency: string } | null {
   const trimmed = value.trim();
 
-  // "100.00 USD"
-  const explicitMatch = /^([\d,]+(?:\.\d+)?)\s+([A-Z]{3})$/.exec(trimmed);
+  // "100.00 USD" or "-100.00 USD"
+  const explicitMatch = /^(-?[\d,]+(?:\.\d+)?)\s+([A-Z]{3})$/.exec(trimmed);
   if (explicitMatch) {
     const amount = parseFloat(explicitMatch[1]!.replace(/,/g, ''));
     if (isNaN(amount)) return null;
